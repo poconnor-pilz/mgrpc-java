@@ -1,0 +1,37 @@
+syntax = "proto3";
+
+package com.pilz.mqttwrap;
+
+option java_multiple_files = true;
+option java_package = "com.pilz.mqttwrap";
+option java_outer_classname = "MqttWrapProtos";
+
+enum MqttPType{
+  //An error message
+  ERROR = 0;
+  //The next message in a stream
+  NEXT = 1;
+  //The last message in a stream
+  LAST = 2;
+}
+
+message MqttProtoRequest {
+  //The message payload encoded as a protocol buffer
+  bytes message = 1;
+  //Topic to reply to. If this message is a request then replyTo must be set. Otherwise this message is part of a
+  //is part of an input stream (client side stream)
+  string replyTo = 2;
+  //If this message is part of an input stream (client side stream) then streamId will contain a uuid that identifies it.
+  string streamId = 3;
+  MqttPType type = 4;
+  //Error or exception TODO: Make this a struct or whatever
+  string error = 5;
+}
+
+message MqttProtoReply {
+  //The message payload encoded as a protocol buffer
+  bytes message = 1;
+  MqttPType type = 2;
+  //Error or exception TODO: Make this a struct or whatever
+  string error = 3;
+}

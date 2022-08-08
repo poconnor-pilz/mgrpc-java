@@ -1,0 +1,47 @@
+//see this: https://dev.to/techschoolguru/config-gradle-to-generate-java-code-from-protobuf-1cla
+//note that the protobuf plugin will default to picking up proto files from src/main/proto
+//but you can specify different paths in the protobuf{} section of the gradle file
+
+
+
+plugins {
+    id 'java'
+    id "com.google.protobuf" version "0.8.19"
+}
+
+group 'org.example'
+version '1.0-SNAPSHOT'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.8.1'
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.8.1'
+    // https://mvnrepository.com/artifact/com.google.protobuf/protobuf-java
+    implementation group: 'com.google.protobuf', name: 'protobuf-java', version: '3.21.2'
+    implementation group: 'org.eclipse.paho', name: 'org.eclipse.paho.client.mqttv3', version: '1.1.1'
+
+}
+
+//Tell gradle and intellij about where the generated proto java files are
+sourceSets {
+    main {
+        java {
+            srcDirs 'build/generated/source/proto/main/java'
+        }
+    }
+}
+
+
+test {
+    useJUnitPlatform()
+}
+
+//only necessary if protoc is not on path
+//protobuf {
+//    protoc {
+//        path = 'c:/bin/protoc/bin/protoc'
+//    }
+//}

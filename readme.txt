@@ -1,0 +1,104 @@
+todo: For pub/sub let the client specify the replyTo. pub/sub is assumed to never send an end of stream.
+Also the proxy doesn't get a return value. It must subscribe separately through another api.
+i.e. It's a different api, different proxy type of code that the user has to do manually (with maybe the help of replyTo etc and some helper classes to put that together)
+
+
+Try prototype where signature of method is either
+
+request response:
+
+AVal aMethod(AParam param)
+
+Server stream (or async request response)
+
+void aMethod(AParam param, StreamObserver<AVal> valueStream)
+
+Client stream
+
+StreamObserver<AVal> aMethod(AParam param)
+
+Should the StreamObserver s be Queues? Maybe not because we need a StreamObserver.onLast() and a queue doesn't have that unless we can put a termination message in it.
+
+Advice here for multiple messages to put size of message before the message (ala geo binary )
+https://developers.google.com/protocol-buffers/docs/techniques
+
+proto stub signature:
+
+IProtoListener onProtoRequest(String topic, byte[] protoRequest, IProtoListener replies)
+
+IProtoListener{
+	void onNext(byte[] protobuf);
+	void onLast(byte[] protobuf);
+}
+
+Note that for grpc they have to send an end of stream message even for a single response
+This is to close the stream.
+But we don't close streams in mqtt
+We do drop subscriptions so we need to have an onLast() but we don't want an onNext() followed by onEnd()
+because that would mean sending two messages.
+Maybe we will need something later for batching but we definitely don't want to batch request response.
+
+We should try for smart endpoints, dumb pipes. So let the final user client code deal with exceptions and lost connections and re-connecting etc.
+
+The client side stuff (proxy class etc) should be functional and stateless. A proxy is just a functor that sends stuff to a topic that you parameterise
+The server side stuff is necessarily stateful as it maintains a connection to a particular opc server. It starts up and listens.
+
+Responsibility of proxy and stub classes is just to map method names and protobufs to actual methods and typed messages.
+
+TODO: Copy grpc and have all exceptions as exceptions. Propagated exceptions that happen remotely via the error (possibly call it exception)
+If a service wants to return a user level error then it should encode that in the reply?
+
+TODO: Do we want to later allow sending multiple reponses (even for different services) to same replyTo? This would cut down on topics
+In this case we will need to model it on BlockingRequestSharedReplyTo which uses a request id to distinguish.
+
+TODO: Consider making the basic service asynchronous in terms of IStreamListenser<V>. Then write a local proxy that wraps that for synch calls. Then write a remote proxy that does the same (or does both, an asynch and a blocking synch or whatever). This code could be generated later if we want to. It could be generated from the base service interface or it could be generated from a grpc service definition if we modify the compiler. Because the grpc interface definition has exactly what we need to distinguish between streams and values e.g. rpc RecordRoute(stream Point) returns (RouteSummary) {}. ***** But making the base service asynch won't really work as we don't want everything to return a stream (for potential client side streaming).
+
+TODO: Possibly consider supporting onNext() and onCompleted() for streamed reply and then just onReply() for normal single replies to be more like grpc for streamed responses? -Maybe use to this because the programming of onLast is awkward for server and client for non unary- Maybe no to this because we will probably have to support out of order anyway. Mqtt is too different. You could force it to be like grpc but we don't need that so it's the wrong tool for the job. As long as we have protobufs that should be enough of a lowest common denominator anyway. If we did have to build a grpc server on top of this then the onLast handler for the mqtt could just call onNext followed by OnCompleted for the upper level grpc client.
+The problem with not supporting onCompleted() is that you can never take any existing grpc service and migrate it without changning it's implementation code (replacing onNext and onCompleted with onLast, and onNext could be part of a loop where you now have to not do the last thing in  the loop - very awkward). We will support ordering of all messages (whether next or completed) so that can guarantee that completed is handled after next. So we should change to do onNext and onCompleted and then add onReply as an optimisation if we think it is necessary. Then later if we want to migrate our services to grpc over http we could take the onReply handler and get it to call onNext followed by onCompleted.
+We may want grpc compatibility for our own use cases. For example if pas on a desktop wants to communicate with a remote device. It could do this over http with grpc. It means that it would not need to make an mqtt connection.
+
+TODO: Use enum to represent message type
+
+TODO: What about out of order messages in a stream? We should probably support a counter based id for this. It can be per stream as the stream will be distinguished by topid or if there is a shared topic then by something like a watchId or requestId. For request response ('unary' in grpc terms) can just set it to zero. Ordering will have to be managed as for services it will be important. For example a service that streams a project down to a device. So ordering should be built in. Look at the google mqtt javascript client code for this.
+For google iot the suggestion for ordering is here:
+https://web.archive.org/web/20190629192452/https://cloud.google.com/pubsub/docs/ordering
+Note that the latest version of this doc states that you can specify to the pubsub system that your message has an ordering key and it will order the messages delivered to you. But this version of the doc basically says to get all the messages in a stream (or up to a timeout here) and then order them all before dealing with them.
+Is there a way of just doing this sorting only if the next message does not have the last message id+1? Then start buffering messages until you get the ones you are missing. But what if in the meantime there are more messages coming in out of order. When do you stop? Just make the buffer and keep sorting it until all the messages are one plus the last. Then send on that buffer's worth. Do this in a blocking function so you don't receive new messages while sorting. Maybe in the sending on bit have a blocking queue that you send the ordered messabes to and a separate thread to service that in case the client is slow. Also overall for the sorting have a timeout so that if you don't get ordered messages within a certain time you just fail. Also throw away duplicates. Overall this should not happen frequently and the out of order message should appear very soon as it's just a network delay. If qos is 1 then you are guaranteed to get it at least once. There should be no waiting for ages for it. The fact that you got message 3 before 2 means that 2 was sent already so it's not like you are waiting for the server to send it. See TryOrdering.java for this.
+
+TODO: Consider requestId and shared replyTo like pasiot. This can be important for batching where there are many different watches. But the client will have to know to unsub from the topic.
+
+TODO: Refactor watch protocol to use grpc like semantics as google does with their grpc interface to pubsub. The createWatch is just a request response. From there you use the watchId to subscribe to a stream. And you can have many clients subscribe to the same stream. But for this to be efficient it should use a shared topic with reference counting etc
+grpc core documented here:
+https://grpc.io/docs/what-is-grpc/core-concepts/
+
+Effectively each method has an input and output stream because of how grpc is implemented over http/2 so there are only 4 types of method. The only place where this two stream restriction causes problems is for the stream in stuff. It would be nice to be able to pass a parameter here also that says things about what you are streaming in. But input streams are unusual enough and you can handle it by putting an optional object in the first message that has the parameters for the rest of the stream:
+single in, single out
+single in, stream out
+stream in, single out
+stream in, stream out
+
+single in, single out
+rpc GetFeature(Point) returns (Feature) {}
+public void getFeature(Point request, StreamObserver<Feature> responseObserver)
+
+single in, stream out
+rpc ListFeatures(Rectangle) returns (stream Feature) {}
+public void listFeatures(Rectangle request, StreamObserver<Feature> responseObserver)
+
+stream in, single out
+rpc RecordRoute(stream Point) returns (RouteSummary) {}
+public StreamObserver<Point> recordRoute(final StreamObserver<RouteSummary> responseObserver)
+
+stream in, stream out
+rpc RouteChat(stream RouteNote) returns (stream RouteNote) {}
+public StreamObserver<RouteNote> routeChat(final StreamObserver<RouteNote> responseObserver)
+
+
+stream in, single out may not be great for e.g. download project where you might like to pass some extra info besides the stream, e.g. the name of the project etc. So for this you might have to have some optional metadata in the first message. Normally it will take all the values in the stream and then return the single out but if there is a problem then it will return the single out straight away with an error (which client gets as exception).
+Also are the grpc streams stateless? i.e. what if you have multiple clients streaming in. Does the server have to distinguish each stream? Presumably not. So we should test for the same.
+
+For stream in the first request must supply a replyTo, a streamId and no message
+Then the stream requests must supply a streamId a message and an empty replyTo
+
+Pub Sub
+Assume that Pub sub will only work over mqtt. i.e. If you want publish subscribe then you need to make sure you include a message broker. In that case the client can just just the mqtt api more or less directly to do things. So for the desktop watch it will be modeled as one method which does create watch with an id another output stream method that listens for that watch. That uses the grpc style of stuff. But we can make another api that assumes there is a broker underneath. That api can be generic. For anything that does streaming it can take an extra parameter which is the stream topic. So when you create a watch you can supply the stream topic as one of the create properties. Then we will have a separate api that you can call where you just subscribe for a topic. Your code will then expect to get watches on that topic or whatever. Maybe we should do ref counting as well. Whatever. The main point is that for this kind of thing we won't worry about sticking exactly to grpc because grpc doesn't support pubsub as a pattern anyway.
