@@ -31,14 +31,6 @@ public interface MPStreamObserver<V> {
      */
     void onError(Throwable t);
 
-    /**
-     * Receives the last or only message in a stream.
-     *
-     * <p>Unary calls should not invoke onNext. Instead they should invoke onLast once only.
-     *
-     * <p>May only be called once and if called it must be the last method called. In particular if an
-     * exception is thrown by an implementation of {@code onCompleted} no further calls to any method
-     * are allowed.
-     */
-    void onLast(V value);
+
+    void onCompleted();
 }

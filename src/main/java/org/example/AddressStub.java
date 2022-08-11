@@ -18,22 +18,23 @@ public class AddressStub implements MqttProtoService {
     public MPBufferObserver onProtoRequest(String method, ByteString params, MPBufferObserver replyListener) throws Exception{
         switch (method) {
             case IAddressService.METHOD_PERSON: {
-                replyListener.onLast(this.addressService.handlePerson(Person.parseFrom(params)).toByteString());
+                replyListener.onNext(this.addressService.handlePerson(Person.parseFrom(params)).toByteString());
+                replyListener.onCompleted();
                 break;
             }
             case IAddressService.METHOD_ADDRESS: {
-                replyListener.onLast(this.addressService.handleAddress(AddressBook.parseFrom(params)).toByteString());
+                replyListener.onNext(this.addressService.handleAddress(AddressBook.parseFrom(params)).toByteString());
+                replyListener.onCompleted();
                 break;
             }
             case IAddressService.METHOD_SERVER_STREAM_PERSONS:{
                 this.addressService.serverStreamPersons(SomeRequestOrReplyValue.parseFrom(params),
-                        new StreamObserverToBufferObserver<>(replyListener));
+                        new StreamToBufferObserver<>(replyListener));
                 break;
             }
             case IAddressService.METHOD_CLIENT_STREAM_PERSONS: {
-                MPStreamObserver<Person> inputStream =  this.addressService.clientStreamPersons(new StreamObserverToBufferObserver<>(replyListener));
-                final MPBufferObserver protoInputStream = new BufferObserverToStreamObserver<Person>(Person.parser(), inputStream);
-                return protoInputStream;
+                MPStreamObserver<Person> inputStream =  this.addressService.clientStreamPersons(new StreamToBufferObserver<>(replyListener));
+                return new BufferToStreamObserver<Person>(Person.parser(), inputStream);
             }
             default:
                 Logit.log("**************Unrecognised method " + method);

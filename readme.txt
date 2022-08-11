@@ -73,8 +73,11 @@ TODO: How do we implement stream cancellation?
 
 grpc core documented here:
 https://grpc.io/docs/what-is-grpc/core-concepts/
+This describes what is happening on the wire in detail (Chapter 4. gRPC under the hood. (Also in c:\books))
+https://www.oreilly.com/library/view/grpc-up-and/9781492058328/ch04.html
 Also the diagrams in this are useful for showing what the streams look like on http/2 (ignore the code it's just the implementation of the route example in ballerina)
 https://thenewstack.io/grpc-a-deep-dive-into-the-communication-pattern/
+
 
 Effectively each method has an input and output stream because of how grpc is implemented over http/2 so there are only 4 types of method. The only place where this two stream restriction causes problems is for the stream in stuff. It would be nice to be able to pass a parameter here also that says things about what you are streaming in. But input streams are unusual enough and you can handle it by putting an optional object in the first message that has the parameters for the rest of the stream:
 single in, single out

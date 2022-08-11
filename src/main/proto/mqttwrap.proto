@@ -9,10 +9,12 @@ option java_outer_classname = "MqttWrapProtos";
 enum MqttPType{
   //An error message
   ERROR = 0;
-  //The next message in a stream
-  NEXT = 1;
-  //The last message in a stream
-  LAST = 2;
+  //Request
+  REQUEST = 1;
+  //Next message in stream
+  NEXT = 2;
+  //Stream completed
+  COMPLETED = 3;
 }
 
 message MqttProtoRequest {

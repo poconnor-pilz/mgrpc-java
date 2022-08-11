@@ -2,11 +2,11 @@ package org.example;
 
 import com.google.protobuf.MessageLite;
 
-public class StreamObserverToBufferObserver<T extends MessageLite> implements MPStreamObserver<T> {
+public class StreamToBufferObserver<T extends MessageLite> implements MPStreamObserver<T> {
 
     private final MPBufferObserver replyListener;
 
-    public StreamObserverToBufferObserver(MPBufferObserver bufferObserver) {
+    public StreamToBufferObserver(MPBufferObserver bufferObserver) {
         this.replyListener = bufferObserver;
     }
 
@@ -23,8 +23,9 @@ public class StreamObserverToBufferObserver<T extends MessageLite> implements MP
 
     }
 
+
     @Override
-    public void onLast(T value) {
-        replyListener.onLast(value.toByteString());
+    public void onCompleted() {
+        replyListener.onCompleted();
     }
 }

@@ -80,8 +80,8 @@ public class Main {
             }
 
             @Override
-            public void onLast(Person value) {
-                Logit.log("Received last stream value: " + value.getName());
+            public void onCompleted() {
+                Logit.log("Received completed stream: ");
                 latch.countDown();
             }
         });
@@ -93,7 +93,7 @@ public class Main {
         MPStreamObserver<Person> inputStream = proxy.clientStreamPersons(new MPStreamObserver<com.example.tutorial.protos.SomeRequestOrReplyValue>() {
             @Override
             public void onNext(com.example.tutorial.protos.SomeRequestOrReplyValue value) {
-
+                Logit.log("Server returned: " + value.getTheVal());
             }
 
             @Override
@@ -102,15 +102,16 @@ public class Main {
             }
 
             @Override
-            public void onLast(com.example.tutorial.protos.SomeRequestOrReplyValue value) {
-                Logit.log("Server returned: " + value.getTheVal());
+            public void onCompleted() {
+                Logit.log("Server sent completed response after processing client stream");
                 latch2.countDown();
             }
         });
 
 
         inputStream.onNext(person);
-        inputStream.onLast(person);
+        inputStream.onNext(person);
+        inputStream.onCompleted();
 
         latch2.await();
 

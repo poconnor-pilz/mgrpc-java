@@ -5,11 +5,11 @@ import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.protobuf.Parser;
 import com.pilz.mqttwrap.Status;
 
-class BufferObserverToStreamObserver<T> implements MPBufferObserver {
+class BufferToStreamObserver<T> implements MPBufferObserver {
     final Parser<T> parser;
     final MPStreamObserver<T> streamObserver;
 
-    BufferObserverToStreamObserver(Parser<T> parser, MPStreamObserver<T> streamObserver) {
+    BufferToStreamObserver(Parser<T> parser, MPStreamObserver<T> streamObserver) {
         this.parser = parser;
         this.streamObserver = streamObserver;
     }
@@ -24,13 +24,9 @@ class BufferObserverToStreamObserver<T> implements MPBufferObserver {
         }
     }
 
-    @Override
-    public void onLast(ByteString value) {
-        try {
-            streamObserver.onLast(parser.parseFrom(value));
-        } catch (InvalidProtocolBufferException e) {
-            Logit.error(e);
-        }
+
+    public void onCompleted(){
+        streamObserver.onCompleted();
     }
 
     @Override
@@ -45,6 +41,7 @@ class BufferObserverToStreamObserver<T> implements MPBufferObserver {
         }
         streamObserver.onError(new Throwable(status.getDescription()));
     }
+
 
 
 }

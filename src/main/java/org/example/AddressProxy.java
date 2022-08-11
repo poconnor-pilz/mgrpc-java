@@ -4,8 +4,6 @@ import com.example.tutorial.protos.AddressBook;
 import com.example.tutorial.protos.Person;
 import com.example.tutorial.protos.SomeRequestOrReplyValue;
 import com.google.protobuf.ByteString;
-import com.google.protobuf.InvalidProtocolBufferException;
-import com.pilz.mqttwrap.Status;
 
 public class AddressProxy implements IAddressService{
 
@@ -32,7 +30,7 @@ public class AddressProxy implements IAddressService{
     @Override
     public void serverStreamPersons(SomeRequestOrReplyValue requestVal, MPStreamObserver<Person> responseStream) throws Exception {
         protoSender.sendSingleRequest(IAddressService.METHOD_SERVER_STREAM_PERSONS, requestVal,
-                new BufferObserverToStreamObserver<>(Person.parser(), responseStream));
+                new BufferToStreamObserver<>(Person.parser(), responseStream));
     }
 
 
@@ -44,9 +42,9 @@ public class AddressProxy implements IAddressService{
         final String streamId = Base64Utils.randomId();
 
         protoSender.sendInputStreamRequest(IAddressService.METHOD_CLIENT_STREAM_PERSONS, streamId,
-                new BufferObserverToStreamObserver<>(SomeRequestOrReplyValue.parser(), responseStream));
+                new BufferToStreamObserver<>(SomeRequestOrReplyValue.parser(), responseStream));
 
-        return new StreamObserverToSender<Person>(protoSender, IAddressService.METHOD_CLIENT_STREAM_PERSONS, streamId);
+        return new StreamObserverToSender<>(protoSender, IAddressService.METHOD_CLIENT_STREAM_PERSONS, streamId);
 
     }
 }

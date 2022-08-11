@@ -39,14 +39,9 @@ public class AddressService implements IAddressService {
                                             .setType(Person.PhoneType.HOME))
                             .build();
 
-            //TODO: Detecting the last here is a bit awkward but a service could always decide to send an empty onLast()
-            //Or consider onReply (see readme.txt)
-            if(i < numPersons - 1){
                 personStream.onNext(person);
-            } else {
-                personStream.onLast(person);
-            }
         }
+        personStream.onCompleted();
 
     }
 
@@ -66,14 +61,17 @@ public class AddressService implements IAddressService {
                 Logit.error(t);
             }
 
+
             @Override
-            public void onLast(Person value) {
-                Logit.log("Server received last input stream value of: " + value.getName());
+            public void onCompleted() {
+                Logit.log("Server input stream received on completed: ");
                 numPersons++;
                 SomeRequestOrReplyValue replyValue = SomeRequestOrReplyValue.newBuilder().
                         setTheVal("Client sent total of " + numPersons + " persons").build();
-                responseStream.onLast(replyValue);
+                responseStream.onNext(replyValue);
+                responseStream.onCompleted();
             }
+
         };
     }
 

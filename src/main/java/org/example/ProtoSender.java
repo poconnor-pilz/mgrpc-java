@@ -43,18 +43,20 @@ public class ProtoSender {
         sendSingleRequest( method, params, new MPBufferObserver() {
             @Override
             public void onNext(ByteString value) {
-                latch.countDown();
-            }
-
-            @Override
-            public void onLast(ByteString value) {
                 reply[0] = value;
                 latch.countDown();
             }
+
+
             @Override
             public void onError(ByteString error) {
                 //TODO: Handle error
-                System.out.println("********Error******** " + error);
+                Logit.error(error.toString());
+            }
+
+            public void onCompleted(){
+                Logit.log("Protosender received onCompleted");
+                //Do nothing here. This call effectively completes after the first onNext()
             }
 
         });
@@ -84,6 +86,7 @@ public class ProtoSender {
     public void sendInputStreamRequest(String method, String streamId, MPBufferObserver protoListener) throws Exception{
         String replyTo = subscribeForReplies(method, protoListener);
         Builder request = MqttProtoRequest.newBuilder()
+                .setType(MqttPType.REQUEST)
                 .setStreamId(streamId)
                 .setReplyTo(replyTo);
         send(method, request);
@@ -100,53 +103,12 @@ public class ProtoSender {
     public void sendSingleRequest(String method, MessageLite message, MPBufferObserver protoListener) throws Exception{
         String replyTo = subscribeForReplies(method, protoListener);
         Builder request = MqttProtoRequest.newBuilder()
-                .setType(MqttPType.LAST)
+                .setType(MqttPType.REQUEST)
                 .setMessage(message.toByteString())
                 .setReplyTo(replyTo);
         send(method, request);
     }
 
-    /**
-     * Send a request to a service method
-     * @param method The name of the method to call
-     * @param message The payload of the message
-     * @param protoListener Listener for responses if this send is a request. Null if this send is part of an input
-     *                      stream
-     * @throws Exception
-     */
-    public void sendSingleRequest(String method, MessageLite message, AbstractParser parser, MPStreamObserver responseStream) throws Exception{
-        MPBufferObserver observer = new MPBufferObserver() {
-            @Override
-            public void onNext(ByteString value) {
-                try {
-                    responseStream.onNext(parser.parseFrom(value));
-                } catch (InvalidProtocolBufferException e) {
-                    throw new RuntimeException(e);
-                }
-            }
-
-            @Override
-            public void onLast(ByteString value) {
-                try {
-                    responseStream.onLast(parser.parseFrom(value));
-                } catch (InvalidProtocolBufferException e) {
-                    throw new RuntimeException(e);
-                }
-            }
-
-            @Override
-            public void onError(ByteString error) {
-                //TODO: Handle error
-                try {
-                    Logit.error(Status.parseFrom(error).toString());
-                } catch (InvalidProtocolBufferException e) {
-                    throw new RuntimeException(e);
-                }
-            }
-        };
-
-        sendSingleRequest(method, message, observer);
-    }
 
 
     /**
@@ -165,21 +127,20 @@ public class ProtoSender {
         send(method, request);
     }
 
+
+
     /**
-     * Send the last stream value to a method that takes a input stream (client side stream)
+     * Send the completed token to method that takes a input stream (client side stream)
      * @param method The name of the method to call
-     * @param message The payload of the message
      * @param streamId The stream id if the service method takes an input stream from the client otherwise null
      * @throws Exception
      */
-    public void sendLastStreamValue(String method, String streamId, MessageLite message) throws Exception{
+    public void sendCompleted(String method, String streamId) throws Exception{
         Builder request = MqttProtoRequest.newBuilder()
-                .setType(MqttPType.LAST)
-                .setMessage(message.toByteString())
+                .setType(MqttPType.COMPLETED)
                 .setStreamId(streamId);
         send(method, request);
     }
-
 
     /**
      * Send a stream value to a method that takes a input stream (client side stream)
@@ -215,15 +176,15 @@ public class ProtoSender {
                     case NEXT:
                         protoListener.onNext(mqttProtoReply.getMessage());
                         break;
-                    case LAST:
-                        Logit.log("ProtoSender Unsubscribing to: " + replyTo);
-                        client.unsubscribe(replyTo);
-                        protoListener.onLast(mqttProtoReply.getMessage());
-                        break;
                     case ERROR:
                         Logit.log("ProtoSender error recieved Unsubscribing to: " + replyTo);
                         client.unsubscribe(replyTo);
                         protoListener.onError(mqttProtoReply.getMessage());
+                        break;
+                    case COMPLETED:
+                        Logit.log("ProtoSender completed received Unsubscribing to: " + replyTo);
+                        client.unsubscribe(replyTo);
+                        protoListener.onCompleted();
                         break;
                     default:
                         Logit.error("Unhandled message type");

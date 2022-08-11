@@ -35,13 +35,16 @@ public class StreamObserverToSender<T extends MessageLite> implements MPStreamOb
         }
     }
 
+
+
     @Override
-    public void onLast(T value) {
+    public void onCompleted() {
         try {
-            protoSender.sendLastStreamValue(method, streamId, value);
+            protoSender.sendCompleted(method, streamId);
         } catch (Exception e) {
             //TODO: handle error
             e.printStackTrace();
         }
+
     }
 }
