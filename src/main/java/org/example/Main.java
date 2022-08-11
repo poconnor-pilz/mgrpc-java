@@ -68,7 +68,7 @@ public class Main {
         final CountDownLatch latch = new CountDownLatch(1);
 
         SomeRequestOrReplyValue reqVal = SomeRequestOrReplyValue.newBuilder().setTheVal("A request value for the stream").build();
-        proxy.serverStreamPersons(reqVal, new MqttProtoStreamObserver<Person>() {
+        proxy.serverStreamPersons(reqVal, new MPStreamObserver<Person>() {
             @Override
             public void onNext(Person value) {
                 Logit.log("Received stream value: " + value.getName());
@@ -90,7 +90,7 @@ public class Main {
 
 
         final CountDownLatch latch2 = new CountDownLatch(1);
-        MqttProtoStreamObserver<Person> inputStream = proxy.clientStreamPersons(new MqttProtoStreamObserver<com.example.tutorial.protos.SomeRequestOrReplyValue>() {
+        MPStreamObserver<Person> inputStream = proxy.clientStreamPersons(new MPStreamObserver<com.example.tutorial.protos.SomeRequestOrReplyValue>() {
             @Override
             public void onNext(com.example.tutorial.protos.SomeRequestOrReplyValue value) {
 

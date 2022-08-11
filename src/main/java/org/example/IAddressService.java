@@ -19,9 +19,9 @@ public interface IAddressService {
     SomeRequestOrReplyValue handleAddress(AddressBook book) throws Exception;
 
     //Single in, stream out
-    void serverStreamPersons(SomeRequestOrReplyValue requestVal, MqttProtoStreamObserver<Person> personStream)
+    void serverStreamPersons(SomeRequestOrReplyValue requestVal, MPStreamObserver<Person> personStream)
             throws Exception;
 
     //Stream in, single out
-    MqttProtoStreamObserver<Person> clientStreamPersons(MqttProtoStreamObserver<SomeRequestOrReplyValue> responseStream) throws Exception;
+    MPStreamObserver<Person> clientStreamPersons(MPStreamObserver<SomeRequestOrReplyValue> responseStream) throws Exception;
 }

@@ -23,7 +23,7 @@ public class AddressService implements IAddressService {
     }
 
     @Override
-    public void serverStreamPersons(SomeRequestOrReplyValue requestVal, MqttProtoStreamObserver<Person> personStream)
+    public void serverStreamPersons(SomeRequestOrReplyValue requestVal, MPStreamObserver<Person> personStream)
     throws Exception{
         log("serverStreamPersons with request value of " + requestVal.getTheVal());
         int numPersons = 3;
@@ -51,8 +51,8 @@ public class AddressService implements IAddressService {
     }
 
     @Override
-    public MqttProtoStreamObserver<Person> clientStreamPersons(MqttProtoStreamObserver<SomeRequestOrReplyValue> responseStream) throws Exception {
-        return new MqttProtoStreamObserver<Person>() {
+    public MPStreamObserver<Person> clientStreamPersons(MPStreamObserver<SomeRequestOrReplyValue> responseStream) throws Exception {
+        return new MPStreamObserver<Person>() {
 
             private int numPersons = 0;
             @Override

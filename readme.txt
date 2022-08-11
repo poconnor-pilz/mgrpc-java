@@ -68,8 +68,13 @@ Is there a way of just doing this sorting only if the next message does not have
 TODO: Consider requestId and shared replyTo like pasiot. This can be important for batching where there are many different watches. But the client will have to know to unsub from the topic.
 
 TODO: Refactor watch protocol to use grpc like semantics as google does with their grpc interface to pubsub. The createWatch is just a request response. From there you use the watchId to subscribe to a stream. And you can have many clients subscribe to the same stream. But for this to be efficient it should use a shared topic with reference counting etc
+
+TODO: How do we implement stream cancellation?
+
 grpc core documented here:
 https://grpc.io/docs/what-is-grpc/core-concepts/
+Also the diagrams in this are useful for showing what the streams look like on http/2 (ignore the code it's just the implementation of the route example in ballerina)
+https://thenewstack.io/grpc-a-deep-dive-into-the-communication-pattern/
 
 Effectively each method has an input and output stream because of how grpc is implemented over http/2 so there are only 4 types of method. The only place where this two stream restriction causes problems is for the stream in stuff. It would be nice to be able to pass a parameter here also that says things about what you are streaming in. But input streams are unusual enough and you can handle it by putting an optional object in the first message that has the parameters for the rest of the stream:
 single in, single out
@@ -102,3 +107,8 @@ Then the stream requests must supply a streamId a message and an empty replyTo
 
 Pub Sub
 Assume that Pub sub will only work over mqtt. i.e. If you want publish subscribe then you need to make sure you include a message broker. In that case the client can just just the mqtt api more or less directly to do things. So for the desktop watch it will be modeled as one method which does create watch with an id another output stream method that listens for that watch. That uses the grpc style of stuff. But we can make another api that assumes there is a broker underneath. That api can be generic. For anything that does streaming it can take an extra parameter which is the stream topic. So when you create a watch you can supply the stream topic as one of the create properties. Then we will have a separate api that you can call where you just subscribe for a topic. Your code will then expect to get watches on that topic or whatever. Maybe we should do ref counting as well. Whatever. The main point is that for this kind of thing we won't worry about sticking exactly to grpc because grpc doesn't support pubsub as a pattern anyway.
+
+
+It might be realistic for us to say that if it is not in process then we will always use mqtt. In that case we could possibly simplify things and we could always be sure that onReply would work (without having to plug something in to our service that calls onNext followed by onCompleted)
+
+If we make our own style of interface instead of strict grpc then it should not matter as long as that interface is easily adaptable to something that only has a single input stream and single output stream of protocol buffers. This can then be wrapped in a grpc service. So even if our interface uses e.g. onSingle() then the wrapper can translate that as onNext followed by onCompleted. The only place the two streams solution is a little awkward is for a client input stream because then the input stream has taken the slot of something where you can pass parameters. But this is an unusual case and can be dealt with by having an optional protobuf in the first message. (Of course in our mqtt imlementation the client input stream is easilty separated from the first parameter as the input stream needs a unique stream id whereas the first parameter just has a replyTo - maybe replyTo should be requestId == streamId - no it should be separate so we can do pubsub and batching. But we should do it like pilz iot where the listener will separate stuff based on requestId and not just rely on the topic).

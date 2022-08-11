@@ -11,6 +11,6 @@ public interface MqttProtoService {
      * return an IProtoListener that will listen to the client side stream. Otherwise return null.
      * @throws Exception
      */
-    MqttProtoBufferObserver onProtoRequest(String method, ByteString requestParams, MqttProtoBufferObserver replyListener) throws Exception;
+    MPBufferObserver onProtoRequest(String method, ByteString requestParams, MPBufferObserver replyListener) throws Exception;
 
 }

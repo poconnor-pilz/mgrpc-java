@@ -1,9 +1,11 @@
 package org.example;
 
 import com.google.protobuf.ByteString;
+import com.google.protobuf.InvalidProtocolBufferException;
 import com.pilz.mqttwrap.MqttPType;
 import com.pilz.mqttwrap.MqttProtoReply;
 import com.pilz.mqttwrap.MqttProtoRequest;
+import com.pilz.mqttwrap.Status;
 import org.eclipse.paho.client.mqttv3.IMqttMessageListener;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
@@ -14,12 +16,12 @@ import java.util.Map;
 
 public class ProtoServiceManager {
 
-    private class MappedInputStream implements MqttProtoBufferObserver{
+    private class MappedInputStream implements MPBufferObserver {
 
-        private final MqttProtoBufferObserver serviceInputStream;
+        private final MPBufferObserver serviceInputStream;
         private final String streamId;
 
-        private MappedInputStream(MqttProtoBufferObserver serviceInputStream, String streamId) {
+        private MappedInputStream(MPBufferObserver serviceInputStream, String streamId) {
             this.serviceInputStream = serviceInputStream;
             this.streamId = streamId;
         }
@@ -40,7 +42,7 @@ public class ProtoServiceManager {
         }
 
         @Override
-        public void onError(String error) {
+        public void onError(ByteString error) {
             serviceInputStream.onError(error);
             ProtoServiceManager.this.streamIdToInputStream.remove(this.streamId);
         }
@@ -106,7 +108,7 @@ public class ProtoServiceManager {
                         case ERROR:
                             Logit.log("Removing MappedInputStream for " + streamId);
                             streamIdToInputStream.remove(streamId);
-                            mappedInputStream.onError(request.getError());
+                            mappedInputStream.onError(request.getMessage());
                             break;
                         default:
                             Logit.error("Unhandled message type");
@@ -114,7 +116,7 @@ public class ProtoServiceManager {
                     return;
                 }
 
-                MqttProtoBufferObserver inputStream = mqttProtoService.onProtoRequest(method, params, new MqttProtoBufferObserver() {
+                MPBufferObserver inputStream = mqttProtoService.onProtoRequest(method, params, new MPBufferObserver() {
                     @Override
                     public void onNext(ByteString value) {
                         MqttProtoReply reply = MqttProtoReply.newBuilder()
@@ -139,9 +141,13 @@ public class ProtoServiceManager {
                         }
                     }
                     @Override
-                    public void onError(String error) {
+                    public void onError(ByteString error) {
                         //TODO: Handle error
-                        Logit.error("********Error******** " + error);
+                        try {
+                            Logit.error(Status.parseFrom(error).toString());
+                        } catch (InvalidProtocolBufferException e) {
+                            Logit.error("Failed to parse error");
+                        }
                     }
 
                 });

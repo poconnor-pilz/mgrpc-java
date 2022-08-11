@@ -16,22 +16,27 @@ enum MqttPType{
 }
 
 message MqttProtoRequest {
+  //message type
+  MqttPType type = 1;
   //The message payload encoded as a protocol buffer
-  bytes message = 1;
+  bytes message = 2;
   //Topic to reply to. If this message is a request then replyTo must be set. Otherwise this message is part of a
   //is part of an input stream (client side stream)
-  string replyTo = 2;
+  string replyTo = 3;
   //If this message is part of an input stream (client side stream) then streamId will contain a uuid that identifies it.
-  string streamId = 3;
-  MqttPType type = 4;
-  //Error or exception TODO: Make this a struct or whatever
-  string error = 5;
+  string streamId = 4;
 }
 
 message MqttProtoReply {
+  //Message type
+  MqttPType type = 1;
   //The message payload encoded as a protocol buffer
-  bytes message = 1;
-  MqttPType type = 2;
-  //Error or exception TODO: Make this a struct or whatever
-  string error = 3;
+  bytes message = 2;
+}
+
+//TODO: Use grpc errors/status instead
+//This will be used to encode an error in the request.message or reply.messageS
+message Status{
+  int32 code = 1;
+  string description = 2;
 }

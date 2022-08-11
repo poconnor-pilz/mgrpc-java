@@ -5,6 +5,7 @@ import com.example.tutorial.protos.Person;
 import com.example.tutorial.protos.SomeRequestOrReplyValue;
 import com.google.protobuf.ByteString;
 import com.google.protobuf.InvalidProtocolBufferException;
+import com.pilz.mqttwrap.Status;
 
 public class AddressProxy implements IAddressService{
 
@@ -29,97 +30,23 @@ public class AddressProxy implements IAddressService{
     }
 
     @Override
-    public void serverStreamPersons(SomeRequestOrReplyValue requestVal, MqttProtoStreamObserver<Person> responseStream) throws Exception {
-        protoSender.sendSingleRequest(IAddressService.METHOD_SERVER_STREAM_PERSONS, requestVal, new MqttProtoBufferObserver() {
-            @Override
-            public void onNext(ByteString value) {
-                try {
-                    responseStream.onNext(Person.parseFrom(value));
-                } catch (InvalidProtocolBufferException e) {
-                    throw new RuntimeException(e);
-                }
-            }
-
-            @Override
-            public void onLast(ByteString value) {
-                try {
-                    responseStream.onLast(Person.parseFrom(value));
-                } catch (InvalidProtocolBufferException e) {
-                    throw new RuntimeException(e);
-                }
-            }
-
-            @Override
-            public void onError(String error) {
-                //TODO: Handle error
-                System.out.println("********Error******** " + error);
-            }
-        });
+    public void serverStreamPersons(SomeRequestOrReplyValue requestVal, MPStreamObserver<Person> responseStream) throws Exception {
+        protoSender.sendSingleRequest(IAddressService.METHOD_SERVER_STREAM_PERSONS, requestVal,
+                new BufferObserverToStreamObserver<>(Person.parser(), responseStream));
     }
 
+
+
+
     @Override
-    public MqttProtoStreamObserver<Person> clientStreamPersons(MqttProtoStreamObserver<SomeRequestOrReplyValue> responseStream) throws Exception {
+    public MPStreamObserver<Person> clientStreamPersons(MPStreamObserver<SomeRequestOrReplyValue> responseStream) throws Exception {
 
         final String streamId = Base64Utils.randomId();
 
-        protoSender.sendInputStreamRequest(IAddressService.METHOD_CLIENT_STREAM_PERSONS, streamId, new MqttProtoBufferObserver() {
-            @Override
-            public void onNext(ByteString value) {
-                try {
-                    responseStream.onNext(SomeRequestOrReplyValue.parseFrom(value));
-                } catch (InvalidProtocolBufferException e) {
-                    throw new RuntimeException(e);
-                }
-            }
+        protoSender.sendInputStreamRequest(IAddressService.METHOD_CLIENT_STREAM_PERSONS, streamId,
+                new BufferObserverToStreamObserver<>(SomeRequestOrReplyValue.parser(), responseStream));
 
-            @Override
-            public void onLast(ByteString value) {
-                try {
-                    responseStream.onLast(SomeRequestOrReplyValue.parseFrom(value));
-                } catch (InvalidProtocolBufferException e) {
-                    throw new RuntimeException(e);
-                }
-            }
+        return new StreamObserverToSender<Person>(protoSender, IAddressService.METHOD_CLIENT_STREAM_PERSONS, streamId);
 
-            @Override
-            public void onError(String error) {
-                //TODO: Handle error
-                System.out.println("********Error******** " + error);
-            }
-        });
-
-        return new MqttProtoStreamObserver<Person>() {
-            @Override
-            public void onNext(Person value) {
-                try {
-                    protoSender.sendNextStreamValue(IAddressService.METHOD_CLIENT_STREAM_PERSONS, streamId, value);
-                } catch (Exception e) {
-                    //TODO: handle error
-                    e.printStackTrace();
-                }
-            }
-
-            @Override
-            public void onError(Throwable t) {
-                try {
-                    //TODO encode the exeption as a protobuf
-                    protoSender.sendErrorToStream(IAddressService.METHOD_CLIENT_STREAM_PERSONS, streamId, t.getMessage());
-                } catch (Exception e) {
-                    //TODO: handle error
-                    e.printStackTrace();
-                }
-
-            }
-
-            @Override
-            public void onLast(Person value) {
-                try {
-                    protoSender.sendLastStreamValue(IAddressService.METHOD_CLIENT_STREAM_PERSONS, streamId, value);
-                } catch (Exception e) {
-                    //TODO: handle error
-                    e.printStackTrace();
-                }
-            }
-        };
     }
 }
