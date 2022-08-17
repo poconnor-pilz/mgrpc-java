@@ -101,6 +101,8 @@ stream in, stream out
 rpc RouteChat(stream RouteNote) returns (stream RouteNote) {}
 public StreamObserver<RouteNote> routeChat(final StreamObserver<RouteNote> responseObserver)
 
+The single out methods may look awkward but the benefit is that it is clear that this is not a local inline request.
+You will have to at least wrap it in a StreamSingleWaiter and put in a timeout.
 
 stream in, single out may not be great for e.g. download project where you might like to pass some extra info besides the stream, e.g. the name of the project etc. So for this you might have to have some optional metadata in the first message. Normally it will take all the values in the stream and then return the single out but if there is a problem then it will return the single out straight away with an error (which client gets as exception).
 Also are the grpc streams stateless? i.e. what if you have multiple clients streaming in. Does the server have to distinguish each stream? Presumably not. So we should test for the same.
@@ -115,3 +117,29 @@ Assume that Pub sub will only work over mqtt. i.e. If you want publish subscribe
 It might be realistic for us to say that if it is not in process then we will always use mqtt. In that case we could possibly simplify things and we could always be sure that onReply would work (without having to plug something in to our service that calls onNext followed by onCompleted)
 
 If we make our own style of interface instead of strict grpc then it should not matter as long as that interface is easily adaptable to something that only has a single input stream and single output stream of protocol buffers. This can then be wrapped in a grpc service. So even if our interface uses e.g. onSingle() then the wrapper can translate that as onNext followed by onCompleted. The only place the two streams solution is a little awkward is for a client input stream because then the input stream has taken the slot of something where you can pass parameters. But this is an unusual case and can be dealt with by having an optional protobuf in the first message. (Of course in our mqtt imlementation the client input stream is easilty separated from the first parameter as the input stream needs a unique stream id whereas the first parameter just has a replyTo - maybe replyTo should be requestId == streamId - no it should be separate so we can do pubsub and batching. But we should do it like pilz iot where the listener will separate stuff based on requestId and not just rely on the topic).
+
+----------------------------
+
+Making RouteGuide work as if it needed to be used in a desktop and remotely
+
+Will extract an IRouteGuide interface
+Then make a RouteGuideStub that implements this (they use stub where com uses proxy, so we will use stub for client and skeleton for server like corba)
+The RouteGuideStub does the remote comms
+Then make a RouteGuideBlockingStub that wraps an IRouteGuideStub and makes simpler blocking calls to the service whether it is local or remote.
+
+Note that the stub is expected to throw a statusruntimeexeption which is unchecked
+
+---------------
+
+protoc compliler plugin:
+It should be not too hard to get the grpc compiler to generate the stub and skeleton from the grpc definition of the service.
+Probably should get a student to do this.
+It could be done as a grpc compiler plugin. See the https://github.com/vert-x3/vertx-grpc-java-compiler
+Can write a plugin in any language: https://scalapb.github.io/docs/writing-plugins/
+Google: creating a protoc plugin in java
+Simple example in java: https://github.com/thesamet/protoc-plugin-in-java
+The above uses a bat file to get protoc to call it but below has something about how get it to be executable:
+https://stackoverflow.com/questions/56414734/create-custom-protoc-plugin-in-java
+Also can look at the source of com.google.protobuf:protobuf-java
+But could also just modify the protoc compiler see
+https://github.com/protocolbuffers/protobuf/tree/main/src/google/protobuf/compiler/java

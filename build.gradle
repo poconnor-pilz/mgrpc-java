@@ -19,8 +19,13 @@ repositories {
 dependencies {
     testImplementation 'org.junit.jupiter:junit-jupiter-api:5.8.1'
     testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.8.1'
-    // https://mvnrepository.com/artifact/com.google.protobuf/protobuf-java
     implementation group: 'com.google.protobuf', name: 'protobuf-java', version: '3.21.2'
+    //For StatusException and Status
+    implementation group: 'io.grpc', name: 'grpc-api', version: '1.47.0'
+    //For StreamObserver
+    implementation group: 'io.grpc', name: 'grpc-stub', version: '1.47.0'
+    //This is just for the RouteGuideExample to parse json to protobuf
+    implementation group: 'com.google.protobuf', name: 'protobuf-java-util', version: '3.21.2'
     implementation group: 'org.eclipse.paho', name: 'org.eclipse.paho.client.mqttv3', version: '1.1.1'
 
 }

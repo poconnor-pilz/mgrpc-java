@@ -3,27 +3,32 @@ package org.example;
 import com.example.tutorial.protos.AddressBook;
 import com.example.tutorial.protos.Person;
 import com.example.tutorial.protos.SomeRequestOrReplyValue;
+import io.grpc.stub.StreamObserver;
 
 public class AddressService implements IAddressService {
 
 
     @Override
-    public SomeRequestOrReplyValue handlePerson(Person person){
+    public void handlePerson(Person person, StreamObserver<SomeRequestOrReplyValue> replyStream){
         log("handlePerson");
         log(person.toString());
-        return SomeRequestOrReplyValue.newBuilder().setTheVal("handled " + person.getName()).build();
+        final SomeRequestOrReplyValue reply = SomeRequestOrReplyValue.newBuilder().setTheVal("handled " + person.getName()).build();
+        replyStream.onNext(reply);
+        replyStream.onCompleted();
     }
 
     @Override
-    public SomeRequestOrReplyValue handleAddress(AddressBook book){
+    public void handleAddress(AddressBook book, StreamObserver<SomeRequestOrReplyValue> replyStream){
         log("handleAddress");
         log(book.toString());
-        return SomeRequestOrReplyValue.newBuilder().setTheVal("got an address ").build();
+        final SomeRequestOrReplyValue reply = SomeRequestOrReplyValue.newBuilder().setTheVal("got an address ").build();
+        replyStream.onNext(reply);
+        replyStream.onCompleted();
 
     }
 
     @Override
-    public void serverStreamPersons(SomeRequestOrReplyValue requestVal, MPStreamObserver<Person> personStream)
+    public void serverStreamPersons(SomeRequestOrReplyValue requestVal, StreamObserver<Person> personStream)
     throws Exception{
         log("serverStreamPersons with request value of " + requestVal.getTheVal());
         int numPersons = 3;
@@ -46,8 +51,8 @@ public class AddressService implements IAddressService {
     }
 
     @Override
-    public MPStreamObserver<Person> clientStreamPersons(MPStreamObserver<SomeRequestOrReplyValue> responseStream) throws Exception {
-        return new MPStreamObserver<Person>() {
+    public StreamObserver<Person> clientStreamPersons(StreamObserver<SomeRequestOrReplyValue> responseStream) throws Exception {
+        return new StreamObserver<Person>() {
 
             private int numPersons = 0;
             @Override

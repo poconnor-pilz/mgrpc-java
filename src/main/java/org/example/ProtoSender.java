@@ -1,8 +1,6 @@
 package org.example;
 
-import com.google.protobuf.AbstractParser;
 import com.google.protobuf.ByteString;
-import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.protobuf.MessageLite;
 import com.pilz.mqttwrap.MqttPType;
 import com.pilz.mqttwrap.MqttProtoReply;
@@ -40,13 +38,18 @@ public class ProtoSender {
 
         CountDownLatch latch = new CountDownLatch(1);
         final ByteString[] reply = new ByteString[1];
-        sendSingleRequest( method, params, new MPBufferObserver() {
+        sendRequest( method, params, new BufferObserver() {
             @Override
             public void onNext(ByteString value) {
                 reply[0] = value;
                 latch.countDown();
             }
 
+            @Override
+            public void onSingle(ByteString value) {
+                reply[0] = value;
+                latch.countDown();
+            }
 
             @Override
             public void onError(ByteString error) {
@@ -58,6 +61,7 @@ public class ProtoSender {
                 Logit.log("Protosender received onCompleted");
                 //Do nothing here. This call effectively completes after the first onNext()
             }
+
 
         });
 
@@ -74,24 +78,6 @@ public class ProtoSender {
         return reply[0];
     }
 
-
-    /**
-     * Send a request to a service method that takes an input stream
-     * @param method The name of the method to call
-     * @param streamId The stream id if the server method takes an input stream from the client otherwise null
-     * @param protoListener Listener for responses if this send is a request. Null if this send is part of an input
-     *                      stream
-     * @throws Exception
-     */
-    public void sendInputStreamRequest(String method, String streamId, MPBufferObserver protoListener) throws Exception{
-        String replyTo = subscribeForReplies(method, protoListener);
-        Builder request = MqttProtoRequest.newBuilder()
-                .setType(MqttPType.REQUEST)
-                .setStreamId(streamId)
-                .setReplyTo(replyTo);
-        send(method, request);
-    }
-
     /**
      * Send a request to a service method
      * @param method The name of the method to call
@@ -100,7 +86,7 @@ public class ProtoSender {
      *                      stream
      * @throws Exception
      */
-    public void sendSingleRequest(String method, MessageLite message, MPBufferObserver protoListener) throws Exception{
+    public void sendRequest(String method, MessageLite message, BufferObserver protoListener) throws Exception{
         String replyTo = subscribeForReplies(method, protoListener);
         Builder request = MqttProtoRequest.newBuilder()
                 .setType(MqttPType.REQUEST)
@@ -112,13 +98,31 @@ public class ProtoSender {
 
 
     /**
+     * Send a request to a service method that takes an input stream
+     * @param method The name of the method to call
+     * @param streamId The stream id if the server method takes an input stream from the client otherwise null
+     * @param protoListener Listener for responses if this send is a request. Null if this send is part of an input
+     *                      stream
+     * @throws Exception
+     */
+    public void sendClientStreamingRequest(String method, String streamId, BufferObserver protoListener) throws Exception{
+        String replyTo = subscribeForReplies(method, protoListener);
+        Builder request = MqttProtoRequest.newBuilder()
+                .setType(MqttPType.REQUEST)
+                .setStreamId(streamId)
+                .setReplyTo(replyTo);
+        send(method, request);
+    }
+
+
+    /**
      * Send an error to a method that takes a input stream (client side stream)
      * @param method The name of the method to call
      * @param error The error
      * @param streamId The stream id if the service method takes an input stream from the client otherwise null
      * @throws Exception
      */
-    public void sendErrorToStream(String method, String streamId, String error) throws Exception{
+    public void sendClientStreamError(String method, String streamId, String error) throws Exception{
         Status status = Status.newBuilder().setCode(500).setDescription(error).build();
         Builder request = MqttProtoRequest.newBuilder()
                 .setType(MqttPType.ERROR)
@@ -135,7 +139,7 @@ public class ProtoSender {
      * @param streamId The stream id if the service method takes an input stream from the client otherwise null
      * @throws Exception
      */
-    public void sendCompleted(String method, String streamId) throws Exception{
+    public void sendClientStreamCompleted(String method, String streamId) throws Exception{
         Builder request = MqttProtoRequest.newBuilder()
                 .setType(MqttPType.COMPLETED)
                 .setStreamId(streamId);
@@ -149,7 +153,7 @@ public class ProtoSender {
      * @param streamId The stream id if the service method takes an input stream from the client otherwise null
      * @throws Exception
      */
-    public void sendNextStreamValue(String method, String streamId, MessageLite message) throws Exception{
+    public void sendClientStreamNext(String method, String streamId, MessageLite message) throws Exception{
         Builder request = MqttProtoRequest.newBuilder()
                 .setType(MqttPType.NEXT)
                 .setMessage(message.toByteString())
@@ -163,7 +167,7 @@ public class ProtoSender {
     }
 
 
-    private String subscribeForReplies(String method, MPBufferObserver protoListener) throws Exception{
+    private String subscribeForReplies(String method, BufferObserver protoListener) throws Exception{
         final String replyTo = serviceBaseTopic + '/' + MqttProtoConsts.OUT + '/' + method + '/' + Base64Utils.randomId();
         Logit.log("ProtoSender subscribing for reply on: " + replyTo);
         final IMqttMessageListener messageListener = new IMqttMessageListener() {
@@ -175,6 +179,11 @@ public class ProtoSender {
                 switch(mqttProtoReply.getType()){
                     case NEXT:
                         protoListener.onNext(mqttProtoReply.getMessage());
+                        break;
+                    case SINGLE:
+                        protoListener.onSingle(mqttProtoReply.getMessage());
+                        //This is the only message in the stream so unsubscribe
+                        client.unsubscribe(replyTo);
                         break;
                     case ERROR:
                         Logit.log("ProtoSender error recieved Unsubscribing to: " + replyTo);

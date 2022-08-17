@@ -16,50 +16,75 @@ import java.util.Map;
 
 public class ProtoServiceManager {
 
-    private class MappedClientStream implements MPBufferObserver {
+    /**
+     * BufferObserver that just takes Buffer values and publishes them to replyTo with the correct type
+     * (NEXT, COMPLETED ...)
+     */
+    private class ServerBufferPublisher implements BufferObserver{
 
-        private final MPBufferObserver serviceClientStream;
-        private final String streamId;
+        private final String replyTo;
 
-        private MappedClientStream(MPBufferObserver serviceClientStream, String streamId) {
-            this.serviceClientStream = serviceClientStream;
-            this.streamId = streamId;
+        private ServerBufferPublisher(String replyTo) {
+            this.replyTo = replyTo;
         }
 
         @Override
         public void onNext(ByteString value) {
-            serviceClientStream.onNext(value);
+            MqttProtoReply reply = MqttProtoReply.newBuilder()
+                    .setMessage(value)
+                    .setType(MqttPType.NEXT).build();
+            try {
+                client.publish(replyTo, reply.toByteArray(), 1, false);
+            } catch (MqttException e) {
+                throw new RuntimeException(e);
+            }
         }
 
+        @Override
+        public void onSingle(ByteString value) {
+            MqttProtoReply reply = MqttProtoReply.newBuilder()
+                    .setMessage(value)
+                    .setType(MqttPType.SINGLE).build();
+            try {
+                client.publish(replyTo, reply.toByteArray(), 1, false);
+            } catch (MqttException e) {
+                throw new RuntimeException(e);
+            }
+        }
 
         @Override
         public void onCompleted() {
-            serviceClientStream.onCompleted();
-            //TODO: What if the client dies and never calls onLast. Then this object and the serviceInputStream
-            //will leak. Put in something that can pick up the LWT of clients (like in IoT) and then remove
-            //all MappedInputStreams associated with that client.
-            //Maybe this can be propagated to here via the onError which will remove it anyway
-            ProtoServiceManager.this.streamIdToClientStream.remove(this.streamId);
+            MqttProtoReply reply = MqttProtoReply.newBuilder()
+                    .setType(MqttPType.COMPLETED).build();
+            try {
+                client.publish(replyTo, reply.toByteArray(), 1, false);
+            } catch (MqttException e) {
+                throw new RuntimeException(e);
+            }
         }
+
 
         @Override
         public void onError(ByteString error) {
-            serviceClientStream.onError(error);
-            ProtoServiceManager.this.streamIdToClientStream.remove(this.streamId);
+            //TODO: Handle error - send it on to the broker
+            try {
+                Logit.error(Status.parseFrom(error).toString());
+            } catch (InvalidProtocolBufferException e) {
+                Logit.error("Failed to parse error");
+            }
         }
+
+
     }
+
 
     private final MqttAsyncClient client;
 
-    private final Map<String, MappedClientStream> streamIdToClientStream = new HashMap<>();
+    private final Map<String, BufferObserver> streamIdToClientBufferObserver = new HashMap<>();
 
     public ProtoServiceManager(MqttAsyncClient client) {
         this.client = client;
     }
-
-
-
-
 
 
    public void subscribeService(String serviceBaseTopic, MqttProtoService mqttProtoService) throws Exception{
@@ -83,52 +108,18 @@ public class ProtoServiceManager {
                 String streamId = request.getStreamId();
 
                 if(request.getType() == MqttPType.REQUEST) {
-                    MPBufferObserver clientStream = mqttProtoService.onProtoRequest(method, params, new MPBufferObserver() {
-                        @Override
-                        public void onNext(ByteString value) {
-                            MqttProtoReply reply = MqttProtoReply.newBuilder()
-                                    .setMessage(value)
-                                    .setType(MqttPType.NEXT).build();
-                            try {
-                                client.publish(replyTo, reply.toByteArray(), 1, false);
-                            } catch (MqttException e) {
-                                throw new RuntimeException(e);
-                            }
-                        }
+                    BufferObserver clientBufferObserver = mqttProtoService.onProtoRequest(method, params,
+                            new ServerBufferPublisher(replyTo));
 
-
-                        @Override
-                        public void onCompleted() {
-                            MqttProtoReply reply = MqttProtoReply.newBuilder()
-                                    .setType(MqttPType.COMPLETED).build();
-                            try {
-                                client.publish(replyTo, reply.toByteArray(), 1, false);
-                            } catch (MqttException e) {
-                                throw new RuntimeException(e);
-                            }
-                        }
-
-                        @Override
-                        public void onError(ByteString error) {
-                            //TODO: Handle error
-                            try {
-                                Logit.error(Status.parseFrom(error).toString());
-                            } catch (InvalidProtocolBufferException e) {
-                                Logit.error("Failed to parse error");
-                            }
-                        }
-
-                    });
-
-                    if (clientStream != null) {
+                    if (clientBufferObserver != null) {
                         if (streamId.isEmpty()) {
                             //TODO: Send error to client. Client must supply streamId if the service has an input stream
                             Logit.error("No streamId supplied for client stream request");
                             return;
                         }
-                        //Store the input stream so that we can send later messages to it.
+                        //Store the input stream so that we can send later messages to it if they have the same streamId
                         Logit.log("Setting up MappedInputStream for " + streamId);
-                        streamIdToClientStream.put(streamId, new MappedClientStream(clientStream, streamId));
+                        streamIdToClientBufferObserver.put(streamId, clientBufferObserver);
                     }
 
                 } else {
@@ -139,27 +130,31 @@ public class ProtoServiceManager {
                         return;
                     }
                     //Get the corresponding stream and send on the message
-                    final MappedClientStream mappedClientStream = streamIdToClientStream.get(streamId);
-                    if (mappedClientStream == null) {
+                    final BufferObserver clientBufferObserver = streamIdToClientBufferObserver.get(streamId);
+                    if (clientBufferObserver == null) {
                         //TODO: log error, this should not occur
                         Logit.error("Can't find stream for: " + streamId);
                         return;
                     }
                     switch (request.getType()) {
                         case NEXT:
-                            mappedClientStream.onNext(request.getMessage());
+                            clientBufferObserver.onNext(request.getMessage());
+                            break;
+                        case SINGLE:
+                            clientBufferObserver.onSingle(request.getMessage());
+                            streamIdToClientBufferObserver.remove(streamId);
                             break;
                         case COMPLETED:
                             //TODO: This also needs to be removed if the client gets disconnected
                             Logit.log("Completed received. Removing MappedClientStream for " + streamId);
-                            streamIdToClientStream.remove(streamId);
-                            mappedClientStream.onCompleted();
+                            streamIdToClientBufferObserver.remove(streamId);
+                            clientBufferObserver.onCompleted();
                             break;
                         case ERROR:
                             Logit.error("Received error in client stream");
                             Logit.log("Removing MappedClientStream for " + streamId);
-                            streamIdToClientStream.remove(streamId);
-                            mappedClientStream.onError(request.getMessage());
+                            streamIdToClientBufferObserver.remove(streamId);
+                            clientBufferObserver.onError(request.getMessage());
                             break;
                         default:
                             Logit.error("Unhandled message type");

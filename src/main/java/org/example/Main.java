@@ -1,7 +1,9 @@
 package org.example;
 
+import com.example.tutorial.protos.AddressBook;
 import com.example.tutorial.protos.Person;
 import com.example.tutorial.protos.SomeRequestOrReplyValue;
+import io.grpc.stub.StreamObserver;
 import org.eclipse.paho.client.mqttv3.*;
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
 
@@ -54,21 +56,36 @@ public class Main {
         String serviceBaseTopic = "addressservice";
         ProtoServiceManager protoServiceManager = new ProtoServiceManager(serverMqttClient);
         AddressService service = new AddressService();
-        AddressStub stub = new AddressStub(service);
+        AddressSkeleton stub = new AddressSkeleton(service);
         protoServiceManager.subscribeService(serviceBaseTopic, stub);
 
 
         //Set up client
         ProtoSender protoSender = new ProtoSender(clientMqttClient, serviceBaseTopic);
-        AddressProxy proxy = new AddressProxy(protoSender);
-        SomeRequestOrReplyValue SomeRequestOrReplyValue = proxy.handlePerson(person);
-        Logit.log("Received reply: " + SomeRequestOrReplyValue.toString());
+        AddressStub proxy = new AddressStub(protoSender);
+        StreamWaiter<SomeRequestOrReplyValue> waiter =  new StreamWaiter<>();
+        proxy.handlePerson(person, waiter);
+        try {
+            Logit.log("Received reply: " + waiter.getSingle().toString());
+        } catch (Throwable t){
+            Logit.error("Failed to get single value");
+            Logit.error(t);
+        }
+
+        waiter =  new StreamWaiter<>();
+        proxy.handleAddress(AddressBook.newBuilder().build(), waiter);
+        try {
+            Logit.log("Received address reply: " + waiter.getSingle().toString());
+        } catch (Throwable t){
+            Logit.error("Failed to get single value");
+            Logit.error(t);
+        }
 
 
         final CountDownLatch latch = new CountDownLatch(1);
 
         SomeRequestOrReplyValue reqVal = SomeRequestOrReplyValue.newBuilder().setTheVal("A request value for the stream").build();
-        proxy.serverStreamPersons(reqVal, new MPStreamObserver<Person>() {
+        proxy.serverStreamPersons(reqVal, new StreamObserver<Person>() {
             @Override
             public void onNext(Person value) {
                 Logit.log("Received stream value: " + value.getName());
@@ -90,7 +107,7 @@ public class Main {
 
 
         final CountDownLatch latch2 = new CountDownLatch(1);
-        MPStreamObserver<Person> inputStream = proxy.clientStreamPersons(new MPStreamObserver<com.example.tutorial.protos.SomeRequestOrReplyValue>() {
+        StreamObserver<Person> inputStream = proxy.clientStreamPersons(new StreamObserver<com.example.tutorial.protos.SomeRequestOrReplyValue>() {
             @Override
             public void onNext(com.example.tutorial.protos.SomeRequestOrReplyValue value) {
                 Logit.log("Server returned: " + value.getTheVal());

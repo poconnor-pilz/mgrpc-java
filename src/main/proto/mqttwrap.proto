@@ -13,8 +13,10 @@ enum MqttPType{
   REQUEST = 1;
   //Next message in stream
   NEXT = 2;
+  //Single message in stream
+  SINGLE = 3;
   //Stream completed
-  COMPLETED = 3;
+  COMPLETED = 4;
 }
 
 message MqttProtoRequest {

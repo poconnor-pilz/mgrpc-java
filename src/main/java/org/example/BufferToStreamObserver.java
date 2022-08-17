@@ -4,12 +4,13 @@ import com.google.protobuf.ByteString;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.protobuf.Parser;
 import com.pilz.mqttwrap.Status;
+import io.grpc.stub.StreamObserver;
 
-class BufferToStreamObserver<T> implements MPBufferObserver {
+class BufferToStreamObserver<T> implements BufferObserver {
     final Parser<T> parser;
-    final MPStreamObserver<T> streamObserver;
+    final StreamObserver<T> streamObserver;
 
-    BufferToStreamObserver(Parser<T> parser, MPStreamObserver<T> streamObserver) {
+    BufferToStreamObserver(Parser<T> parser, StreamObserver<T> streamObserver) {
         this.parser = parser;
         this.streamObserver = streamObserver;
     }
@@ -26,6 +27,19 @@ class BufferToStreamObserver<T> implements MPBufferObserver {
 
 
     public void onCompleted(){
+        streamObserver.onCompleted();
+    }
+
+    @Override
+    public void onSingle(ByteString value) {
+        //If there is a single value in a stream  then send the streamObserver
+        //an onNext() followed by an onCompleted(). Using onSingle means that every request/response can
+        //be completed with two mqtt messages instead of three.
+        try {
+            streamObserver.onNext(parser.parseFrom(value));
+        } catch (InvalidProtocolBufferException e) {
+            Logit.error(e);
+        }
         streamObserver.onCompleted();
     }
 

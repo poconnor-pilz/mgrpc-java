@@ -1,18 +1,21 @@
 package org.example;
 
 import com.google.protobuf.MessageLite;
+import io.grpc.stub.StreamObserver;
 
-public class StreamToBufferObserver<T extends MessageLite> implements MPStreamObserver<T> {
 
-    private final MPBufferObserver replyListener;
+public class StreamToBufferObserver<T extends MessageLite> implements StreamObserver<T> {
 
-    public StreamToBufferObserver(MPBufferObserver bufferObserver) {
-        this.replyListener = bufferObserver;
+
+    private final BufferObserver bufferObserver;
+
+    public StreamToBufferObserver(BufferObserver bufferObserver) {
+        this.bufferObserver = bufferObserver;
     }
 
     @Override
     public void onNext(T value) {
-        replyListener.onNext(value.toByteString());
+        bufferObserver.onNext(value.toByteString());
     }
 
     @Override
@@ -26,6 +29,7 @@ public class StreamToBufferObserver<T extends MessageLite> implements MPStreamOb
 
     @Override
     public void onCompleted() {
-        replyListener.onCompleted();
+        bufferObserver.onCompleted();
     }
+
 }

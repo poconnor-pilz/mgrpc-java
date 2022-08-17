@@ -1,8 +1,9 @@
 package org.example;
 
 import com.google.protobuf.MessageLite;
+import io.grpc.stub.StreamObserver;
 
-public class StreamObserverToSender<T extends MessageLite> implements MPStreamObserver<T>  {
+public class StreamObserverToSender<T extends MessageLite> implements StreamObserver<T> {
 
     private final ProtoSender protoSender;
     private final String method;
@@ -17,7 +18,7 @@ public class StreamObserverToSender<T extends MessageLite> implements MPStreamOb
     @Override
     public void onNext(T value) {
         try {
-            protoSender.sendNextStreamValue(method, streamId, value);
+            protoSender.sendClientStreamNext(method, streamId, value);
         } catch (Exception e) {
             //TODO: handle error
             e.printStackTrace();
@@ -28,7 +29,7 @@ public class StreamObserverToSender<T extends MessageLite> implements MPStreamOb
     public void onError(Throwable t) {
         try {
             //TODO encode the exeption as a protobuf
-            protoSender.sendErrorToStream(method, streamId, t.getMessage());
+            protoSender.sendClientStreamError(method, streamId, t.getMessage());
         } catch (Exception e) {
             //TODO: handle error
             e.printStackTrace();
@@ -40,7 +41,7 @@ public class StreamObserverToSender<T extends MessageLite> implements MPStreamOb
     @Override
     public void onCompleted() {
         try {
-            protoSender.sendCompleted(method, streamId);
+            protoSender.sendClientStreamCompleted(method, streamId);
         } catch (Exception e) {
             //TODO: handle error
             e.printStackTrace();

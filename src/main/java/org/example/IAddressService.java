@@ -3,6 +3,7 @@ package org.example;
 import com.example.tutorial.protos.AddressBook;
 import com.example.tutorial.protos.Person;
 import com.example.tutorial.protos.SomeRequestOrReplyValue;
+import io.grpc.stub.StreamObserver;
 
 public interface IAddressService {
 
@@ -14,14 +15,14 @@ public interface IAddressService {
     String METHOD_CLIENT_STREAM_PERSONS = "clientStreamPersons";
 
     //Single in, single out
-    SomeRequestOrReplyValue handlePerson(Person person) throws Exception;
+    void handlePerson(Person person, StreamObserver<SomeRequestOrReplyValue> replyStream) throws Exception;
 
-    SomeRequestOrReplyValue handleAddress(AddressBook book) throws Exception;
+    void handleAddress(AddressBook book, StreamObserver<SomeRequestOrReplyValue> replyStream) throws Exception;
 
     //Single in, stream out
-    void serverStreamPersons(SomeRequestOrReplyValue requestVal, MPStreamObserver<Person> personStream)
+    void serverStreamPersons(SomeRequestOrReplyValue requestVal, StreamObserver<Person> personStream)
             throws Exception;
 
     //Stream in, single out
-    MPStreamObserver<Person> clientStreamPersons(MPStreamObserver<SomeRequestOrReplyValue> responseStream) throws Exception;
+    StreamObserver<Person> clientStreamPersons(StreamObserver<SomeRequestOrReplyValue> responseStream) throws Exception;
 }
