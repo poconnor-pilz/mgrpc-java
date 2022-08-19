@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package com.pilz.mqttgrpc;
+
+option java_multiple_files = true;
+option java_package = "com.pilz.mqttgrpc";
+option java_outer_classname = "MqttGrpc";
+
+enum MqttGrpcType{
+  //An error message
+  ERROR = 0;
+  //Request
+  REQUEST = 1;
+  //Next message in stream
+  NEXT = 2;
+  //Single message in stream
+  SINGLE = 3;
+  //Stream completed
+  COMPLETED = 4;
+}
+
+message MqttGrpcRequest {
+  //message type
+  MqttGrpcType type = 1;
+  //The message payload encoded as a protocol buffer
+  bytes message = 2;
+  //Topic to reply to. If this message is a request then replyTo must be set. Otherwise this message is part of a
+  //is part of an input stream (client side stream)
+  string replyTo = 3;
+  //If this message is part of an input stream (client side stream) then streamId will contain a uuid that identifies it.
+  string streamId = 4;
+}
+
+message MqttGrpcResponse {
+  //Message type
+  MqttGrpcType type = 1;
+  //The message payload encoded as a protocol buffer
+  bytes message = 2;
+}
+
+
+//This will be used to encode an error in the request.message or reply.message
+//It matches a grpc.io.Status but we can't use that as it is not defined as a protobuf
+message MqttGrpcStatus{
+  int32 code = 1;
+  string description = 2;
+}

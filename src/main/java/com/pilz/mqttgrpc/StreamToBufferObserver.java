@@ -1,16 +1,20 @@
-package org.example;
+package com.pilz.mqttgrpc;
 
 import com.google.protobuf.ByteString;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.protobuf.Parser;
-import com.pilz.mqttwrap.Status;
+import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
 import io.grpc.stub.StreamObserver;
 
-class BufferToStreamObserver<T> implements BufferObserver {
+/**
+ * Convert a StreamObserver to a BufferObserver
+ */
+public class StreamToBufferObserver<T> implements BufferObserver {
     final Parser<T> parser;
     final StreamObserver<T> streamObserver;
 
-    BufferToStreamObserver(Parser<T> parser, StreamObserver<T> streamObserver) {
+    public StreamToBufferObserver(Parser<T> parser, StreamObserver<T> streamObserver) {
         this.parser = parser;
         this.streamObserver = streamObserver;
     }
@@ -45,15 +49,14 @@ class BufferToStreamObserver<T> implements BufferObserver {
 
     @Override
     public void onError(ByteString error) {
-        //TODO: Handle error
-        Logit.error("Error");
-        Status status = Status.newBuilder().setCode(500).setDescription("Could not parse error").build();
+
+        Status status = Status.UNKNOWN.withDescription("Could not parse error");
         try {
-            status = Status.parseFrom(error);
+            status = StatusConv.toStatus(MqttGrpcStatus.parseFrom(error));
         } catch (InvalidProtocolBufferException e) {
-            Logit.error("Failed to parse error");
+            streamObserver.onError(new StatusRuntimeException(status));
         }
-        streamObserver.onError(new Throwable(status.getDescription()));
+        streamObserver.onError(new StatusRuntimeException(status));
     }
 
 

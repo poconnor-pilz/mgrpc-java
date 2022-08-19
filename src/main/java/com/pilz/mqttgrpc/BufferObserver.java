@@ -1,4 +1,4 @@
-package org.example;
+package com.pilz.mqttgrpc;
 
 import com.google.protobuf.ByteString;
 

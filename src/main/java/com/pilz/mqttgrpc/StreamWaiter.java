@@ -1,4 +1,4 @@
-package org.example;
+package com.pilz.mqttgrpc;
 
 import io.grpc.stub.StreamObserver;
 
@@ -68,12 +68,13 @@ public class StreamWaiter<V> implements StreamObserver<V> {
      */
     public V getSingle() throws Throwable{
         List<V> vals = getList();
-        if(vals.size() > 1){
-            throw new Exception("More than one value received");
-        } else if(vals.size() == 0){
-            throw new Exception("No values received");
-        } else {
+        if(vals.size() == 1){
             return vals.get(0);
+        }
+        if(vals.size() == 0){
+            throw new Exception("No values received.");
+        } else {
+            throw new Exception("More than one value received");
         }
     }
 }

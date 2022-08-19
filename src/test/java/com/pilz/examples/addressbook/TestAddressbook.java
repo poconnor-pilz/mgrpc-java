@@ -1,22 +1,31 @@
-package org.example;
+package com.pilz.examples.addressbook;
 
 import com.example.tutorial.protos.AddressBook;
 import com.example.tutorial.protos.Person;
 import com.example.tutorial.protos.SomeRequestOrReplyValue;
+import com.pilz.mqttgrpc.Logit;
+import com.pilz.mqttgrpc.ProtoSender;
+import com.pilz.mqttgrpc.ProtoServiceManager;
+import com.pilz.mqttgrpc.StreamWaiter;
 import io.grpc.stub.StreamObserver;
-import org.eclipse.paho.client.mqttv3.*;
+import lombok.extern.slf4j.Slf4j;
+import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
+import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
+import org.eclipse.paho.client.mqttv3.MqttException;
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
+import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.CountDownLatch;
 
-public class Main {
-    public static void main(String[] args) throws Exception {
-        new Main().run();
-    }
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
+@Slf4j
+public class TestAddressbook {
 
-    public Main() {
-
+    @Test
+    public void test1(){
+        log.debug("*****************************");
+        assertEquals(1,1);
     }
 
     private MqttAsyncClient makeClient(){
@@ -36,6 +45,7 @@ public class Main {
 
     }
 
+    @Test
     public void run() throws Exception{
         Person person =
                 Person.newBuilder()
@@ -107,7 +117,7 @@ public class Main {
 
 
         final CountDownLatch latch2 = new CountDownLatch(1);
-        StreamObserver<Person> inputStream = proxy.clientStreamPersons(new StreamObserver<com.example.tutorial.protos.SomeRequestOrReplyValue>() {
+        StreamObserver<Person> clientStream = proxy.clientStreamPersons(new StreamObserver<com.example.tutorial.protos.SomeRequestOrReplyValue>() {
             @Override
             public void onNext(com.example.tutorial.protos.SomeRequestOrReplyValue value) {
                 Logit.log("Server returned: " + value.getTheVal());
@@ -126,9 +136,9 @@ public class Main {
         });
 
 
-        inputStream.onNext(person);
-        inputStream.onNext(person);
-        inputStream.onCompleted();
+        clientStream.onNext(person);
+        clientStream.onNext(person);
+        clientStream.onCompleted();
 
         latch2.await();
 
@@ -138,8 +148,4 @@ public class Main {
         clientMqttClient.close();
 
     }
-
-
-
-
 }

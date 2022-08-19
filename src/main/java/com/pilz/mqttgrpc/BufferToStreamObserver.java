@@ -1,15 +1,21 @@
-package org.example;
+package com.pilz.mqttgrpc;
 
 import com.google.protobuf.MessageLite;
+import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
+import lombok.extern.slf4j.Slf4j;
 
 
-public class StreamToBufferObserver<T extends MessageLite> implements StreamObserver<T> {
+@Slf4j
+/**
+ * Convert a BufferObserver to a StreamObserver
+ */
+public class BufferToStreamObserver<T extends MessageLite> implements StreamObserver<T> {
 
 
     private final BufferObserver bufferObserver;
 
-    public StreamToBufferObserver(BufferObserver bufferObserver) {
+    public BufferToStreamObserver(BufferObserver bufferObserver) {
         this.bufferObserver = bufferObserver;
     }
 
@@ -20,10 +26,8 @@ public class StreamToBufferObserver<T extends MessageLite> implements StreamObse
 
     @Override
     public void onError(Throwable t) {
-        Logit.error(t);
-        //TODO: do something like this
-        //replyListener.onError(new ByteString(t.getMessage()));
-
+        log.error("", t);
+        bufferObserver.onError(StatusConv.toBuffer(Status.UNKNOWN.withCause(t)).toByteString());
     }
 
 

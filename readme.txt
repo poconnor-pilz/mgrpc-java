@@ -77,6 +77,11 @@ This describes what is happening on the wire in detail (Chapter 4. gRPC under th
 https://www.oreilly.com/library/view/grpc-up-and/9781492058328/ch04.html
 Also the diagrams in this are useful for showing what the streams look like on http/2 (ignore the code it's just the implementation of the route example in ballerina)
 https://thenewstack.io/grpc-a-deep-dive-into-the-communication-pattern/
+Error handling:
+https://www.baeldung.com/grpcs-error-handling
+https://techdozo.dev/getting-error-handling-right-in-grpc/
+https://www.grpc.io/docs/guides/error/
+Note that the google stubs favour StatusRuntimeException - probably just copy this for the moment but we could change that.
 
 
 Effectively each method has an input and output stream because of how grpc is implemented over http/2 so there are only 4 types of method. The only place where this two stream restriction causes problems is for the stream in stuff. It would be nice to be able to pass a parameter here also that says things about what you are streaming in. But input streams are unusual enough and you can handle it by putting an optional object in the first message that has the parameters for the rest of the stream:

@@ -1,19 +1,24 @@
-package org.example;
+package com.pilz.mqttgrpc;
 
 import com.google.protobuf.MessageLite;
+import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
+import lombok.extern.slf4j.Slf4j;
+
 /**
+ * Convert a BufferObserver to a StreamObserver where the StreamObserver sends only one value.
  * Use this class for service methods that are expected to only send a single response.
  * It will be more effcient than using a StreamToBufferObserver as it will only send
  * one onSingle message for the response (instead of onNext and onCompleted)
  * @param <T>
  */
-public class SingleToBufferObserver<T extends MessageLite> implements StreamObserver<T> {
+@Slf4j
+public class SingleToStreamObserver<T extends MessageLite> implements StreamObserver<T> {
 
     private final BufferObserver bufferObserver;
     private boolean receivedOne = false;
 
-    public SingleToBufferObserver(BufferObserver bufferObserver) {
+    public SingleToStreamObserver(BufferObserver bufferObserver) {
         this.bufferObserver = bufferObserver;
     }
 
@@ -29,10 +34,8 @@ public class SingleToBufferObserver<T extends MessageLite> implements StreamObse
 
     @Override
     public void onError(Throwable t) {
-        Logit.error(t);
-        //TODO: do something like this
-        //replyListener.onError(new ByteString(t.getMessage()));
-
+        log.error("", t);
+        bufferObserver.onError(StatusConv.toBuffer(Status.UNKNOWN.withCause(t)).toByteString());
     }
 
 
