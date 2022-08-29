@@ -12,7 +12,6 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import static java.lang.Math.*;
-import static java.lang.Math.sqrt;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 
 public class RouteGuideService implements IRouteGuideService {

@@ -130,36 +130,33 @@ public class ProtoSender {
     private String subscribeForReplies(String method, BufferObserver protoListener) throws MqttException{
         final String replyTo = serviceBaseTopic + '/' + Consts.OUT + '/' + method + '/' + Base64Utils.randomId();
         Logit.log("ProtoSender subscribing for reply on: " + replyTo);
-        final IMqttMessageListener messageListener = new IMqttMessageListener() {
-            @Override
-            public void messageArrived(String topic, MqttMessage message) throws Exception {
-                Logit.log("ProtoSender received reply on: " + topic);
-                //TODO: catch parsing exception here
-                MqttGrpcResponse response = MqttGrpcResponse.parseFrom(message.getPayload());
-                switch(response.getType()){
-                    case NEXT:
-                        protoListener.onNext(response.getMessage());
-                        break;
-                    case SINGLE:
-                        protoListener.onSingle(response.getMessage());
-                        //This is the only message in the stream so unsubscribe
-                        client.unsubscribe(replyTo);
-                        break;
-                    case ERROR:
-                        Logit.log("ProtoSender error recieved Unsubscribing to: " + replyTo);
-                        client.unsubscribe(replyTo);
-                        protoListener.onError(response.getMessage());
-                        break;
-                    case COMPLETED:
-                        Logit.log("ProtoSender completed received Unsubscribing to: " + replyTo);
-                        client.unsubscribe(replyTo);
-                        protoListener.onCompleted();
-                        break;
-                    default:
-                        Logit.error("Unhandled message type");
-                }
+        final IMqttMessageListener messageListener = new MqttExceptionLogger((String topic, MqttMessage message)->{
+            Logit.log("ProtoSender received reply on: " + topic);
+            //TODO: catch parsing exception here
+            MqttGrpcResponse response = MqttGrpcResponse.parseFrom(message.getPayload());
+            switch(response.getType()){
+                case NEXT:
+                    protoListener.onNext(response.getMessage());
+                    break;
+                case SINGLE:
+                    protoListener.onSingle(response.getMessage());
+                    //This is the only message in the stream so unsubscribe
+                    client.unsubscribe(replyTo);
+                    break;
+                case ERROR:
+                    Logit.log("ProtoSender error recieved Unsubscribing to: " + replyTo);
+                    client.unsubscribe(replyTo);
+                    protoListener.onError(response.getMessage());
+                    break;
+                case COMPLETED:
+                    Logit.log("ProtoSender completed received Unsubscribing to: " + replyTo);
+                    client.unsubscribe(replyTo);
+                    protoListener.onCompleted();
+                    break;
+                default:
+                    Logit.error("Unhandled message type");
             }
-        };
+        });
         client.subscribe(replyTo, 1, messageListener).waitForCompletion(SUBSCRIPTION_TIMEOUT_MILLIS); //TODO: check for timeout
         return replyTo;
     }

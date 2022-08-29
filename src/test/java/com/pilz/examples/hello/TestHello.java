@@ -1,10 +1,9 @@
 package com.pilz.examples.hello;
 
-import com.pilz.examples.mqttutils.MqttUtils;
 import com.pilz.mqttgrpc.ProtoSender;
 import com.pilz.mqttgrpc.ProtoServiceManager;
-import com.pilz.mqttgrpc.StreamIterator;
 import com.pilz.mqttgrpc.StreamWaiter;
+import com.pilz.utils.MqttUtils;
 import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.stub.StreamObserver;
@@ -104,7 +103,7 @@ public class TestHello {
         List<HelloReply> responseList = waiter.getList();
         assertEquals(responseList.size(), 2);
         assertEquals("Hello joe", responseList.get(0).getMessage());
-        assertEquals("Hello joe", responseList.get(1).getMessage());
+        assertEquals("Hello again joe", responseList.get(1).getMessage());
 
     }
 
@@ -194,7 +193,7 @@ public class TestHello {
         }
         assertEquals(responseList.size(), 2);
         assertEquals("Hello joe", responseList.get(0).getMessage());
-        assertEquals("Hello joe", responseList.get(1).getMessage());
+        assertEquals("Hello again joe", responseList.get(1).getMessage());
 
     }
 

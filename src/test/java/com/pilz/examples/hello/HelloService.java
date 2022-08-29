@@ -27,9 +27,10 @@ public class HelloService implements IHelloService {
     @Override
     public void serverStream(HelloRequest request, StreamObserver<HelloReply> multipleResponses) {
         HelloReply reply = HelloReply.newBuilder().setMessage("Hello " + request.getName()).build();
+        HelloReply reply2 = HelloReply.newBuilder().setMessage("Hello again " + request.getName()).build();
         //Send the same response twice in the stream
         multipleResponses.onNext(reply);
-        multipleResponses.onNext(reply);
+        multipleResponses.onNext(reply2);
         multipleResponses.onCompleted();
     }
 

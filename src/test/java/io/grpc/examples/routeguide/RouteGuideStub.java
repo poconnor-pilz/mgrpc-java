@@ -1,8 +1,8 @@
 package io.grpc.examples.routeguide;
 
+import com.pilz.mqttgrpc.ProtoSender;
 import com.pilz.mqttgrpc.StreamToBufferObserver;
 import io.grpc.stub.StreamObserver;
-import com.pilz.mqttgrpc.ProtoSender;
 
 public class RouteGuideStub implements IRouteGuideService{
 

@@ -1,4 +1,4 @@
-package com.pilz.examples.mqttutils;
+package com.pilz.utils;
 
 import io.moquette.broker.Server;
 import io.moquette.broker.config.ClasspathResourceLoader;
@@ -14,7 +14,6 @@ import org.eclipse.paho.client.mqttv3.MqttException;
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
 
 import java.io.IOException;
-import java.util.Collections;
 import java.util.List;
 
 import static java.nio.charset.StandardCharsets.UTF_8;

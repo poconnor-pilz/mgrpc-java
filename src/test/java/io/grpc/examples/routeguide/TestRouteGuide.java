@@ -1,20 +1,13 @@
-package com.pilz.examples.routeguide;
+package io.grpc.examples.routeguide;
 
 import com.pilz.mqttgrpc.ProtoSender;
 import com.pilz.mqttgrpc.ProtoServiceManager;
-import io.grpc.examples.routeguide.RouteGuideService;
-import io.grpc.examples.routeguide.RouteGuideSkeleton;
-import io.grpc.examples.routeguide.RouteGuideStub;
-import io.grpc.examples.routeguide.RouteGuideUtil;
+import com.pilz.utils.MqttUtils;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
-import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
 import org.eclipse.paho.client.mqttv3.MqttException;
-import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
-
-import com.pilz.examples.mqttutils.MqttUtils;
 
 import java.io.IOException;
 
