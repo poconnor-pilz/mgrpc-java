@@ -4,10 +4,10 @@ import io.grpc.stub.StreamObserver;
 
 public interface IRouteGuideService {
 
-    String METHOD_GET_FEATURE = "getFeature";
-    String METHOD_LIST_FEATURES = "listFeatures";
-    String METHOD_RECORD_ROUTE = "recordRoute";
-    String METHOD_ROUTE_CHAT = "routeChat";
+    String GET_FEATURE = "getFeature";
+    String LIST_FEATURES = "listFeatures";
+    String RECORD_ROUTE = "recordRoute";
+    String ROUTE_CHAT = "routeChat";
 
     void getFeature(Point request, StreamObserver<Feature> responseObserver) throws Exception;
 

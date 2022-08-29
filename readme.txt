@@ -71,6 +71,8 @@ TODO: Refactor watch protocol to use grpc like semantics as google does with the
 
 TODO: How do we implement stream cancellation?
 
+TODO: pubsub. First this will only work with mqtt. It won't work locally. So the Service implementation will need an mqtt connection. Then we will make a general subscription client with the method subscribe(String topic, StreamObserver<V> responseObserver). Then we make the actual service like a WatchService. This just has request response methods for making watches and in the request is the response topic for the watch values. These can be batched etc. Note that when something unsubscribes it should probably get an onCompleted() in order to maintain the semantics of grpc and allow it to clean up or whatever.
+
 grpc core documented here:
 https://grpc.io/docs/what-is-grpc/core-concepts/
 This describes what is happening on the wire in detail (Chapter 4. gRPC under the hood. (Also in c:\books))

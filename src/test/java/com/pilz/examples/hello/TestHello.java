@@ -1,20 +1,23 @@
 package com.pilz.examples.hello;
 
+import com.pilz.examples.mqttutils.MqttUtils;
 import com.pilz.mqttgrpc.ProtoSender;
 import com.pilz.mqttgrpc.ProtoServiceManager;
+import com.pilz.mqttgrpc.StreamIterator;
 import com.pilz.mqttgrpc.StreamWaiter;
 import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.stub.StreamObserver;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
-import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
 import org.eclipse.paho.client.mqttv3.MqttException;
-import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -24,16 +27,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 public class TestHello {
 
 
-    private static MqttAsyncClient makeClient() throws MqttException{
-        final MqttAsyncClient client;
-        client = new MqttAsyncClient(
-                "tcp://localhost:1883",
-                MqttAsyncClient.generateClientId(),
-                new MemoryPersistence());
-        MqttConnectOptions mqttConnectOptions = new MqttConnectOptions();
-        client.connect(mqttConnectOptions).waitForCompletion();
-        return client;
-    }
 
 
     private static MqttAsyncClient serverMqtt;
@@ -43,21 +36,24 @@ public class TestHello {
     private HelloStub stub;
 
 
-
     @BeforeAll
-    public static void makeMqttClients() throws MqttException {
-        serverMqtt = makeClient();
-        clientMqtt = makeClient();
+    public static void startBrokerAndClients() throws MqttException, IOException {
+
+        MqttUtils.startEmbeddedBroker();
+
+        serverMqtt = MqttUtils.makeClient();
+        clientMqtt = MqttUtils.makeClient();
     }
 
     @AfterAll
-    public static void closeMqttClients() throws MqttException {
+    public static void stopClientsAndBroker() throws MqttException {
         serverMqtt.disconnect();
         serverMqtt.close();
         serverMqtt = null;
         clientMqtt.disconnect();
         clientMqtt.close();
         clientMqtt = null;
+        MqttUtils.stopEmbeddedBroker();
     }
 
     @BeforeEach
@@ -174,6 +170,32 @@ public class TestHello {
         clientStreamObserver.onNext(jane);
         replyObserver.latch.await(10, TimeUnit.SECONDS);
         assertEquals("Hello jane", replyObserver.lastReply.getMessage());
+    }
+
+
+    @Test
+    public void testBlockingStub() throws Throwable{
+        //Test local and remote calls to the service
+        testBlockingStub(service);
+        testBlockingStub(stub);
+    }
+
+    public void testBlockingStub(IHelloService helloService) throws Throwable{
+
+        HelloBlockingStub blockingStub = new HelloBlockingStub(service);
+        HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
+        HelloReply reply = blockingStub.requestResponse(joe);
+        assertEquals("Hello joe", reply.getMessage());
+
+        List<HelloReply> responseList = new ArrayList<>();
+        final Iterator<HelloReply> helloReplyIterator = blockingStub.serverStream(joe);
+        while (helloReplyIterator.hasNext()) {
+            responseList.add(helloReplyIterator.next());
+        }
+        assertEquals(responseList.size(), 2);
+        assertEquals("Hello joe", responseList.get(0).getMessage());
+        assertEquals("Hello joe", responseList.get(1).getMessage());
+
     }
 
 

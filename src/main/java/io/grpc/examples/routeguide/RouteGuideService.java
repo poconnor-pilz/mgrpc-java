@@ -22,7 +22,7 @@ public class RouteGuideService implements IRouteGuideService {
 
     private static final Logger logger = Logger.getLogger(RouteGuideService.class.getName());
 
-    RouteGuideService(Collection<Feature> features) {
+    public RouteGuideService(Collection<Feature> features) {
         this.features = features;
     }
 

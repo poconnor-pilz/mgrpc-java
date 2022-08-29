@@ -24,12 +24,12 @@ public class HelloSkeleton implements Skeleton {
                 //It is not necessary to use this but it is more efficient. It will mean that one less
                 //mqtt message is sent compared to using BufferToStreamObserver.
                 service.requestResponse(HelloRequest.parseFrom(request), new SingleToStreamObserver<>(responseObserver));
-                break;
+                return null;
 
             case IHelloService.SERVER_STREAM:
                 //Use BufferToStreamObserver here because the server stream will have more than one response.
                 service.serverStream(HelloRequest.parseFrom(request), new BufferToStreamObserver<>(responseObserver));
-                break;
+                return null;
 
             case IHelloService.CLIENT_STREAM:
                 //Use StreamToBufferObserver to convert the client StreamObserver to a BufferObserver.
@@ -39,10 +39,9 @@ public class HelloSkeleton implements Skeleton {
             case IHelloService.CLIENT_AND_SERVER_STREAM:
                 return new StreamToBufferObserver<>(HelloRequest.parser(),
                         service.clientAndServerStream(new BufferToStreamObserver<>(responseObserver)));
+        }
 
-            default:
-                log.error("Unmatched method: " + method);
-        };
+        log.error("Unmatched method: " + method);
         return null;
     }
 }
