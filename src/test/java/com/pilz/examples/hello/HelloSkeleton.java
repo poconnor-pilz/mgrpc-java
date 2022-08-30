@@ -3,10 +3,11 @@ package com.pilz.examples.hello;
 import com.google.protobuf.ByteString;
 import com.pilz.mqttgrpc.*;
 import io.grpc.examples.helloworld.HelloRequest;
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-@Slf4j
 public class HelloSkeleton implements Skeleton {
+    private static Logger log = LoggerFactory.getLogger(HelloSkeleton.class);
 
     private final IHelloService service;
 

@@ -1,18 +1,18 @@
 package com.pilz.mqttgrpc;
 
 import com.google.protobuf.MessageLite;
-import io.grpc.Status;
-import io.grpc.StatusRuntimeException;
+import io.grpc.protobuf.StatusProto;
 import io.grpc.stub.StreamObserver;
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 
-@Slf4j
 /**
  * Convert a BufferObserver to a StreamObserver
  */
 public class BufferToStreamObserver<T extends MessageLite> implements StreamObserver<T> {
 
+    private static Logger log = LoggerFactory.getLogger(BufferToStreamObserver.class);
 
     private final BufferObserver bufferObserver;
 
@@ -27,12 +27,7 @@ public class BufferToStreamObserver<T extends MessageLite> implements StreamObse
 
     @Override
     public void onError(Throwable t) {
-        if(t instanceof StatusRuntimeException){
-            Status status = ((StatusRuntimeException)t).getStatus();
-            bufferObserver.onError(StatusConv.toBuffer(status).toByteString());
-        } else {
-            bufferObserver.onError(StatusConv.toBuffer(Status.UNKNOWN.withCause(t)).toByteString());
-        }
+        bufferObserver.onError(StatusProto.fromThrowable(t).toByteString());
     }
 
 

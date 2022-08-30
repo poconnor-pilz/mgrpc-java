@@ -1,10 +1,10 @@
 package com.pilz.mqttgrpc;
 
 import com.google.protobuf.MessageLite;
-import io.grpc.Status;
-import io.grpc.StatusRuntimeException;
+import io.grpc.protobuf.StatusProto;
 import io.grpc.stub.StreamObserver;
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Convert a BufferObserver to a StreamObserver where the StreamObserver sends only one value.
@@ -15,6 +15,7 @@ import lombok.extern.slf4j.Slf4j;
  */
 public class SingleToStreamObserver<T extends MessageLite> implements StreamObserver<T> {
 
+    private static Logger log = LoggerFactory.getLogger(SingleToStreamObserver.class);
     private final BufferObserver bufferObserver;
     private boolean receivedOne = false;
 
@@ -25,7 +26,7 @@ public class SingleToStreamObserver<T extends MessageLite> implements StreamObse
     @Override
     public void onNext(T value) {
         if(receivedOne){
-            Logit.error("Received more than one value for a stream that only expects one");
+            log.error("Received more than one value for a stream that only expects one");
         } else {
             receivedOne = true;
             bufferObserver.onSingle(value.toByteString());
@@ -34,12 +35,7 @@ public class SingleToStreamObserver<T extends MessageLite> implements StreamObse
 
     @Override
     public void onError(Throwable t) {
-        if(t instanceof StatusRuntimeException){
-            Status status = ((StatusRuntimeException)t).getStatus();
-            bufferObserver.onError(StatusConv.toBuffer(status).toByteString());
-        } else {
-            bufferObserver.onError(StatusConv.toBuffer(Status.UNKNOWN.withCause(t)).toByteString());
-        }
+        bufferObserver.onError(StatusProto.fromThrowable(t).toByteString());
     }
 
 

@@ -3,14 +3,15 @@ package com.pilz.mqttgrpc;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 import io.grpc.stub.StreamObserver;
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Iterator;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 
-@Slf4j
 public class StreamIterator<V> implements Iterator<V>, StreamObserver<V> {
+    private static Logger log = LoggerFactory.getLogger(StreamIterator.class);
 
     private static final int DEFAULT_QUEUE_BUFFER_SIZE = 10;
 

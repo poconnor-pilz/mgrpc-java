@@ -35,3 +35,12 @@ message HelloRequest {
 message HelloReply {
   string message = 1;
 }
+
+//Example rich error
+message HelloCustomError{
+  string hello_error_description = 1;
+  int32 hello_error_code = 2;
+}
+
+
+

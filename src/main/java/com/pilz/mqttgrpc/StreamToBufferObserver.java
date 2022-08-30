@@ -5,12 +5,16 @@ import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.protobuf.Parser;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
+import io.grpc.protobuf.StatusProto;
 import io.grpc.stub.StreamObserver;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Convert a StreamObserver to a BufferObserver
  */
 public class StreamToBufferObserver<T> implements BufferObserver {
+    private static Logger log = LoggerFactory.getLogger(StreamToBufferObserver.class);
     final Parser<T> parser;
     final StreamObserver<T> streamObserver;
 
@@ -25,7 +29,7 @@ public class StreamToBufferObserver<T> implements BufferObserver {
         try {
             streamObserver.onNext(parser.parseFrom(value));
         } catch (InvalidProtocolBufferException e) {
-            Logit.error(e);
+            log.error("Can't parse protobuf",e);
         }
     }
 
@@ -42,21 +46,19 @@ public class StreamToBufferObserver<T> implements BufferObserver {
         try {
             streamObserver.onNext(parser.parseFrom(value));
         } catch (InvalidProtocolBufferException e) {
-            Logit.error(e);
+            log.error("Can't parse protobuf", e);
         }
         streamObserver.onCompleted();
     }
 
     @Override
     public void onError(ByteString error) {
-
-        Status status = Status.UNKNOWN.withDescription("Could not parse error");
         try {
-            status = StatusConv.toStatus(MqttGrpcStatus.parseFrom(error));
+            final com.google.rpc.Status status = com.google.rpc.Status.parseFrom(error);
+            streamObserver.onError(StatusProto.toStatusRuntimeException(status));
         } catch (InvalidProtocolBufferException e) {
-            streamObserver.onError(new StatusRuntimeException(status));
+            streamObserver.onError(new StatusRuntimeException(Status.UNKNOWN.withDescription("Could not parse error")));
         }
-        streamObserver.onError(new StatusRuntimeException(status));
     }
 
 

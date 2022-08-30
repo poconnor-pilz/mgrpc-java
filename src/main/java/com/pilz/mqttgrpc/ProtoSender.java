@@ -1,17 +1,21 @@
 package com.pilz.mqttgrpc;
 
+import com.google.protobuf.ByteString;
 import com.google.protobuf.MessageLite;
 import com.pilz.mqttgrpc.MqttGrpcRequest.Builder;
 import io.grpc.Status;
+import io.grpc.protobuf.StatusProto;
 import org.eclipse.paho.client.mqttv3.IMqttMessageListener;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
-
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 
 public class ProtoSender {
 
+    private static Logger log = LoggerFactory.getLogger(ProtoSender.class);
 
     //TODO: Decrease this timeout
     public static final long REPLY_TIMEOUT_MILLIS = 100 * 1000;
@@ -69,12 +73,10 @@ public class ProtoSender {
      * @param streamId The stream id if the service method takes an input stream from the client otherwise null
      * @throws Exception
      */
-    public void sendClientStreamError(String method, String streamId, String error) throws MqttException{
-        //TODO: should this be UNKNOWN or should we encode our own or should the caller pass a Status?
-        Status status = io.grpc.Status.UNKNOWN.withDescription(error);
+    public void sendClientStreamError(String method, String streamId, ByteString error) throws MqttException{
         Builder request = MqttGrpcRequest.newBuilder()
                 .setType(MqttGrpcType.ERROR)
-                .setMessage(StatusConv.toBuffer(status).toByteString())
+                .setMessage(error)
                 .setStreamId(streamId);
         send(method, request);
     }
@@ -117,7 +119,8 @@ public class ProtoSender {
         } catch (MqttException e) {
             //TODO: should this be UNKNOWN or should we encode our own?
             Status status = io.grpc.Status.UNKNOWN.withDescription("Mqtt publish failed: " + e.getMessage());
-            responseObserver.onError(StatusConv.toBuffer(status).toByteString());
+            final com.google.rpc.Status status1 = StatusProto.fromStatusAndTrailers(status, null);
+            responseObserver.onError(status1.toByteString());
         }
     }
 
@@ -129,9 +132,9 @@ public class ProtoSender {
 
     private String subscribeForReplies(String method, BufferObserver protoListener) throws MqttException{
         final String replyTo = serviceBaseTopic + '/' + Consts.OUT + '/' + method + '/' + Base64Utils.randomId();
-        Logit.log("ProtoSender subscribing for reply on: " + replyTo);
+       log.debug("ProtoSender subscribing for responses on: " + replyTo);
         final IMqttMessageListener messageListener = new MqttExceptionLogger((String topic, MqttMessage message)->{
-            Logit.log("ProtoSender received reply on: " + topic);
+           log.debug("ProtoSender received response on: " + topic);
             //TODO: catch parsing exception here
             MqttGrpcResponse response = MqttGrpcResponse.parseFrom(message.getPayload());
             switch(response.getType()){
@@ -144,17 +147,17 @@ public class ProtoSender {
                     client.unsubscribe(replyTo);
                     break;
                 case ERROR:
-                    Logit.log("ProtoSender error recieved Unsubscribing to: " + replyTo);
+                   log.debug("ProtoSender ERROR received Unsubscribing to: " + replyTo);
                     client.unsubscribe(replyTo);
                     protoListener.onError(response.getMessage());
                     break;
                 case COMPLETED:
-                    Logit.log("ProtoSender completed received Unsubscribing to: " + replyTo);
+                   log.debug("ProtoSender COMPLETED received Unsubscribing to: " + replyTo);
                     client.unsubscribe(replyTo);
                     protoListener.onCompleted();
                     break;
                 default:
-                    Logit.error("Unhandled message type");
+                    log.error("Unhandled message type");
             }
         });
         client.subscribe(replyTo, 1, messageListener).waitForCompletion(SUBSCRIPTION_TIMEOUT_MILLIS); //TODO: check for timeout

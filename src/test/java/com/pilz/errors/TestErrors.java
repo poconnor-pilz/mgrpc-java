@@ -1,5 +1,9 @@
 package com.pilz.errors;
 
+import com.google.protobuf.Any;
+import com.google.protobuf.InvalidProtocolBufferException;
+import com.google.rpc.Code;
+import com.google.rpc.ErrorInfo;
 import com.pilz.mqttgrpc.ProtoSender;
 import com.pilz.mqttgrpc.ProtoServiceManager;
 import com.pilz.mqttgrpc.StreamIterator;
@@ -7,8 +11,10 @@ import com.pilz.mqttgrpc.StreamWaiter;
 import com.pilz.utils.MqttUtils;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
+import io.grpc.examples.helloworld.HelloCustomError;
 import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
+import io.grpc.protobuf.StatusProto;
 import io.grpc.stub.StreamObserver;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
@@ -179,6 +185,128 @@ public class TestErrors {
         assertEquals(status.getCode(), Status.Code.OUT_OF_RANGE);
         assertEquals("the value is out of range", status.getDescription());
     }
+    @Test
+    public void testErrorInClientStream(){
+        testErrorInClientStream(service);
+        testErrorInClientStream(stub);
+    }
+
+    public void testErrorInClientStream(IErrorsService errorsService){
+        HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
+        StreamWaiter<HelloReply> waiter = new StreamWaiter<>();
+        StreamObserver<HelloRequest> clientStreamObserver = errorsService.errorInClientStream(waiter);
+        clientStreamObserver.onNext(joe);
+        clientStreamObserver.onError(Status.OUT_OF_RANGE.withDescription("some description").asRuntimeException());
+        final HelloReply reply = waiter.getSingle();
+        assertEquals("ok", reply.getMessage());
+    }
+
+
+    @Test
+    public void testSingleResponseWithRichError() throws InterruptedException, InvalidProtocolBufferException {
+        testSingleResponseWithRichError(service);
+        testSingleResponseWithRichError(stub);
+    }
+
+
+    public void testSingleResponseWithRichError(IErrorsService errorsService) throws InterruptedException, InvalidProtocolBufferException {
+
+        HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
+
+        StreamWaiter waiter = new StreamWaiter(5000);
+        errorsService.singleResponseWithError(joe, waiter);
+        final StatusRuntimeException statusRuntimeException = assertThrows(StatusRuntimeException.class,
+                () -> waiter.getSingle());
+
+        final Status status = statusRuntimeException.getStatus();
+        assertEquals(status.getCode(), Status.Code.OUT_OF_RANGE);
+        assertEquals("the value is out of range", status.getDescription());
+
+        //The io.grpc.status above is exactly the same as when in testSingleResponseWithError
+        //To get the rich error we convert to com.google.rpc.status
+        //The details are in an google.rpc.ErrorInfo
+        //Usually to represent details it will be enough  to use one of the protocol buffers in
+        //https://github.com/googleapis/googleapis/blob/master/google/rpc/error_details.proto
+        //described also at https://cloud.google.com/apis/design/errors
+        //Note that the line below could also use StatusProto.fromThrowable(statusRuntimeException)
+        com.google.rpc.Status rpcStatus = StatusProto.fromStatusAndTrailers(status, null);
+        assertEquals(Code.OUT_OF_RANGE, Code.forNumber(rpcStatus.getCode()));
+        assertEquals("the value is out of range", rpcStatus.getMessage());
+        for (Any any : rpcStatus.getDetailsList()) {
+            if (any.is(ErrorInfo.class)) {
+                ErrorInfo errorInfo = any.unpack(ErrorInfo.class);
+                assertEquals("test failed", errorInfo.getReason());
+                assertEquals("com.pilz.errors", errorInfo.getDomain());
+                assertEquals("somevalue", errorInfo.getMetadataMap().get("somekey"));
+            }
+        }
+    }
+
+    @Test
+    public void testSingleResponseWithRichCustomError() throws InterruptedException, InvalidProtocolBufferException {
+        testSingleResponseWithRichCustomError(service);
+        testSingleResponseWithRichCustomError(stub);
+    }
+
+
+    public void testSingleResponseWithRichCustomError(IErrorsService errorsService) throws InterruptedException, InvalidProtocolBufferException {
+
+        HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
+        StreamWaiter waiter = new StreamWaiter(5000);
+        errorsService.singleResponseWithError(joe, waiter);
+        final StatusRuntimeException statusRuntimeException = assertThrows(StatusRuntimeException.class,
+                () -> waiter.getSingle());
+
+        final Status status = statusRuntimeException.getStatus();
+        assertEquals(status.getCode(), Status.Code.OUT_OF_RANGE);
+        assertEquals("the value is out of range", status.getDescription());
+
+        //The io.grpc.status above is exactly the same as when in testSingleResponseWithError
+        //To get the rich error we convert to com.google.rpc.status
+        //Usually to represent details it will be enough  to use one of the protocol buffers in
+        //https://github.com/googleapis/googleapis/blob/master/google/rpc/error_details.proto
+        //described also at https://cloud.google.com/apis/design/errors
+        //But in this case the details are in a HelloCustomError
+        com.google.rpc.Status rpcStatus = StatusProto.fromStatusAndTrailers(status, null);
+        assertEquals(Code.OUT_OF_RANGE, Code.forNumber(rpcStatus.getCode()));
+        assertEquals("the value is out of range", rpcStatus.getMessage());
+        for (Any any : rpcStatus.getDetailsList()) {
+            if (any.is(HelloCustomError.class)) {
+                HelloCustomError helloCustomError = any.unpack(HelloCustomError.class);
+                assertEquals(20, helloCustomError.getHelloErrorCode());
+                assertEquals("an error description", helloCustomError.getHelloErrorDescription());
+            }
+        }
+    }
+
+    @Test
+    public void testRichErrorInClientStream(){
+        testRichErrorInClientStream(service);
+        testRichErrorInClientStream(stub);
+    }
+
+    public void testRichErrorInClientStream(IErrorsService errorsService){
+        HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
+        StreamWaiter<HelloReply> waiter = new StreamWaiter<>();
+        StreamObserver<HelloRequest> clientStreamObserver = errorsService.richErrorInClientStream(waiter);
+        clientStreamObserver.onNext(joe);
+
+        com.google.rpc.Status status = com.google.rpc.Status.newBuilder()
+                .setCode(Code.OUT_OF_RANGE.getNumber())
+                .setMessage("the value is out of range")
+                .addDetails(Any.pack(ErrorInfo.newBuilder()
+                        .setReason("test failed")
+                        .setDomain("com.pilz.errors")
+                        .putMetadata("somekey", "somevalue")
+                        .build()))
+                .build();
+        clientStreamObserver.onError(StatusProto.toStatusRuntimeException(status));
+
+        final HelloReply reply = waiter.getSingle();
+        assertEquals("ok", reply.getMessage());
+    }
+
+
 
 
 }

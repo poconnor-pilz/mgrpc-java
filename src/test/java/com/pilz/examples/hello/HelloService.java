@@ -3,11 +3,12 @@ package com.pilz.examples.hello;
 import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.stub.StreamObserver;
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
-@Slf4j
 public class HelloService implements IHelloService {
+    private static Logger log = LoggerFactory.getLogger(HelloService.class);
 
     /**
      * @param request a single request

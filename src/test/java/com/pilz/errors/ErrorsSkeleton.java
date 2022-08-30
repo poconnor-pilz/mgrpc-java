@@ -1,16 +1,13 @@
 package com.pilz.errors;
 
 import com.google.protobuf.ByteString;
-import com.pilz.mqttgrpc.BufferObserver;
-import com.pilz.mqttgrpc.BufferToStreamObserver;
-import com.pilz.mqttgrpc.SingleToStreamObserver;
-import com.pilz.mqttgrpc.Skeleton;
+import com.pilz.mqttgrpc.*;
 import io.grpc.examples.helloworld.HelloRequest;
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-@Slf4j
 public class ErrorsSkeleton implements Skeleton {
-
+    private static Logger log = LoggerFactory.getLogger(ErrorsSkeleton.class);
     final IErrorsService service;
 
     public ErrorsSkeleton(IErrorsService service) {
@@ -27,8 +24,24 @@ public class ErrorsSkeleton implements Skeleton {
                 return null;
 
             case IErrorsService.MULTI_RESPONSE_WITH_ERROR:
-                service.singleResponseWithError(HelloRequest.parseFrom(request), new BufferToStreamObserver<>(responseObserver));
+                service.multiResponseWithError(HelloRequest.parseFrom(request), new BufferToStreamObserver<>(responseObserver));
                 return null;
+
+            case IErrorsService.ERROR_IN_CLIENT_STREAM:
+                return new StreamToBufferObserver<>(HelloRequest.parser(),
+                        service.errorInClientStream(new SingleToStreamObserver<>(responseObserver)));
+
+            case IErrorsService.SINGLE_RESPONSE_WITH_RICH_ERROR:
+                service.singleResponseWithRichError(HelloRequest.parseFrom(request), new SingleToStreamObserver<>(responseObserver));
+                return null;
+
+            case IErrorsService.SINGLE_RESPONSE_WITH_RICH_CUSTOM_ERROR:
+                service.singleResponseWithRichCustomError(HelloRequest.parseFrom(request), new SingleToStreamObserver<>(responseObserver));
+                return null;
+
+            case IErrorsService.RICH_ERROR_IN_CLIENT_STREAM:
+                return new StreamToBufferObserver<>(HelloRequest.parser(),
+                        service.richErrorInClientStream(new SingleToStreamObserver<>(responseObserver)));
         }
 
         log.error("Unmatched method: " + method);

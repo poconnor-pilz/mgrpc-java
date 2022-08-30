@@ -1,12 +1,14 @@
 package com.pilz.mqttgrpc;
 
-import lombok.extern.slf4j.Slf4j;
 import org.eclipse.paho.client.mqttv3.IMqttMessageListener;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-@Slf4j
+
 public class MqttExceptionLogger implements IMqttMessageListener {
 
+    private static Logger log = LoggerFactory.getLogger(MqttExceptionLogger.class);
     private final IMqttMessageListener inner;
 
     public MqttExceptionLogger(IMqttMessageListener inner) {

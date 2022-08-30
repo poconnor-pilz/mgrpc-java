@@ -73,6 +73,16 @@ TODO: How do we implement stream cancellation?
 
 TODO: pubsub. First this will only work with mqtt. It won't work locally. So the Service implementation will need an mqtt connection. Then we will make a general subscription client with the method subscribe(String topic, StreamObserver<V> responseObserver). Then we make the actual service like a WatchService. This just has request response methods for making watches and in the request is the response topic for the watch values. These can be batched etc. Note that when something unsubscribes it should probably get an onCompleted() in order to maintain the semantics of grpc and allow it to clean up or whatever.
 
+Error handling:
+Will use this https://cloud.google.com/apis/design/errors
+Note that it has it's own protobuf Status https://github.com/googleapis/googleapis/blob/master/google/rpc/status.proto
+This can be used for transport
+See also this section https://cloud.google.com/apis/design/errors#error_payloads
+They have different kinds of error payloads for different kinds of errors
+Also there was some note about limiting the number of error types as clients will have to write a lot of code to handle them (the error handling code ends up bigger than the logic) so maybe we should stick to the google Code types
+See StatusProto.java#fromThrowable. This assumes that somewhere in the stack is a StatusRuntimeException or a StatusException. So any service we write must always construct a one of these and call onError. ********Need to document this somewhere*********
+
+
 grpc core documented here:
 https://grpc.io/docs/what-is-grpc/core-concepts/
 This describes what is happening on the wire in detail (Chapter 4. gRPC under the hood. (Also in c:\books))

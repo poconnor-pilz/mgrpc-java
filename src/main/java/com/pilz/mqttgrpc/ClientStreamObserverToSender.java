@@ -3,6 +3,7 @@ package com.pilz.mqttgrpc;
 import com.google.protobuf.MessageLite;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
+import io.grpc.protobuf.StatusProto;
 import io.grpc.stub.StreamObserver;
 
 public class ClientStreamObserverToSender<T extends MessageLite> implements StreamObserver<T> {
@@ -33,8 +34,7 @@ public class ClientStreamObserverToSender<T extends MessageLite> implements Stre
     @Override
     public void onError(Throwable t) {
         try {
-            //TODO encode the exeption as a protobuf
-            protoSender.sendClientStreamError(method, streamId, t.getMessage());
+            protoSender.sendClientStreamError(method, streamId, StatusProto.fromThrowable(t).toByteString());
         } catch (Exception e) {
             Status status = io.grpc.Status.UNKNOWN.withDescription("Mqtt publish failed: " + e.getMessage());
             throw new StatusRuntimeException(status);

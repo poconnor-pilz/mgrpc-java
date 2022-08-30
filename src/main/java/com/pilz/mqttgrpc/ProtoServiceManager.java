@@ -1,16 +1,17 @@
 package com.pilz.mqttgrpc;
 
 import com.google.protobuf.ByteString;
-import org.eclipse.paho.client.mqttv3.IMqttMessageListener;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
 import java.util.Map;
 
 public class ProtoServiceManager {
-
+    private static Logger log = LoggerFactory.getLogger(ProtoServiceManager.class);
     /**
      * BufferObserver that just takes Buffer values and publishes them to replyTo with the correct type
      * (NEXT, COMPLETED ...)
@@ -25,6 +26,7 @@ public class ProtoServiceManager {
 
         @Override
         public void onNext(ByteString value) {
+            log.debug("Sending NEXT");
             MqttGrpcResponse reply = MqttGrpcResponse.newBuilder()
                     .setMessage(value)
                     .setType(MqttGrpcType.NEXT).build();
@@ -32,12 +34,13 @@ public class ProtoServiceManager {
                 client.publish(replyTo, reply.toByteArray(), 1, false);
             } catch (MqttException e) {
                 //We can only log the exception here as the broker is broken
-                Logit.error(e);
+                log.error("onNext failed to send mqtt message", e);
             }
         }
 
         @Override
         public void onSingle(ByteString value) {
+            log.debug("Sending SINGLE");
             MqttGrpcResponse reply = MqttGrpcResponse.newBuilder()
                     .setMessage(value)
                     .setType(MqttGrpcType.SINGLE).build();
@@ -45,25 +48,27 @@ public class ProtoServiceManager {
                 client.publish(replyTo, reply.toByteArray(), 1, false);
             } catch (MqttException e) {
                 //We can only log the exception here as the broker is broken
-                Logit.error(e);
+                log.error("Publish failed", e);
             }
         }
 
         @Override
         public void onCompleted() {
+            log.debug("Sending COMPLETED");
             MqttGrpcResponse reply = MqttGrpcResponse.newBuilder()
                     .setType(MqttGrpcType.COMPLETED).build();
             try {
                 client.publish(replyTo, reply.toByteArray(), 1, false);
             } catch (MqttException e) {
                 //We can only log the exception here as the broker is broken
-                Logit.error(e);
+                log.error("Publish failed", e);
             }
         }
 
 
         @Override
         public void onError(ByteString error) {
+            log.debug("Sending ERROR");
             MqttGrpcResponse reply = MqttGrpcResponse.newBuilder()
                     .setMessage(error)
                     .setType(MqttGrpcType.ERROR).build();
@@ -71,7 +76,7 @@ public class ProtoServiceManager {
                 client.publish(replyTo, reply.toByteArray(), 1, false);
             } catch (MqttException e) {
                 //We can only log the exception here as the broker is broken
-                Logit.error(e);
+                log.error("Publish failed");
             }
         }
 
@@ -90,11 +95,11 @@ public class ProtoServiceManager {
 
     public void subscribeService(String serviceBaseTopic, Skeleton skeleton) throws Exception {
         String wildTopic = serviceBaseTopic + "/" + Consts.IN + "/#";
-        Logit.log("subscribeService: " + wildTopic);
+       log.debug("subscribeService: " + wildTopic);
         client.subscribe(wildTopic, 1, new MqttExceptionLogger((String topic, MqttMessage message) -> {
             //TODO: must handle all exceptions here (user mqttexceptionhandler)
             //or else the exception will disconnect the mqtt client
-            Logit.log("ProtoServiceManager received message on : " + topic);
+           log.debug("ProtoServiceManager received message on : " + topic);
             //TODO: this should be in thread pool
             //TODO: Error handling needed everywhere
             final MqttGrpcRequest request = MqttGrpcRequest.parseFrom(message.getPayload());
@@ -113,11 +118,11 @@ public class ProtoServiceManager {
                 if (clientBufferObserver != null) {
                     if (streamId.isEmpty()) {
                         //TODO: Send error to client. Client must supply streamId if the service has an input stream
-                        Logit.error("No streamId supplied for client stream request");
+                        log.error("No streamId supplied for client stream request");
                         return;
                     }
                     //Store the input stream so that we can send later messages to it if they have the same streamId
-                    Logit.log("Setting up MappedInputStream for " + streamId);
+                   log.debug("Setting up MappedInputStream for " + streamId);
                     streamIdToClientBufferObserver.put(streamId, clientBufferObserver);
                 }
 
@@ -125,14 +130,14 @@ public class ProtoServiceManager {
                 //This message is not a REQUEST so it is part of a client side stream
                 if (streamId.isEmpty()) {
                     //TODO: Send error to client. Client must supply streamId if there is no replyTo
-                    Logit.error("If replyTo is empty then streamId must be empty");
+                    log.error("If replyTo is empty then streamId must be empty");
                     return;
                 }
                 //Get the corresponding stream and send on the message
                 final BufferObserver clientBufferObserver = streamIdToClientBufferObserver.get(streamId);
                 if (clientBufferObserver == null) {
                     //TODO: log error, this should not occur
-                    Logit.error("Can't find stream for: " + streamId);
+                    log.error("Can't find stream for: " + streamId);
                     return;
                 }
                 switch (request.getType()) {
@@ -145,18 +150,18 @@ public class ProtoServiceManager {
                         break;
                     case COMPLETED:
                         //TODO: This also needs to be removed if the client gets disconnected
-                        Logit.log("Completed received. Removing MappedClientStream for " + streamId);
+                       log.debug("Completed received. Removing MappedClientStream for " + streamId);
                         streamIdToClientBufferObserver.remove(streamId);
                         clientBufferObserver.onCompleted();
                         break;
                     case ERROR:
-                        Logit.error("Received error in client stream");
-                        Logit.log("Removing MappedClientStream for " + streamId);
+                        log.error("Received error in client stream");
+                       log.debug("Removing MappedClientStream for " + streamId);
                         streamIdToClientBufferObserver.remove(streamId);
                         clientBufferObserver.onError(request.getMessage());
                         break;
                     default:
-                        Logit.error("Unhandled message type");
+                        log.error("Unhandled message type");
                 }
                 return;
             }

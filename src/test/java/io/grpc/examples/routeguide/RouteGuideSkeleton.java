@@ -2,10 +2,12 @@ package io.grpc.examples.routeguide;
 
 import com.google.protobuf.ByteString;
 import com.pilz.mqttgrpc.*;
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-@Slf4j
+
 public class RouteGuideSkeleton implements Skeleton {
+    private static Logger log = LoggerFactory.getLogger(RouteGuideSkeleton.class);
 
     private final IRouteGuideService service;
 
