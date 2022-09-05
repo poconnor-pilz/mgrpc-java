@@ -7,32 +7,34 @@ import io.grpc.stub.StreamObserver;
 public class RouteGuideStub implements IRouteGuideService{
 
     final ProtoSender sender;
+    final String serviceName;
 
-    public RouteGuideStub(ProtoSender sender) {
+    public RouteGuideStub(ProtoSender sender, String serviceName) {
         this.sender = sender;
+        this.serviceName = serviceName;
     }
 
     @Override
     public void getFeature(Point request, StreamObserver<Feature> responseObserver) {
-        sender.sendRequest(IRouteGuideService.GET_FEATURE, request,
+        sender.sendRequest(serviceName, IRouteGuideService.GET_FEATURE, request,
                 new StreamToBufferObserver<>(Feature.parser(), responseObserver));
     }
 
     @Override
     public void listFeatures(Rectangle request, StreamObserver<Feature> responseObserver) {
-        sender.sendRequest(IRouteGuideService.LIST_FEATURES, request,
+        sender.sendRequest(serviceName, IRouteGuideService.LIST_FEATURES, request,
                 new StreamToBufferObserver<>(Feature.parser(), responseObserver));
     }
 
     @Override
     public StreamObserver<Point> recordRoute(StreamObserver<RouteSummary> responseObserver) {
-        return sender.sendClientStreamingRequest(IRouteGuideService.RECORD_ROUTE,
+        return sender.sendClientStreamingRequest(serviceName, IRouteGuideService.RECORD_ROUTE,
                 new StreamToBufferObserver<>(RouteSummary.parser(), responseObserver));
     }
 
     @Override
     public StreamObserver<RouteNote> routeChat(StreamObserver<RouteNote> responseObserver) {
-        return sender.sendClientStreamingRequest(IRouteGuideService.ROUTE_CHAT,
+        return sender.sendClientStreamingRequest(serviceName, IRouteGuideService.ROUTE_CHAT,
                 new StreamToBufferObserver<>(RouteNote.parser(), responseObserver));
     }
 }

@@ -73,7 +73,7 @@ public class StreamIterator<V> implements Iterator<V>, StreamObserver<V> {
     @Override
     public void onError(Throwable t) {
         try {
-            q.put(new QueueItem(Status.fromThrowable(t)));
+            q.put(new QueueItem(Status.fromThrowable(t).withCause(t)));
         } catch (InterruptedException e) {
             log.error("Interrupted while putting item on queue", e);
         }

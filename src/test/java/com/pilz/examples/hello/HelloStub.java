@@ -9,32 +9,34 @@ import io.grpc.stub.StreamObserver;
 public class HelloStub implements IHelloService{
 
     final ProtoSender sender;
+    final String serviceName;
 
-    public HelloStub(ProtoSender sender) {
+    public HelloStub(ProtoSender sender, String serviceName) {
         this.sender = sender;
+        this.serviceName = serviceName;
     }
 
     @Override
     public void requestResponse(HelloRequest request, StreamObserver<HelloReply> singleResponse) {
-        sender.sendRequest(IHelloService.REQUEST_RESPONSE, request,
+        sender.sendRequest(serviceName, IHelloService.REQUEST_RESPONSE, request,
                 new StreamToBufferObserver<>(HelloReply.parser(), singleResponse));
     }
 
     @Override
     public void serverStream(HelloRequest request, StreamObserver<HelloReply> multipleResponses) {
-        sender.sendRequest(IHelloService.SERVER_STREAM, request,
+        sender.sendRequest(serviceName, IHelloService.SERVER_STREAM, request,
                 new StreamToBufferObserver<>(HelloReply.parser(), multipleResponses));
     }
 
     @Override
     public StreamObserver<HelloRequest> clientStream(StreamObserver<HelloReply> singleResponse) {
-        return sender.sendClientStreamingRequest(IHelloService.CLIENT_STREAM,
+        return sender.sendClientStreamingRequest(serviceName, IHelloService.CLIENT_STREAM,
                 new StreamToBufferObserver<>(HelloReply.parser(), singleResponse));
     }
 
     @Override
     public StreamObserver<HelloRequest> clientAndServerStream(StreamObserver<HelloReply> multipleResponses) {
-        return sender.sendClientStreamingRequest(IHelloService.CLIENT_AND_SERVER_STREAM,
+        return sender.sendClientStreamingRequest(serviceName, IHelloService.CLIENT_AND_SERVER_STREAM,
                 new StreamToBufferObserver<>(HelloReply.parser(), multipleResponses));
     }
 }

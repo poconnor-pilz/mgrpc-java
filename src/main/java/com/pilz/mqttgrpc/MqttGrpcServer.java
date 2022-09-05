@@ -10,8 +10,12 @@ import org.slf4j.LoggerFactory;
 import java.util.HashMap;
 import java.util.Map;
 
-public class ProtoServiceManager {
-    private static Logger log = LoggerFactory.getLogger(ProtoServiceManager.class);
+import static com.pilz.mqttgrpc.Consts.IN;
+import static com.pilz.mqttgrpc.Consts.SVC;
+
+public class MqttGrpcServer {
+    private static Logger log = LoggerFactory.getLogger(MqttGrpcServer.class);
+
     /**
      * BufferObserver that just takes Buffer values and publishes them to replyTo with the correct type
      * (NEXT, COMPLETED ...)
@@ -86,27 +90,30 @@ public class ProtoServiceManager {
 
     private final MqttAsyncClient client;
 
+    private final String serverTopic;
+
     private final Map<String, BufferObserver> streamIdToClientBufferObserver = new HashMap<>();
 
-    public ProtoServiceManager(MqttAsyncClient client) {
+    public MqttGrpcServer(MqttAsyncClient client, String serverTopic) {
         this.client = client;
+        this.serverTopic = serverTopic;
     }
 
 
-    public void subscribeService(String serviceBaseTopic, Skeleton skeleton) throws Exception {
-        String wildTopic = serviceBaseTopic + "/" + Consts.IN + "/#";
-       log.debug("subscribeService: " + wildTopic);
+    public void subscribeService(String serviceName, Skeleton skeleton) throws MqttException {
+        String wildTopic = TopicMaker.make(serverTopic, IN, SVC,  serviceName, "#");
+        log.debug("subscribeService: " + wildTopic);
         client.subscribe(wildTopic, 1, new MqttExceptionLogger((String topic, MqttMessage message) -> {
             //TODO: must handle all exceptions here (user mqttexceptionhandler)
             //or else the exception will disconnect the mqtt client
-           log.debug("ProtoServiceManager received message on : " + topic);
+            log.debug("ProtoServiceManager received message on : " + topic);
             //TODO: this should be in thread pool
             //TODO: Error handling needed everywhere
             final MqttGrpcRequest request = MqttGrpcRequest.parseFrom(message.getPayload());
             //TODO: When we unsubscribe will this protoService be garbage collected?
             //Maybe it should be in a map. instead and just have a single listener on the MqttProto class
             //In fact the MqttProto class could just do one subscribe for rootOfAllServices/#
-            String method = topic.substring(serviceBaseTopic.length() + Consts.IN.length() + 2);
+            String method = topic.substring(topic.lastIndexOf('/') + 1);
             ByteString params = request.getMessage();
             String replyTo = request.getReplyTo();
             String streamId = request.getStreamId();
@@ -122,7 +129,7 @@ public class ProtoServiceManager {
                         return;
                     }
                     //Store the input stream so that we can send later messages to it if they have the same streamId
-                   log.debug("Setting up MappedInputStream for " + streamId);
+                    log.debug("Setting up MappedInputStream for " + streamId);
                     streamIdToClientBufferObserver.put(streamId, clientBufferObserver);
                 }
 
@@ -150,18 +157,18 @@ public class ProtoServiceManager {
                         break;
                     case COMPLETED:
                         //TODO: This also needs to be removed if the client gets disconnected
-                       log.debug("Completed received. Removing MappedClientStream for " + streamId);
+                        log.debug("Completed received. Removing MappedClientStream for " + streamId);
                         streamIdToClientBufferObserver.remove(streamId);
                         clientBufferObserver.onCompleted();
                         break;
                     case ERROR:
                         log.error("Received error in client stream");
-                       log.debug("Removing MappedClientStream for " + streamId);
+                        log.debug("Removing MappedClientStream for " + streamId);
                         streamIdToClientBufferObserver.remove(streamId);
                         clientBufferObserver.onError(request.getMessage());
                         break;
                     default:
-                        log.error("Unhandled message type");
+                        log.error("Unhandled message type: " + request.getType().name());
                 }
                 return;
             }

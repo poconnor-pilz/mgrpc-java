@@ -1,7 +1,7 @@
 package com.pilz.examples.hello;
 
 import com.pilz.mqttgrpc.ProtoSender;
-import com.pilz.mqttgrpc.ProtoServiceManager;
+import com.pilz.mqttgrpc.MqttGrpcServer;
 import com.pilz.mqttgrpc.StreamWaiter;
 import com.pilz.utils.MqttUtils;
 import io.grpc.examples.helloworld.HelloReply;
@@ -34,6 +34,8 @@ public class TestHello {
     private HelloService service;
     private HelloStub stub;
 
+    private static final String DEVICE = "device1";
+    private static final String SERVICE_NAME = "helloservice";
 
     @BeforeAll
     public static void startBrokerAndClients() throws MqttException, IOException {
@@ -61,14 +63,14 @@ public class TestHello {
         String serviceBaseTopic = "helloservice";
 
         //Set up the server
-        ProtoServiceManager protoServiceManager = new ProtoServiceManager(serverMqtt);
+        MqttGrpcServer mqttGrpcServer = new MqttGrpcServer(serverMqtt, DEVICE);
         service = new HelloService();
         HelloSkeleton skeleton = new HelloSkeleton(service);
-        protoServiceManager.subscribeService(serviceBaseTopic, skeleton);
+        mqttGrpcServer.subscribeService(serviceBaseTopic, skeleton);
 
         //Setup the client stub
-        ProtoSender sender = new ProtoSender(clientMqtt, serviceBaseTopic);
-        stub = new HelloStub(sender);
+        ProtoSender sender = new ProtoSender(clientMqtt, DEVICE);
+        stub = new HelloStub(sender, SERVICE_NAME);
     }
 
 

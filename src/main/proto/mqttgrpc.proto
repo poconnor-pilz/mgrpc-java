@@ -38,10 +38,20 @@ message MqttGrpcResponse {
   bytes message = 2;
 }
 
+//The connection status of a server. Sent to an mqtt LWT topic
+//When a service is connected it sends this message with connected = true
+//Note that many of these messages may be sent (one for each service in a server) but they are idempotent.
+//When a server is disconnected this message will automatically be sent as the topic for the connection status
+//will be the LWT for the server.
+message ConnectionStatus{
+  bool connected = 1;
+}
 
-//This will be used to encode an error in the request.message or reply.message
-//It matches a grpc.io.Status but we can't use that as it is not defined as a protobuf
-message MqttGrpcStatus{
-  int32 code = 1;
-  string description = 2;
+//A response containing the topic on which connection status will be sent
+//The client will send an empty message to the serviceBaseTopic/connectionStatus and receive this response
+//The client can then listen for ConnectionStatus messages at this topic.
+message ConnectionStatusResponse{
+  bool ok = 2;
+  string connectionStatusTopic = 1;
+  string errorMessage = 3;
 }

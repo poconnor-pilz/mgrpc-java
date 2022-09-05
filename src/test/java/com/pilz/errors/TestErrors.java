@@ -5,7 +5,7 @@ import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.rpc.Code;
 import com.google.rpc.ErrorInfo;
 import com.pilz.mqttgrpc.ProtoSender;
-import com.pilz.mqttgrpc.ProtoServiceManager;
+import com.pilz.mqttgrpc.MqttGrpcServer;
 import com.pilz.mqttgrpc.StreamIterator;
 import com.pilz.mqttgrpc.StreamWaiter;
 import com.pilz.utils.MqttUtils;
@@ -37,6 +37,8 @@ public class TestErrors {
     private ErrorsService service;
     private ErrorsStub stub;
 
+    private static final String DEVICE = "device";
+    private static final String SERVICE_NAME = "errorsservice";
 
     @BeforeAll
     public static void startBrokerAndClients() throws MqttException, IOException {
@@ -61,17 +63,16 @@ public class TestErrors {
     @BeforeEach
     void setup() throws Exception{
 
-        String serviceBaseTopic = "errorsservice";
 
         //Set up the server
-        ProtoServiceManager protoServiceManager = new ProtoServiceManager(serverMqtt);
+        MqttGrpcServer mqttGrpcServer = new MqttGrpcServer(serverMqtt, DEVICE);
         service = new ErrorsService();
         ErrorsSkeleton skeleton = new ErrorsSkeleton(service);
-        protoServiceManager.subscribeService(serviceBaseTopic, skeleton);
+        mqttGrpcServer.subscribeService(SERVICE_NAME, skeleton);
 
         //Setup the client stub
-        ProtoSender sender = new ProtoSender(clientMqtt, serviceBaseTopic);
-        stub = new ErrorsStub(sender);
+        ProtoSender sender = new ProtoSender(clientMqtt, DEVICE);
+        stub = new ErrorsStub(sender, SERVICE_NAME);
     }
 
 

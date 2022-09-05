@@ -11,24 +11,24 @@ import java.util.concurrent.TimeUnit;
 
 public class StreamWaiter<V> implements StreamObserver<V> {
 
-    public long INFINITE_TIMEOUT = -1;
+    public static final long INFINITE_TIMEOUT = -1;
 
     private List<V> values = new ArrayList<>();
-    private StatusRuntimeException exception = null;
+    private Status status = null;
 
     private final long timeoutMillis;
 
 
     private final CountDownLatch latch = new CountDownLatch(1);
 
-    public StreamWaiter() {
-        this.timeoutMillis = INFINITE_TIMEOUT;
-    }
 
     public StreamWaiter(long timeoutMillis) {
         this.timeoutMillis = timeoutMillis;
     }
 
+    public StreamWaiter() {
+        this(INFINITE_TIMEOUT);
+    }
 
 
     @Override
@@ -38,7 +38,7 @@ public class StreamWaiter<V> implements StreamObserver<V> {
 
     @Override
     public void onError(Throwable t) {
-        this.exception = new StatusRuntimeException(Status.fromThrowable(t));
+        this.status = Status.fromThrowable(t).withCause(t);
         latch.countDown();
     }
 
@@ -57,14 +57,13 @@ public class StreamWaiter<V> implements StreamObserver<V> {
             if(timeoutMillis < 0){
                 latch.await();
             } else if(!latch.await(timeoutMillis, TimeUnit.MILLISECONDS)){
-                    //TODO: make special exception type for waiter;
-                    throw new StatusRuntimeException(Status.DEADLINE_EXCEEDED.withDescription("Operation timed out"));
+                throw new StatusRuntimeException(Status.DEADLINE_EXCEEDED.withDescription("Operation timed out"));
             }
         } catch (InterruptedException e) {
             throw new StatusRuntimeException(Status.fromThrowable(e));
         }
-        if(this.exception != null){
-            throw this.exception;
+        if(this.status != null){
+            throw new StatusRuntimeException(status);
         }
         return values;
     }
