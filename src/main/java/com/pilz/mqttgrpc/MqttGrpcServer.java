@@ -1,20 +1,158 @@
 package com.pilz.mqttgrpc;
 
 import com.google.protobuf.ByteString;
+import io.grpc.Status;
+import io.grpc.StatusException;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.Closeable;
+import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 
-import static com.pilz.mqttgrpc.Consts.IN;
-import static com.pilz.mqttgrpc.Consts.SVC;
-
-public class MqttGrpcServer {
+public class MqttGrpcServer implements Closeable {
     private static Logger log = LoggerFactory.getLogger(MqttGrpcServer.class);
+
+    private final MqttAsyncClient client;
+
+    private final String serverTopic;
+
+    private boolean initCalled = false;
+    private final Map<String, BufferObserver> streamIdToClientBufferObserver = new HashMap<>();
+
+    public MqttGrpcServer(MqttAsyncClient client, String serverTopic) {
+        this.client = client;
+        this.serverTopic = serverTopic;
+    }
+
+
+    /**
+     * This should always be called after construction. It will set the lwt status to connected
+     * so that clients can detect if the server is connected
+     *
+     * @throws StatusException
+     */
+    public void init() throws StatusException {
+        //TODO: If the server is set to auto re-connect then we need to call this init method again when there is a sucessful connection.
+        //This can be done with MqttCallbackExtended
+        final byte[] statusConnected = ConnectionStatus.newBuilder().setConnected(true).build().toByteArray();
+        try {
+            //Subscribe for statusprompt. A client will send a message to statusprompt when it wants to know if the server is running
+            //If we receive a message at statusprompt then send back a connected status message.
+            client.subscribe(Topics.systemStatusPrompt(this.serverTopic), 1, new MqttExceptionLogger((String topic, MqttMessage message) -> {
+                try {
+                    this.client.publish(Topics.systemStatus(serverTopic), statusConnected, 1, true).waitForCompletion();
+                } catch (MqttException e) {
+                    throw new StatusException(Status.UNAVAILABLE.fromThrowable(e));
+                }
+            })).waitForCompletion();
+        } catch (MqttException e) {
+            throw new StatusException(Status.INTERNAL.withCause(e));
+        }
+
+        initCalled = true;
+    }
+
+    @Override
+    /**
+     * close() should be called on the server when finished with it so that clients are notified
+     * and can release any resources that they have.
+     */
+    public void close()  {
+        final byte[] statusDisconnected = ConnectionStatus.newBuilder().setConnected(false).build().toByteArray();
+        try {
+            this.client.publish(Topics.systemStatus(serverTopic), statusDisconnected, 1, false).waitForCompletion();
+            this.client.unsubscribe(Topics.systemStatusPrompt(this.serverTopic));
+        } catch (MqttException e) {
+            log.error("Failed to publish disconnected status on close", e);
+        }
+    }
+
+
+    public void subscribeService(String serviceName, Skeleton skeleton) throws MqttException {
+
+        if (!initCalled) {
+            throw new MqttException(new Throwable("init() method not called"));
+        }
+        String allMethodsIn = Topics.allMethodsIn(serverTopic, serviceName);
+        log.debug("subscribeService: " + allMethodsIn);
+        client.subscribe(allMethodsIn, 1, new MqttExceptionLogger((String topic, MqttMessage message) -> {
+            //TODO: must handle all exceptions here (user mqttexceptionhandler)
+            //or else the exception will disconnect the mqtt client
+            log.debug("Received message on : " + topic);
+            //TODO: this should be in thread pool
+            //TODO: Error handling needed everywhere
+            final MqttGrpcRequest request = MqttGrpcRequest.parseFrom(message.getPayload());
+            //TODO: When we unsubscribe will this protoService be garbage collected?
+            //Maybe it should be in a map. instead and just have a single listener on the MqttProto class
+            //In fact the MqttProto class could just do one subscribe for rootOfAllServices/#
+            String method = topic.substring(topic.lastIndexOf('/') + 1);
+            ByteString params = request.getMessage();
+            String replyTo = request.getReplyTo();
+            String streamId = request.getStreamId();
+
+            if (request.getType() == MqttGrpcType.REQUEST) {
+                BufferObserver clientBufferObserver = skeleton.onRequest(method, params,
+                        new ServerBufferPublisher(replyTo));
+
+                if (clientBufferObserver != null) {
+                    if (streamId.isEmpty()) {
+                        //TODO: Send error to client. Client must supply streamId if the service has an input stream
+                        log.error("No streamId supplied for client stream request");
+                        return;
+                    }
+                    //Store the input stream so that we can send later messages to it if they have the same streamId
+                    log.debug("Setting up MappedInputStream for " + streamId);
+                    streamIdToClientBufferObserver.put(streamId, clientBufferObserver);
+                }
+
+            } else {
+                //This message is not a REQUEST so it is part of a client side stream
+                if (streamId.isEmpty()) {
+                    //TODO: Send error to client. Client must supply streamId if there is no replyTo
+                    log.error("If replyTo is empty then streamId must be empty");
+                    return;
+                }
+                //Get the corresponding stream and send on the message
+                final BufferObserver clientBufferObserver = streamIdToClientBufferObserver.get(streamId);
+                if (clientBufferObserver == null) {
+                    //TODO: log error, this should not occur
+                    log.error("Can't find stream for: " + streamId);
+                    return;
+                }
+                switch (request.getType()) {
+                    case NEXT:
+                        clientBufferObserver.onNext(request.getMessage());
+                        break;
+                    case SINGLE:
+                        clientBufferObserver.onSingle(request.getMessage());
+                        streamIdToClientBufferObserver.remove(streamId);
+                        break;
+                    case COMPLETED:
+                        //TODO: This also needs to be removed if the client gets disconnected
+                        log.debug("Completed received. Removing MappedClientStream for " + streamId);
+                        streamIdToClientBufferObserver.remove(streamId);
+                        clientBufferObserver.onCompleted();
+                        break;
+                    case ERROR:
+                        log.error("Received error in client stream");
+                        log.debug("Removing MappedClientStream for " + streamId);
+                        streamIdToClientBufferObserver.remove(streamId);
+                        clientBufferObserver.onError(request.getMessage());
+                        break;
+                    default:
+                        log.error("Unhandled message type: " + request.getType().name());
+                }
+                return;
+            }
+
+        }));
+    }
+
 
     /**
      * BufferObserver that just takes Buffer values and publishes them to replyTo with the correct type
@@ -87,92 +225,4 @@ public class MqttGrpcServer {
 
     }
 
-
-    private final MqttAsyncClient client;
-
-    private final String serverTopic;
-
-    private final Map<String, BufferObserver> streamIdToClientBufferObserver = new HashMap<>();
-
-    public MqttGrpcServer(MqttAsyncClient client, String serverTopic) {
-        this.client = client;
-        this.serverTopic = serverTopic;
-    }
-
-
-    public void subscribeService(String serviceName, Skeleton skeleton) throws MqttException {
-        String wildTopic = TopicMaker.make(serverTopic, IN, SVC,  serviceName, "#");
-        log.debug("subscribeService: " + wildTopic);
-        client.subscribe(wildTopic, 1, new MqttExceptionLogger((String topic, MqttMessage message) -> {
-            //TODO: must handle all exceptions here (user mqttexceptionhandler)
-            //or else the exception will disconnect the mqtt client
-            log.debug("ProtoServiceManager received message on : " + topic);
-            //TODO: this should be in thread pool
-            //TODO: Error handling needed everywhere
-            final MqttGrpcRequest request = MqttGrpcRequest.parseFrom(message.getPayload());
-            //TODO: When we unsubscribe will this protoService be garbage collected?
-            //Maybe it should be in a map. instead and just have a single listener on the MqttProto class
-            //In fact the MqttProto class could just do one subscribe for rootOfAllServices/#
-            String method = topic.substring(topic.lastIndexOf('/') + 1);
-            ByteString params = request.getMessage();
-            String replyTo = request.getReplyTo();
-            String streamId = request.getStreamId();
-
-            if (request.getType() == MqttGrpcType.REQUEST) {
-                BufferObserver clientBufferObserver = skeleton.onRequest(method, params,
-                        new ServerBufferPublisher(replyTo));
-
-                if (clientBufferObserver != null) {
-                    if (streamId.isEmpty()) {
-                        //TODO: Send error to client. Client must supply streamId if the service has an input stream
-                        log.error("No streamId supplied for client stream request");
-                        return;
-                    }
-                    //Store the input stream so that we can send later messages to it if they have the same streamId
-                    log.debug("Setting up MappedInputStream for " + streamId);
-                    streamIdToClientBufferObserver.put(streamId, clientBufferObserver);
-                }
-
-            } else {
-                //This message is not a REQUEST so it is part of a client side stream
-                if (streamId.isEmpty()) {
-                    //TODO: Send error to client. Client must supply streamId if there is no replyTo
-                    log.error("If replyTo is empty then streamId must be empty");
-                    return;
-                }
-                //Get the corresponding stream and send on the message
-                final BufferObserver clientBufferObserver = streamIdToClientBufferObserver.get(streamId);
-                if (clientBufferObserver == null) {
-                    //TODO: log error, this should not occur
-                    log.error("Can't find stream for: " + streamId);
-                    return;
-                }
-                switch (request.getType()) {
-                    case NEXT:
-                        clientBufferObserver.onNext(request.getMessage());
-                        break;
-                    case SINGLE:
-                        clientBufferObserver.onSingle(request.getMessage());
-                        streamIdToClientBufferObserver.remove(streamId);
-                        break;
-                    case COMPLETED:
-                        //TODO: This also needs to be removed if the client gets disconnected
-                        log.debug("Completed received. Removing MappedClientStream for " + streamId);
-                        streamIdToClientBufferObserver.remove(streamId);
-                        clientBufferObserver.onCompleted();
-                        break;
-                    case ERROR:
-                        log.error("Received error in client stream");
-                        log.debug("Removing MappedClientStream for " + streamId);
-                        streamIdToClientBufferObserver.remove(streamId);
-                        clientBufferObserver.onError(request.getMessage());
-                        break;
-                    default:
-                        log.error("Unhandled message type: " + request.getType().name());
-                }
-                return;
-            }
-
-        }));
-    }
 }

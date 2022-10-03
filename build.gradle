@@ -32,8 +32,8 @@ dependencies {
     //For errors using com.google.rpc.Status
     implementation group: 'io.grpc', name: 'grpc-protobuf', version: '1.47.0';
 
-
-    implementation group: 'org.eclipse.paho', name: 'org.eclipse.paho.client.mqttv3', version: '1.1.1'
+    //https://mvnrepository.com/artifact/org.eclipse.paho/org.eclipse.paho.client.mqttv3
+    implementation group: 'org.eclipse.paho', name: 'org.eclipse.paho.client.mqttv3', version: '1.2.5'
 
     testImplementation 'io.moquette:moquette-broker:0.15'
     testImplementation 'org.junit.jupiter:junit-jupiter-api:5.8.1'
@@ -47,7 +47,7 @@ dependencies {
 sourceSets {
     main {
         java {
-            srcDirs 'build/generated/source/proto/main/java'
+            srcDirs 'build/generated/source/proto/main/java', 'build/generated/source/proto/test/java'
         }
     }
 }

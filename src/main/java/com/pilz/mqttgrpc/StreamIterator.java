@@ -26,38 +26,6 @@ public class StreamIterator<V> implements Iterator<V>, StreamObserver<V> {
     }
 
 
-    private enum Type{
-        NEXT,
-        ERROR,
-        COMPLETED
-    }
-
-    private class QueueItem{
-        public final Type type;
-        public final V value;
-        public final Status status;
-
-        private QueueItem(Type type, V value, Status status) {
-            this.type = type;
-            this.value = value;
-            this.status = status;
-        }
-
-        private QueueItem(Status status){
-            this(Type.ERROR, null, status);
-        }
-
-        private QueueItem(V value){
-            this(Type.NEXT, value, null);
-        }
-
-        private QueueItem(){
-            this(Type.COMPLETED, null, null);
-        }
-    }
-
-
-
     private BlockingQueue<QueueItem> q = new ArrayBlockingQueue<>(DEFAULT_QUEUE_BUFFER_SIZE);
 
     //StreamObserver methods
@@ -122,6 +90,37 @@ public class StreamIterator<V> implements Iterator<V>, StreamObserver<V> {
         }
 
         return null;//Satisfy compiler. This cannot be reached.
+    }
+
+
+    private enum Type{
+        NEXT,
+        ERROR,
+        COMPLETED
+    }
+
+    private class QueueItem{
+        public final Type type;
+        public final V value;
+        public final Status status;
+
+        private QueueItem(Type type, V value, Status status) {
+            this.type = type;
+            this.value = value;
+            this.status = status;
+        }
+
+        private QueueItem(Status status){
+            this(Type.ERROR, null, status);
+        }
+
+        private QueueItem(V value){
+            this(Type.NEXT, value, null);
+        }
+
+        private QueueItem(){
+            this(Type.COMPLETED, null, null);
+        }
     }
 
 

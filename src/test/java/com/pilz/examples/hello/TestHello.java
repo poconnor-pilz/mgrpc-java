@@ -1,8 +1,9 @@
 package com.pilz.examples.hello;
 
-import com.pilz.mqttgrpc.ProtoSender;
+import com.pilz.mqttgrpc.MqttGrpcClient;
 import com.pilz.mqttgrpc.MqttGrpcServer;
 import com.pilz.mqttgrpc.StreamWaiter;
+import com.pilz.mqttgrpc.Topics;
 import com.pilz.utils.MqttUtils;
 import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
@@ -26,8 +27,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 public class TestHello {
 
 
-
-
     private static MqttAsyncClient serverMqtt;
     private static MqttAsyncClient clientMqtt;
 
@@ -42,8 +41,8 @@ public class TestHello {
 
         MqttUtils.startEmbeddedBroker();
 
-        serverMqtt = MqttUtils.makeClient();
-        clientMqtt = MqttUtils.makeClient();
+        serverMqtt = MqttUtils.makeClient(Topics.systemStatus(DEVICE));
+        clientMqtt = MqttUtils.makeClient(null);
     }
 
     @AfterAll
@@ -64,44 +63,46 @@ public class TestHello {
 
         //Set up the server
         MqttGrpcServer mqttGrpcServer = new MqttGrpcServer(serverMqtt, DEVICE);
+        mqttGrpcServer.init();
         service = new HelloService();
         HelloSkeleton skeleton = new HelloSkeleton(service);
         mqttGrpcServer.subscribeService(serviceBaseTopic, skeleton);
 
         //Setup the client stub
-        ProtoSender sender = new ProtoSender(clientMqtt, DEVICE);
-        stub = new HelloStub(sender, SERVICE_NAME);
+        MqttGrpcClient mgClient = new MqttGrpcClient(clientMqtt, DEVICE);
+        mgClient.init();
+        stub = new HelloStub(mgClient, SERVICE_NAME);
     }
 
 
 
     @Test
-    public void testRequestResponse() throws Throwable{
+    public void testSayHello() throws Throwable{
         //Test local and remote calls to the service
-        testRequestResponse(service);
-        testRequestResponse(stub);
+        testSayHello(service);
+        testSayHello(stub);
     }
 
-    public void testRequestResponse(IHelloService helloService) throws Throwable{
+    public void testSayHello(IHelloService helloService) throws Throwable{
 
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
         StreamWaiter<HelloReply> waiter = new StreamWaiter<>();
-        helloService.requestResponse(joe, waiter);
+        helloService.sayHello(joe, waiter);
         HelloReply reply = waiter.getSingle();
         assertEquals("Hello joe", reply.getMessage());
     }
 
     @Test
-    public void testServerStream() throws Throwable{
+    public void testLotsOfReplies() throws Throwable{
         //Test local and remote calls to the service
-        testServerStream(service);
-        testServerStream(stub);
+        testLotsOfReplies(service);
+        testLotsOfReplies(stub);
     }
-    public void testServerStream(IHelloService helloService) throws Throwable{
+    public void testLotsOfReplies(IHelloService helloService) throws Throwable{
 
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
         StreamWaiter<HelloReply> waiter = new StreamWaiter<>();
-        helloService.serverStream(joe, waiter);
+        helloService.lotsOfReplies(joe, waiter);
         List<HelloReply> responseList = waiter.getList();
         assertEquals(responseList.size(), 2);
         assertEquals("Hello joe", responseList.get(0).getMessage());
@@ -110,19 +111,19 @@ public class TestHello {
     }
 
     @Test
-    public void testClientStream() throws Throwable {
+    public void testLotsOfGreetings() throws Throwable {
         //Test local and remote calls to the service
-        testClientStream(service);
-        testClientStream(stub);
+        testLotsOfGreetings(service);
+        testLotsOfGreetings(stub);
     }
 
 
-    public void testClientStream(IHelloService helloService) throws Throwable{
+    public void testLotsOfGreetings(IHelloService helloService) throws Throwable{
 
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
         HelloRequest jane = HelloRequest.newBuilder().setName("jane").build();
         StreamWaiter<HelloReply> waiter = new StreamWaiter<>();
-        StreamObserver<HelloRequest> clientStreamObserver = helloService.clientStream(waiter);
+        StreamObserver<HelloRequest> clientStreamObserver = helloService.lotsOfGreetings(waiter);
         clientStreamObserver.onNext(joe);
         clientStreamObserver.onNext(jane);
         clientStreamObserver.onCompleted();
@@ -131,13 +132,13 @@ public class TestHello {
     }
 
     @Test
-    public void testClientAndServerStream() throws Throwable {
+    public void testBidiHello() throws Throwable {
         //Test local and remote calls to the service
-        testClientAndServerStream(service);
-        testClientAndServerStream(stub);
+        testBidiHello(service);
+        testBidiHello(stub);
     }
 
-    public void testClientAndServerStream(IHelloService helloService) throws Throwable{
+    public void testBidiHello(IHelloService helloService) throws Throwable{
 
 
         class TestHelloReplyObserver implements StreamObserver<HelloReply> {
@@ -163,7 +164,7 @@ public class TestHello {
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
         HelloRequest jane = HelloRequest.newBuilder().setName("jane").build();
         TestHelloReplyObserver replyObserver = new TestHelloReplyObserver();
-        StreamObserver<HelloRequest> clientStreamObserver = helloService.clientAndServerStream(replyObserver);
+        StreamObserver<HelloRequest> clientStreamObserver = helloService.bidiHello(replyObserver);
         clientStreamObserver.onNext(joe);
         replyObserver.latch.await(10, TimeUnit.SECONDS);
         assertEquals("Hello joe", replyObserver.lastReply.getMessage());

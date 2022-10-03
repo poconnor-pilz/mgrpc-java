@@ -102,7 +102,7 @@ public class TryOrdering {
         //Also we should consider the visu use case where we always want to get the latest value so we would accept
         //something that is more than one greater than last and then reject anything that is less than last.
         //But for most service oriented things which are streaming values then the order of the stream will be important
-        //This could be configured as part of the protoSender
+        //This could be configured as part of the MqttGrpcClient
         if(buffering) {
             buffer.add(value);
             Collections.sort(buffer);

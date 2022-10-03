@@ -1,7 +1,8 @@
 package io.grpc.examples.routeguide;
 
-import com.pilz.mqttgrpc.ProtoSender;
+import com.pilz.mqttgrpc.MqttGrpcClient;
 import com.pilz.mqttgrpc.MqttGrpcServer;
+import com.pilz.mqttgrpc.Topics;
 import com.pilz.utils.MqttUtils;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
@@ -34,8 +35,8 @@ public class TestRouteGuide {
     @BeforeAll
     public static void startBrokerAndClients() throws MqttException, IOException {
         MqttUtils.startEmbeddedBroker();
-        serverMqtt = MqttUtils.makeClient();
-        clientMqtt = MqttUtils.makeClient();
+        serverMqtt = MqttUtils.makeClient(Topics.systemStatus(DEVICE));
+        clientMqtt = MqttUtils.makeClient(null);
     }
 
     @AfterAll
@@ -61,8 +62,8 @@ public class TestRouteGuide {
         mqttGrpcServer.subscribeService(serviceBaseTopic, skeleton);
 
         //Setup the client stub
-        ProtoSender sender = new ProtoSender(clientMqtt, DEVICE);
-        stub = new RouteGuideStub(sender, SERVICE_NAME);
+        MqttGrpcClient mgClient = new MqttGrpcClient(clientMqtt, DEVICE);
+        stub = new RouteGuideStub(mgClient, SERVICE_NAME);
     }
 
 }

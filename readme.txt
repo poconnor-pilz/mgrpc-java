@@ -133,7 +133,25 @@ If we put the i|o after the service then it means that each service has to have 
 Also remember that if this needs to be changed because the topic structure is too inflexible that we could put more in the mqttgrpc message attributes.
 
 Mqtt connection error handling:
-The protoSender should send an initial connection request to the service. If it gets a response then the service will send back its lwt topic and the protoSender can listen for it and then send errors to streams. If it gets no response within a timeout then it assumes that the service is not registered or the server is not running (although if we didn't use timeouts we could distinguish between these cases - but there are other ways to distinguish and anyway in most cases we will know that it is the server that is down because we will know that that server always has those services running - anyway we can provide another way later to get a list of services from a server and their status etc.)  The protoSender remains subscribed to this topic and listens for 'on'/'off' in the status message. In the intitial connection request the protoSender can send it's lwt to the server and the server can send errors to client streams. If this becomes very complicated then we could just time out client streams instead. i.e. if we don't receive a message in a client stream for some time then timeout the stream and fail. This could be much simpler and may match with practice i.e. In practice a client stream should be rapid. It's not for sending rare requests. For rare requests the client should just send single requests. If the server wants to 'watch' something on the client then it should call a service on the client.
+The mgClient should send an initial connection request to the service. If it gets a response then the service will send back its lwt topic and the mgClient can listen for it and then send errors to streams. If it gets no response within a timeout then it assumes that the service is not registered or the server is not running (although if we didn't use timeouts we could distinguish between these cases - but there are other ways to distinguish and anyway in most cases we will know that it is the server that is down because we will know that that server always has those services running - anyway we can provide another way later to get a list of services from a server and their status etc.)  The mgClient remains subscribed to this topic and listens for 'on'/'off' in the status message. In the intitial connection request the mgClient can send it's lwt to the server and the server can send errors to client streams. If this becomes very complicated then we could just time out client streams instead. i.e. if we don't receive a message in a client stream for some time then timeout the stream and fail. This could be much simpler and may match with practice i.e. In practice a client stream should be rapid. It's not for sending rare requests. For rare requests the client should just send single requests. If the server wants to 'watch' something on the client then it should call a service on the client. Along with this for our situtation the client should rarely lose contact with the broker as the client and broker run on the cloud. The device is very different in this regard.
+There is a difference between the client noticing that it itself has been disconnected from the mqtt broker and telling the server that it has been disconnected. We should maybe handle the first case? We will have to handle the first case on the server anyway so we could use similar code.
+The mqtt connection will need to notify a number of entities whenever it is disconnected/re-connected.
+
+//We could do options.setCleanSession(false) here which will make a persistent session
+//For AWS the "Persistent session expiry period" is extendable up to 7 days.
+//https://docs.aws.amazon.com/general/latest/gr/iot-core.html#message-broker-limits
+//If that is reliable then we won't need any re-start notifications
+//as all subscriptions will be re-constituted. It will even deliver queued messages (but for grpc services
+//we probably would not want that. A stream should complete or not, not be in a half way state).
+//In that sense the clean session is easier. For example we don't want some sub to a random replyto to be
+//re-created. In fact the only sub we want re-created would be for something like a watch.
+//So watches might be done on a separate persistent session (clean=false)
+//But even with watches the main connection that will fail is the device/server and that is publishing
+//So it has to remember to publish anyway and persistent session will not help with that.
+//i.e. The only place the persistent session would be valuable is the cloud watch client which is unlikely to fail
+//So overall it's better to keep it 'dumb pipes' except for setting the re-connect automatically and notifiying
+//each grpc client and server when a connect or disconnect happens.
+
 
 Why not model the server up front? There is a server at a topic and that has services at subtopics. This works for the internet with domains and sub domains etc. With devices we have to have a topic anyway. Maybe later we might want to hide devices behind some other indirect topic? We could still make the server an indirect topic if we wanted to. So there is a server at a topic. Then the client connects to the server and listens for its lwt at a well known topic. It can also query the server for services it supports etc. The alternative to this is just sending a connectionStatusRequest to service/connectionStatusRequest and then timing out if there is no response.
 If we do this then it breaks the mqtt anonymity of who responds to a message etc. But we are modeling services here like grpc and grpc is able to solve a lot of problems. For pubsub etc then just use mqtt straight.
@@ -142,7 +160,11 @@ Theres an mgClient which has the root topic ("device1") for a server and is mapp
 The mgClient (ProtoSender) will maintain a map of listeners. It removes a listener wherever it currently does an unsubscribe. If it gets an lwt from the server it is mapped to then it sends an error to each listener, removes and unsubscribes them.
 Note that one good thing about the service approach is that each stub gets individually informed when there is a disconnect and can take action/clean up etc. With normal mqtt there was no real channel for doing that.
 Later it may also sent its lwt topic to the server when it initially connects. It will send this along with a client uuid. Then in every message it sends it also sends the client id. The server can then maintain a map of client stream listeners vs client ids and if it gets an lwt it can send on an error to all the client stream listeners. It could also use this same idea to handle cancellations (see the grpc timeouts stuff below. If a client times out then it should send some kind of cancel to the clientStream which is send as onError with a CANCELLED status). There does not seem to be anything about telling servers to stop sending server streams if the client is gone. So the server stream will probably just continue until finished.
+On the client side have to take care of both the server mqtt connection by listening to lwt but also the client mqtt connection.
+If the client connection fails then any streams also have to be sent an error. It would be possible to have the MqttGrpcClient own the mqtt connection. But we don't want to do that as we want to be able to use one mqtt client for many devices. So we will have to have some way of notifying each MqttGrpcClient when an mqtt client is disconnected.
+Should the client try to automatically re-connect? If it does then the MqttGrpcClient will also have to re-connect for the lwt message.
 
+If a request fails on the client side should the client just throw an exception? i.e. instead of calling onError on the response observer. No. In general propagate the exceptions through onError().
 TODO: Just do the above as a prototype. It won't take that long anyway. i.e. implement the topic structure and what is described in the paragraph above.
 
 For requests timeouts could work? We only need the lwt for streams. Even then timeouts could work (except for things like watch but watch will be separate anyway). But the problem with timeouts is that if the client can set them then they may set a long one (especially for automation where it might take a peripheral a while to respond to some complex request) and it has no idea whether the peripheral failed to respond in the timeout or whether the mqtt connection is down on the server side or whether the service even exists. "How can the client cancel a stream from the server part way through when using the async stub? For single requests, you can't. For bi-directional streaming you can call onError if you have not already called onCompleted. The API is simply too simple for this need; this problem would be solved by using more reactive-streams than RxJava, but that has its own issues."
@@ -151,6 +173,17 @@ TODO: timeouts. grpc supports these. See https://www.tutorialspoint.com/grpc/grp
 and https://grpc.io/docs/what-is-grpc/core-concepts/#deadlines
 Note that some languages work in terms of deadlines and some in terms of timeouts
 We can support them easily enough in StreamWaiter and StreamIterator. The BlockingStub might be harder though.
+
+TODO: subscription limits (because of build up of replyTo topics with long running requests)
+AWS Limits: 50,000 concurrent connections per account. 50 subscriptions per connection (also 50,000 subs per account)
+So we can scale to many devices if we have a few devices per connection
+But we cannot scale non timing out request response where each response has a unique replyTo
+Neither can we scale ongoing streaming responses where each has a unique replyTo
+So we at least need a request id and switch on that.
+After we probably need a subscription per service. If there are permissions on particular methods then we can't use aws topic permissions for that (which is unlikely anyway, the most we will probably have is a restriction on the tenant).
+In fact we should probably just have a single subscription for all services on a device and then filter by topic. We can still have a unique replyTo for each request because we will just be using a single wildcard subscription. Or we can use a requestId. Might as well use a requestId as we already have a streamId which can be used. The only reason not to would be maybe to see cloudwatch logs of requests without decoding the protobuf.
+
+TODO: write tests using mockito fake or whatever (the one that extends a real instance) and check for leaks in MqttGrpcClient.responseObservers etc.
 
 grpc core documented here:
 https://grpc.io/docs/what-is-grpc/core-concepts/
@@ -198,6 +231,7 @@ Then the stream requests must supply a streamId a message and an empty replyTo
 
 Pub Sub
 Assume that Pub sub will only work over mqtt. i.e. If you want publish subscribe then you need to make sure you include a message broker. In that case the client can just just the mqtt api more or less directly to do things. So for the desktop watch it will be modeled as one method which does create watch with an id another output stream method that listens for that watch. That uses the grpc style of stuff. But we can make another api that assumes there is a broker underneath. That api can be generic. For anything that does streaming it can take an extra parameter which is the stream topic. So when you create a watch you can supply the stream topic as one of the create properties. Then we will have a separate api that you can call where you just subscribe for a topic. Your code will then expect to get watches on that topic or whatever. Maybe we should do ref counting as well. Whatever. The main point is that for this kind of thing we won't worry about sticking exactly to grpc because grpc doesn't support pubsub as a pattern anyway.
+In detail: Have a method WatchService.createWatch(WatchCreate). This takes a WatchCreate message/protobuf that has the watch variables, update rate and a values topic. It returns success or failure. Then have a different method that is not defined in IDL SubscribeService.subscribe(String topic, Parser<T> parser, StreamObserver<T> streamObserver). That just listens for values. All the createWatch, deleteWatch, registerWatch etc. is done on the WatchService. But have to take care of too many subscriptions and many subscriptions on same topic from one client. Maybe just use the watchID or requestID and multiplex like the BlockingRequestShared stuff?
 
 
 It might be realistic for us to say that if it is not in process then we will always use mqtt. In that case we could possibly simplify things and we could always be sure that onReply would work (without having to plug something in to our service that calls onNext followed by onCompleted)

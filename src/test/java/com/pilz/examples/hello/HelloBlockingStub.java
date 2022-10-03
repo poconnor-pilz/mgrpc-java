@@ -17,13 +17,13 @@ public class HelloBlockingStub {
 
     public HelloReply requestResponse(HelloRequest request){
         StreamWaiter<HelloReply> waiter = new StreamWaiter<>();
-        service.requestResponse(request, waiter);
+        service.sayHello(request, waiter);
         return waiter.getSingle();
     }
 
     public Iterator<HelloReply> serverStream(HelloRequest request){
         StreamIterator<HelloReply> sit = new StreamIterator<>();
-        service.serverStream(request, sit);
+        service.lotsOfReplies(request, sit);
         return sit;
     }
 

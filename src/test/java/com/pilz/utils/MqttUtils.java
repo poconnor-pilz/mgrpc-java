@@ -1,5 +1,6 @@
 package com.pilz.utils;
 
+import com.pilz.mqttgrpc.ConnectionStatus;
 import io.moquette.broker.Server;
 import io.moquette.broker.config.ClasspathResourceLoader;
 import io.moquette.broker.config.IConfig;
@@ -51,13 +52,18 @@ public class MqttUtils {
         mqttBroker.stopServer();
     }
 
-    public static MqttAsyncClient makeClient() throws MqttException {
+    public static MqttAsyncClient makeClient(String lwtTopic) throws MqttException {
         final MqttAsyncClient client;
         client = new MqttAsyncClient(
                 "tcp://localhost:1884",
                 MqttAsyncClient.generateClientId(),
                 new MemoryPersistence());
         MqttConnectOptions mqttConnectOptions = new MqttConnectOptions();
+
+        if(lwtTopic != null){
+            final byte[] lwtMessage = ConnectionStatus.newBuilder().setConnected(false).build().toByteArray();
+            mqttConnectOptions.setWill(lwtTopic, lwtMessage, 1, false);
+        }
         client.connect(mqttConnectOptions).waitForCompletion();
         return client;
     }

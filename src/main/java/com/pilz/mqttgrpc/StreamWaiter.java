@@ -3,6 +3,8 @@ package com.pilz.mqttgrpc;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 import io.grpc.stub.StreamObserver;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -11,10 +13,14 @@ import java.util.concurrent.TimeUnit;
 
 public class StreamWaiter<V> implements StreamObserver<V> {
 
+    private static Logger log = LoggerFactory.getLogger(StreamWaiter.class);
+
     public static final long INFINITE_TIMEOUT = -1;
 
     private List<V> values = new ArrayList<>();
     private Status status = null;
+
+    private boolean used = false;
 
     private final long timeoutMillis;
 
@@ -33,7 +39,7 @@ public class StreamWaiter<V> implements StreamObserver<V> {
 
     @Override
     public void onNext(V value) {
-       this.values.add(value);
+        this.values.add(value);
     }
 
     @Override
@@ -53,6 +59,10 @@ public class StreamWaiter<V> implements StreamObserver<V> {
      * in the stream
      */
     public List<V> getList() throws StatusRuntimeException {
+        if(used){
+            throw new StatusRuntimeException(Status.INTERNAL.withDescription("get() or getList() can only be used once"));
+        }
+        used = true;
         try {
             if(timeoutMillis < 0){
                 latch.await();

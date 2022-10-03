@@ -15,7 +15,7 @@ public class HelloService implements IHelloService {
      * @param singleResponse a stream containing a single response
      */
     @Override
-    public void requestResponse(HelloRequest request, StreamObserver<HelloReply> singleResponse){
+    public void sayHello(HelloRequest request, StreamObserver<HelloReply> singleResponse){
         HelloReply reply = HelloReply.newBuilder().setMessage("Hello " + request.getName()).build();
         singleResponse.onNext(reply);
         singleResponse.onCompleted();
@@ -26,7 +26,7 @@ public class HelloService implements IHelloService {
      * @param multipleResponses A stream of responses from the server
      */
     @Override
-    public void serverStream(HelloRequest request, StreamObserver<HelloReply> multipleResponses) {
+    public void lotsOfReplies(HelloRequest request, StreamObserver<HelloReply> multipleResponses) {
         HelloReply reply = HelloReply.newBuilder().setMessage("Hello " + request.getName()).build();
         HelloReply reply2 = HelloReply.newBuilder().setMessage("Hello again " + request.getName()).build();
         //Send the same response twice in the stream
@@ -40,7 +40,7 @@ public class HelloService implements IHelloService {
      * @return A stream on which the client can send multiple requests to the server
      */
     @Override
-    public StreamObserver<HelloRequest> clientStream(StreamObserver<HelloReply> singleResponse) {
+    public StreamObserver<HelloRequest> lotsOfGreetings(StreamObserver<HelloReply> singleResponse) {
 
         return new StreamObserver<HelloRequest>() {
             private ArrayList<String> names = new ArrayList<>();
@@ -72,7 +72,7 @@ public class HelloService implements IHelloService {
      * @return A stream on which the client can send multiple requests to the server
      */
     @Override
-    public StreamObserver<HelloRequest> clientAndServerStream(StreamObserver<HelloReply> multipleResponses) {
+    public StreamObserver<HelloRequest> bidiHello(StreamObserver<HelloReply> multipleResponses) {
         return new StreamObserver<HelloRequest>() {
             @Override
             public void onNext(HelloRequest value) {

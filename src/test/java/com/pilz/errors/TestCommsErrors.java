@@ -3,10 +3,10 @@ package com.pilz.errors;
 import com.pilz.examples.hello.HelloService;
 import com.pilz.examples.hello.HelloSkeleton;
 import com.pilz.examples.hello.HelloStub;
-import com.pilz.examples.hello.IHelloService;
 import com.pilz.mqttgrpc.*;
 import com.pilz.utils.MqttUtils;
 import io.grpc.Status;
+import io.grpc.StatusException;
 import io.grpc.StatusRuntimeException;
 import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
@@ -19,8 +19,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class TestCommsErrors {
 
@@ -40,105 +39,102 @@ public class TestCommsErrors {
 
 
     @Test
-    public void testNoClientBrokerConnection() throws MqttException {
+    public void testNoInitialClientBrokerConnection() throws MqttException {
+
+        //Verify that if the client has no broker connection then it gets an UNAVAILABLE
+        //error when it tries to make a call to a service
+
+
         //Setup the client stub
-        String serviceBaseTopic = "helloservice";
-        //Make a ProtoSender with an mqtt client that's not connected and verify that using a service with it
+        //Make a MqttGrpcClient with an mqtt client that's not connected and verify that using a service with it
         //will cause UNAVAILABLE exceptions
-        ProtoSender sender = new ProtoSender(new MqttAsyncClient("tcp://localhost:1884", Base64Utils.randomId()), DEVICE);
-        HelloStub stub = new HelloStub(sender, SERVICE_NAME);
+        MqttGrpcClient mgClient = new MqttGrpcClient(new MqttAsyncClient("tcp://localhost:1884", Base64Utils.randomId()), DEVICE);
+        StatusException ex = assertThrows(StatusException.class, () -> mgClient.init());
+        assertEquals(Status.Code.UNAVAILABLE, ex.getStatus().getCode());
+        HelloStub stub = new HelloStub(mgClient, SERVICE_NAME);
 
-
+        //Even though the init failed try to use the client anyway and verify that we get expected failures
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
         StreamWaiter<HelloReply> waiter = new StreamWaiter<>();
-        stub.requestResponse(joe, waiter);
+        stub.sayHello(joe, waiter);
 
         StatusRuntimeException sre = assertThrows(StatusRuntimeException.class,
                 () -> waiter.getSingle());
 
-        assertEquals(sre.getStatus().getCode(), Status.Code.UNAVAILABLE);
+        assertEquals(Status.Code.UNAVAILABLE, sre.getStatus().getCode());
 
         //Run the same test for StreamIterator
         StreamIterator<HelloReply> iter = new StreamIterator<>();
-        stub.requestResponse(joe, iter);
+        stub.sayHello(joe, iter);
+        sre = assertThrows(StatusRuntimeException.class,
+                () -> iter.next());
+        assertEquals(Status.Code.UNAVAILABLE, sre.getStatus().getCode());
+
+    }
+
+    @Test
+    public void testNoInitialServerBrokerConnection() throws MqttException {
+
+        //Try initialising the client with a valid mqtt connection and verify it fails because the
+        //server is not started
+        final MqttAsyncClient clientMqtt = MqttUtils.makeClient(null);
+        MqttGrpcClient mgClient = new MqttGrpcClient(clientMqtt, DEVICE);
+        StatusException ex = assertThrows(StatusException.class, () -> mgClient.init());
+        assertEquals(Status.Code.UNAVAILABLE, ex.getStatus().getCode());
+        assertEquals("Server unavailable", ex.getStatus().getDescription());
+        mgClient.close();
+    }
+
+    @Test
+    public void testServerClosedDuringActivity() throws MqttException, StatusException {
+
+        //Verify that if the server is closed after there has been a successful interaction
+        //between client and server then the server will get an UNAVAILABLE message
+        //if it tries to make another call.
+
+        //Start the server
+        final MqttAsyncClient serverMqtt = MqttUtils.makeClient(Topics.systemStatus(DEVICE));
+        MqttGrpcServer mgServer = new MqttGrpcServer(serverMqtt, DEVICE);
+        mgServer.init();
+        final HelloService service = new HelloService();
+        HelloSkeleton skeleton = new HelloSkeleton(service);
+        mgServer.subscribeService(SERVICE_NAME, skeleton);
+
+
+        final MqttAsyncClient clientMqtt = MqttUtils.makeClient(null);
+        MqttGrpcClient mgClient = new MqttGrpcClient(clientMqtt, DEVICE);
+        mgClient.init();
+        HelloStub stub = new HelloStub(mgClient, SERVICE_NAME);
+        //send a message and make sure we get a response
+        HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
+        StreamWaiter<HelloReply> waiter = new StreamWaiter<>();
+        stub.sayHello(joe, waiter);
+        HelloReply reply = waiter.getSingle();
+        assertEquals("Hello joe", reply.getMessage());
+
+        //Close should be called on a server when the system shuts down
+        //close() will then send a message to the LWT topic so that clients can release any resources
+        //that they have and so that any open streams get an error.
+        //
+        mgServer.close();
+
+        StreamWaiter waiter2 = new StreamWaiter<>(5000);
+        stub.sayHello(joe, waiter2);
+
+        StatusRuntimeException sre = assertThrows(StatusRuntimeException.class,
+                () -> waiter2.getSingle());
+
+        assertEquals(Status.Code.UNAVAILABLE, sre.getStatus().getCode());
+
+        //Run the same test for StreamIterator
+        StreamIterator<HelloReply> iter = new StreamIterator<>();
+        stub.sayHello(joe, iter);
         sre = assertThrows(StatusRuntimeException.class,
                 () -> iter.next());
         assertEquals(sre.getStatus().getCode(), Status.Code.UNAVAILABLE);
 
     }
 
-    @Test
-    public void testNoServerBrokerConnection() throws MqttException, InterruptedException {
-
-        String serviceBaseTopic = "helloservice";
-
-        //Set up the server
-        final MqttAsyncClient serverMqtt = MqttUtils.makeClient();
-        MqttGrpcServer mqttGrpcServer = new MqttGrpcServer(serverMqtt, DEVICE);
-        final HelloService service = new HelloService();
-        HelloSkeleton skeleton = new HelloSkeleton(service);
-        mqttGrpcServer.subscribeService(serviceBaseTopic, skeleton);
-
-
-        //Setup the client stub
-        final MqttAsyncClient clientMqtt = MqttUtils.makeClient();
-        ProtoSender sender = new ProtoSender(clientMqtt, DEVICE);
-        HelloStub stub = new HelloStub(sender, SERVICE_NAME);
-
-        //send a message and make sure we get a response
-        HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
-        StreamWaiter<HelloReply> waiter = new StreamWaiter<>();
-        stub.requestResponse(joe, waiter);
-        HelloReply reply = waiter.getSingle();
-        assertEquals("Hello joe", reply.getMessage());
-
-        //Disconnect the server broker connection, send a message and check the exception
-        serverMqtt.disconnect().waitForCompletion();
-        serverMqtt.close();
-
-//        CountDownLatch latch = new CountDownLatch(1);
-//        stub.requestResponse(joe, new StreamObserver<HelloReply>() {
-//            @Override
-//            public void onNext(HelloReply value) {
-//                log.debug("next: " + value.toString());
-//            }
-//
-//            @Override
-//            public void onError(Throwable t) {
-//                log.error("err", t);
-//                latch.countDown();
-//            }
-//
-//            @Override
-//            public void onCompleted() {
-//                log.debug("complete");
-//                latch.countDown();
-//            }
-//        });
-//
-//        latch.await();
-
-        StreamWaiter waiter2 = new StreamWaiter<>(1000);
-        stub.requestResponse(joe, waiter);
-
-
-        StatusRuntimeException sre = assertThrows(StatusRuntimeException.class,
-                () -> waiter2.getSingle());
-
-
-        //The waiter will just time out.
-        //TODO: What if this was blocking stub? The protoSender needs to listen for the LWT of the server to fix this.
-        assertEquals(sre.getStatus().getCode(), Status.Code.DEADLINE_EXCEEDED);
-
-        //Run the same test for StreamIterator
-        //TODO: This will just wait forever. Again the protoSender needs to know about the LWT of the server
-//        StreamIterator<HelloReply> iter = new StreamIterator<>();
-//        stub.requestResponse(joe, iter);
-//        sre = assertThrows(StatusRuntimeException.class,
-//                () -> iter.next());
-//        assertEquals(sre.getStatus().getCode(), Status.Code.UNAVAILABLE);
-
-    }
 
 
 }

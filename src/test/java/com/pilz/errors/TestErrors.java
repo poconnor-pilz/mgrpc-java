@@ -4,10 +4,7 @@ import com.google.protobuf.Any;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.rpc.Code;
 import com.google.rpc.ErrorInfo;
-import com.pilz.mqttgrpc.ProtoSender;
-import com.pilz.mqttgrpc.MqttGrpcServer;
-import com.pilz.mqttgrpc.StreamIterator;
-import com.pilz.mqttgrpc.StreamWaiter;
+import com.pilz.mqttgrpc.*;
 import com.pilz.utils.MqttUtils;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
@@ -45,8 +42,8 @@ public class TestErrors {
 
         MqttUtils.startEmbeddedBroker();
 
-        serverMqtt = MqttUtils.makeClient();
-        clientMqtt = MqttUtils.makeClient();
+        serverMqtt = MqttUtils.makeClient(Topics.systemStatus(DEVICE));
+        clientMqtt = MqttUtils.makeClient(null);
     }
 
     @AfterAll
@@ -66,13 +63,15 @@ public class TestErrors {
 
         //Set up the server
         MqttGrpcServer mqttGrpcServer = new MqttGrpcServer(serverMqtt, DEVICE);
+        mqttGrpcServer.init();
         service = new ErrorsService();
         ErrorsSkeleton skeleton = new ErrorsSkeleton(service);
         mqttGrpcServer.subscribeService(SERVICE_NAME, skeleton);
 
         //Setup the client stub
-        ProtoSender sender = new ProtoSender(clientMqtt, DEVICE);
-        stub = new ErrorsStub(sender, SERVICE_NAME);
+        MqttGrpcClient mgClient = new MqttGrpcClient(clientMqtt, DEVICE);
+        mgClient.init();
+        stub = new ErrorsStub(mgClient, SERVICE_NAME);
     }
 
 

@@ -20,26 +20,26 @@ public class HelloSkeleton implements Skeleton {
 
         switch(method){
 
-            case IHelloService.REQUEST_RESPONSE:
+            case IHelloService.SAY_HELLO:
                 //Use SingleToStreamObserver here because the service will only send one response.
                 //It is not necessary to use this but it is more efficient. It will mean that one less
                 //mqtt message is sent compared to using BufferToStreamObserver.
-                service.requestResponse(HelloRequest.parseFrom(request), new SingleToStreamObserver<>(responseObserver));
+                service.sayHello(HelloRequest.parseFrom(request), new SingleToStreamObserver<>(responseObserver));
                 return null;
 
-            case IHelloService.SERVER_STREAM:
+            case IHelloService.LOTS_OF_REPLIES:
                 //Use BufferToStreamObserver here because the server stream will have more than one response.
-                service.serverStream(HelloRequest.parseFrom(request), new BufferToStreamObserver<>(responseObserver));
+                service.lotsOfReplies(HelloRequest.parseFrom(request), new BufferToStreamObserver<>(responseObserver));
                 return null;
 
-            case IHelloService.CLIENT_STREAM:
+            case IHelloService.LOTS_OF_GREETINGS:
                 //Use StreamToBufferObserver to convert the client StreamObserver to a BufferObserver.
                 return new StreamToBufferObserver<>(HelloRequest.parser(),
-                        service.clientStream(new SingleToStreamObserver<>(responseObserver)));
+                        service.lotsOfGreetings(new SingleToStreamObserver<>(responseObserver)));
 
-            case IHelloService.CLIENT_AND_SERVER_STREAM:
+            case IHelloService.BIDI_HELLO:
                 return new StreamToBufferObserver<>(HelloRequest.parser(),
-                        service.clientAndServerStream(new BufferToStreamObserver<>(responseObserver)));
+                        service.bidiHello(new BufferToStreamObserver<>(responseObserver)));
         }
 
         log.error("Unmatched method: " + method);

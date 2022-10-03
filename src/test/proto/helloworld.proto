@@ -20,11 +20,24 @@ option objc_class_prefix = "HLW";
 
 package helloworld;
 
-// The greeting service definition.
-service Greeter {
-  // Sends a greeting
-  rpc SayHello (HelloRequest) returns (HelloReply) {}
+
+
+service ExampleHelloService {
+
+  //Send a single HelloRequest message and return a single HelloReply
+  rpc SayHello(HelloRequest) returns (HelloReply);
+
+  //Send a single HelloRequest message and return a stream of HelloReply messages
+  rpc LotsOfReplies(HelloRequest) returns (stream HelloReply);
+
+  //Send a stream of HelloRequest messages and return a single HelloReply message
+  rpc LotsOfGreetings(stream HelloRequest) returns (HelloReply);
+
+  //Send a stream of HelloRequest messages and return a stream of HelloReply messages
+  rpc BidiHello(stream HelloRequest) returns (stream HelloReply);
+
 }
+
 
 // The request message containing the user's name.
 message HelloRequest {
