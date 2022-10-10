@@ -27,8 +27,8 @@ message MqttGrpcRequest {
   //Topic to reply to. If this message is a request then replyTo must be set. Otherwise this message is part of a
   //is part of an input stream (client side stream)
   string replyTo = 3;
-  //If this message is part of an input stream (client side stream) then streamId will contain a uuid that identifies it.
-  string streamId = 4;
+  //The request id.
+  string requestId = 4;
 }
 
 message MqttGrpcResponse {
@@ -36,6 +36,8 @@ message MqttGrpcResponse {
   MqttGrpcType type = 1;
   //The message payload encoded as a protocol buffer
   bytes message = 2;
+  //The request id.
+  string requestId = 3;
 }
 
 //The connection status of a server. Sent to an mqtt LWT topic

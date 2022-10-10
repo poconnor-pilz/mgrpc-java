@@ -37,6 +37,9 @@ public class TestErrors {
     private static final String DEVICE = "device";
     private static final String SERVICE_NAME = "errorsservice";
 
+    private static final long REQUEST_TIMEOUT = 2000;
+
+
     @BeforeAll
     public static void startBrokerAndClients() throws MqttException, IOException {
 
@@ -126,7 +129,7 @@ public class TestErrors {
 
 
         Status status = statusRuntimeException.getStatus();
-        assertEquals(status.getCode(), Status.Code.OUT_OF_RANGE);
+        assertEquals(Status.Code.OUT_OF_RANGE, status.getCode());
         assertEquals("the value is out of range", status.getDescription());
     }
 
@@ -193,7 +196,7 @@ public class TestErrors {
 
     public void testErrorInClientStream(IErrorsService errorsService){
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
-        StreamWaiter<HelloReply> waiter = new StreamWaiter<>();
+        StreamWaiter<HelloReply> waiter = new StreamWaiter<>(REQUEST_TIMEOUT);
         StreamObserver<HelloRequest> clientStreamObserver = errorsService.errorInClientStream(waiter);
         clientStreamObserver.onNext(joe);
         clientStreamObserver.onError(Status.OUT_OF_RANGE.withDescription("some description").asRuntimeException());
@@ -287,7 +290,7 @@ public class TestErrors {
 
     public void testRichErrorInClientStream(IErrorsService errorsService){
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
-        StreamWaiter<HelloReply> waiter = new StreamWaiter<>();
+        StreamWaiter<HelloReply> waiter = new StreamWaiter<>(REQUEST_TIMEOUT);
         StreamObserver<HelloRequest> clientStreamObserver = errorsService.richErrorInClientStream(waiter);
         clientStreamObserver.onNext(joe);
 

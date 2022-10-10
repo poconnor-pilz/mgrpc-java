@@ -36,6 +36,8 @@ public class TestHello {
     private static final String DEVICE = "device1";
     private static final String SERVICE_NAME = "helloservice";
 
+    private static final long REQUEST_TIMEOUT = 2000;
+
     @BeforeAll
     public static void startBrokerAndClients() throws MqttException, IOException {
 
@@ -86,7 +88,7 @@ public class TestHello {
     public void testSayHello(IHelloService helloService) throws Throwable{
 
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
-        StreamWaiter<HelloReply> waiter = new StreamWaiter<>();
+        StreamWaiter<HelloReply> waiter = new StreamWaiter<>(REQUEST_TIMEOUT);
         helloService.sayHello(joe, waiter);
         HelloReply reply = waiter.getSingle();
         assertEquals("Hello joe", reply.getMessage());
@@ -101,7 +103,7 @@ public class TestHello {
     public void testLotsOfReplies(IHelloService helloService) throws Throwable{
 
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
-        StreamWaiter<HelloReply> waiter = new StreamWaiter<>();
+        StreamWaiter<HelloReply> waiter = new StreamWaiter<>(REQUEST_TIMEOUT);
         helloService.lotsOfReplies(joe, waiter);
         List<HelloReply> responseList = waiter.getList();
         assertEquals(responseList.size(), 2);
@@ -122,7 +124,7 @@ public class TestHello {
 
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
         HelloRequest jane = HelloRequest.newBuilder().setName("jane").build();
-        StreamWaiter<HelloReply> waiter = new StreamWaiter<>();
+        StreamWaiter<HelloReply> waiter = new StreamWaiter<>(REQUEST_TIMEOUT);
         StreamObserver<HelloRequest> clientStreamObserver = helloService.lotsOfGreetings(waiter);
         clientStreamObserver.onNext(joe);
         clientStreamObserver.onNext(jane);

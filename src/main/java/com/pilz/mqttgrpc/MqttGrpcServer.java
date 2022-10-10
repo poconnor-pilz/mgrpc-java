@@ -10,7 +10,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.Closeable;
-import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -81,8 +80,8 @@ public class MqttGrpcServer implements Closeable {
         String allMethodsIn = Topics.allMethodsIn(serverTopic, serviceName);
         log.debug("subscribeService: " + allMethodsIn);
         client.subscribe(allMethodsIn, 1, new MqttExceptionLogger((String topic, MqttMessage message) -> {
-            //TODO: must handle all exceptions here (user mqttexceptionhandler)
-            //or else the exception will disconnect the mqtt client
+            //We use an MqttExceptionLogger here because if a we throw an exception in the subscribe handler
+            //it will disconnect the mqtt client
             log.debug("Received message on : " + topic);
             //TODO: this should be in thread pool
             //TODO: Error handling needed everywhere
@@ -93,35 +92,30 @@ public class MqttGrpcServer implements Closeable {
             String method = topic.substring(topic.lastIndexOf('/') + 1);
             ByteString params = request.getMessage();
             String replyTo = request.getReplyTo();
-            String streamId = request.getStreamId();
+            String requestId = request.getRequestId();
+            if(requestId.isEmpty()){
+                log.error("Every message sent from the client must have a requestId");
+                return;
+            }
 
             if (request.getType() == MqttGrpcType.REQUEST) {
                 BufferObserver clientBufferObserver = skeleton.onRequest(method, params,
-                        new ServerBufferPublisher(replyTo));
+                        new ServerBufferPublisher(requestId, replyTo));
 
                 if (clientBufferObserver != null) {
-                    if (streamId.isEmpty()) {
-                        //TODO: Send error to client. Client must supply streamId if the service has an input stream
-                        log.error("No streamId supplied for client stream request");
-                        return;
-                    }
-                    //Store the input stream so that we can send later messages to it if they have the same streamId
-                    log.debug("Setting up MappedInputStream for " + streamId);
-                    streamIdToClientBufferObserver.put(streamId, clientBufferObserver);
+                    //The service expects a client side stream
+                    //Store the stream so that we can send later messages to it if they have the same requestId
+                    log.debug("Setting up MappedInputStream for " + requestId);
+                    streamIdToClientBufferObserver.put(requestId, clientBufferObserver);
                 }
 
             } else {
                 //This message is not a REQUEST so it is part of a client side stream
-                if (streamId.isEmpty()) {
-                    //TODO: Send error to client. Client must supply streamId if there is no replyTo
-                    log.error("If replyTo is empty then streamId must be empty");
-                    return;
-                }
                 //Get the corresponding stream and send on the message
-                final BufferObserver clientBufferObserver = streamIdToClientBufferObserver.get(streamId);
+                final BufferObserver clientBufferObserver = streamIdToClientBufferObserver.get(requestId);
                 if (clientBufferObserver == null) {
                     //TODO: log error, this should not occur
-                    log.error("Can't find stream for: " + streamId);
+                    log.error("Can't find stream for: " + requestId);
                     return;
                 }
                 switch (request.getType()) {
@@ -130,18 +124,18 @@ public class MqttGrpcServer implements Closeable {
                         break;
                     case SINGLE:
                         clientBufferObserver.onSingle(request.getMessage());
-                        streamIdToClientBufferObserver.remove(streamId);
+                        streamIdToClientBufferObserver.remove(requestId);
                         break;
                     case COMPLETED:
                         //TODO: This also needs to be removed if the client gets disconnected
-                        log.debug("Completed received. Removing MappedClientStream for " + streamId);
-                        streamIdToClientBufferObserver.remove(streamId);
+                        log.debug("Completed received. Removing MappedClientStream for " + requestId);
+                        streamIdToClientBufferObserver.remove(requestId);
                         clientBufferObserver.onCompleted();
                         break;
                     case ERROR:
                         log.error("Received error in client stream");
-                        log.debug("Removing MappedClientStream for " + streamId);
-                        streamIdToClientBufferObserver.remove(streamId);
+                        log.debug("Removing MappedClientStream for " + requestId);
+                        streamIdToClientBufferObserver.remove(requestId);
                         clientBufferObserver.onError(request.getMessage());
                         break;
                     default:
@@ -160,9 +154,11 @@ public class MqttGrpcServer implements Closeable {
      */
     private class ServerBufferPublisher implements BufferObserver {
 
+        private final String requestId;
         private final String replyTo;
 
-        private ServerBufferPublisher(String replyTo) {
+        private ServerBufferPublisher(String requestId, String replyTo) {
+            this.requestId = requestId;
             this.replyTo = replyTo;
         }
 
@@ -170,6 +166,7 @@ public class MqttGrpcServer implements Closeable {
         public void onNext(ByteString value) {
             log.debug("Sending NEXT");
             MqttGrpcResponse reply = MqttGrpcResponse.newBuilder()
+                    .setRequestId(requestId)
                     .setMessage(value)
                     .setType(MqttGrpcType.NEXT).build();
             try {
@@ -184,6 +181,7 @@ public class MqttGrpcServer implements Closeable {
         public void onSingle(ByteString value) {
             log.debug("Sending SINGLE");
             MqttGrpcResponse reply = MqttGrpcResponse.newBuilder()
+                    .setRequestId(requestId)
                     .setMessage(value)
                     .setType(MqttGrpcType.SINGLE).build();
             try {
@@ -198,6 +196,7 @@ public class MqttGrpcServer implements Closeable {
         public void onCompleted() {
             log.debug("Sending COMPLETED");
             MqttGrpcResponse reply = MqttGrpcResponse.newBuilder()
+                    .setRequestId(requestId)
                     .setType(MqttGrpcType.COMPLETED).build();
             try {
                 client.publish(replyTo, reply.toByteArray(), 1, false);
@@ -212,6 +211,7 @@ public class MqttGrpcServer implements Closeable {
         public void onError(ByteString error) {
             log.debug("Sending ERROR");
             MqttGrpcResponse reply = MqttGrpcResponse.newBuilder()
+                    .setRequestId(requestId)
                     .setMessage(error)
                     .setType(MqttGrpcType.ERROR).build();
             try {

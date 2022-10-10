@@ -149,17 +149,16 @@ public class MqttGrpcClient implements Closeable {
      * @throws Exception
      */
     public <T extends MessageLite> StreamObserver<T> sendClientStreamingRequest(String serviceName, String method, BufferObserver responseObserver) {
-        final String streamId = Base64Utils.randomId();
+
         Builder request = MqttGrpcRequest.newBuilder()
-                .setType(MqttGrpcType.REQUEST)
-                .setStreamId(streamId);
-        send(serviceName, method, request, responseObserver);
+                .setType(MqttGrpcType.REQUEST);
+        final String requestId = send(serviceName, method, request, responseObserver);
 
         return new StreamObserver<T>() {
             @Override
             public void onNext(T value) {
                 try {
-                    sendClientStreamNext(serviceName, method, streamId, value);
+                    sendClientStreamNext(serviceName, method, requestId, value);
                 } catch (StatusException e) {
                     //If there is an error sending a client stream value then send that error
                     //on to the original responseObserver associated with the method call
@@ -174,7 +173,7 @@ public class MqttGrpcClient implements Closeable {
             @Override
             public void onError(Throwable t) {
                 try {
-                    sendClientStreamError(serviceName, method, streamId, StatusProto.fromThrowable(t).toByteString());
+                    sendClientStreamError(serviceName, method, requestId, StatusProto.fromThrowable(t).toByteString());
                 } catch (StatusException e) {
                     responseObserver.onError(StatusProto.fromThrowable(e).toByteString());
                     MqttGrpcClient.this.responseObservers.remove(responseObserver);
@@ -183,7 +182,7 @@ public class MqttGrpcClient implements Closeable {
             @Override
             public void onCompleted() {
                 try {
-                    sendClientStreamCompleted(serviceName, method, streamId);
+                    sendClientStreamCompleted(serviceName, method, requestId);
                 } catch (StatusException e) {
                     responseObserver.onError(StatusProto.fromThrowable(e).toByteString());
                     MqttGrpcClient.this.responseObservers.remove(responseObserver);
@@ -199,14 +198,14 @@ public class MqttGrpcClient implements Closeable {
      *
      * @param method   The name of the method to call
      * @param error    The error
-     * @param streamId The stream id if the service method takes an input stream from the client otherwise null
+     * @param requestId The stream id if the service method takes an input stream from the client otherwise null
      * @throws StatusException
      */
-    public void sendClientStreamError(String serviceName, String method, String streamId, ByteString error) throws StatusException {
+    public void sendClientStreamError(String serviceName, String method, String requestId, ByteString error) throws StatusException {
         Builder request = MqttGrpcRequest.newBuilder()
                 .setType(MqttGrpcType.ERROR)
                 .setMessage(error)
-                .setStreamId(streamId);
+                .setRequestId(requestId);
         send(serviceName, method, request);
     }
 
@@ -215,13 +214,13 @@ public class MqttGrpcClient implements Closeable {
      * Send the completed token to method that takes a input stream (client side stream)
      *
      * @param method   The name of the method to call
-     * @param streamId The stream id if the service method takes an input stream from the client otherwise null
+     * @param requestId The stream id if the service method takes an input stream from the client otherwise null
      * @throws StatusException
      */
-    public void sendClientStreamCompleted(String serviceName, String method, String streamId) throws StatusException {
+    public void sendClientStreamCompleted(String serviceName, String method, String requestId) throws StatusException {
         Builder request = MqttGrpcRequest.newBuilder()
                 .setType(MqttGrpcType.COMPLETED)
-                .setStreamId(streamId);
+                .setRequestId(requestId);
         send(serviceName, method, request);
     }
 
@@ -230,27 +229,31 @@ public class MqttGrpcClient implements Closeable {
      *
      * @param method   The name of the method to call
      * @param message  The payload of the message
-     * @param streamId The stream id if the service method takes an input stream from the client otherwise null
+     * @param requestId The stream id if the service method takes an input stream from the client otherwise null
      * @throws StatusException
      */
-    public void sendClientStreamNext(String serviceName, String method, String streamId, MessageLite message) throws StatusException {
+    public void sendClientStreamNext(String serviceName, String method, String requestId, MessageLite message) throws StatusException {
         Builder request = MqttGrpcRequest.newBuilder()
                 .setType(MqttGrpcType.NEXT)
                 .setMessage(message.toByteString())
-                .setStreamId(streamId);
+                .setRequestId(requestId);
         send(serviceName, method, request);
     }
 
-    private void send(String serviceName, String method, Builder request, BufferObserver responseObserver) {
+    private String send(String serviceName, String method, Builder request, BufferObserver responseObserver) {
 
+        String requestId = Base64Utils.randomId();
         try {
-            String replyTo = subscribeForReplies(serviceName, method, responseObserver);
+            request.setRequestId(requestId);
+            String replyTo = subscribeForReplies(serviceName, method, requestId, responseObserver);
             request.setReplyTo(replyTo);
             send(serviceName, method, request);
+            return requestId;
         } catch (StatusException e) {
             final com.google.rpc.Status grpcStatus = StatusProto.fromStatusAndTrailers(e.getStatus(), null);
             responseObserver.onError(grpcStatus.toByteString());
         }
+        return requestId;
     }
 
     private void send(String serviceName, String method, Builder request) throws StatusException {
@@ -266,11 +269,11 @@ public class MqttGrpcClient implements Closeable {
     }
 
 
-    private String subscribeForReplies(String serviceName, String method, BufferObserver responseObserver) throws StatusException {
+    private String subscribeForReplies(String serviceName, String method, String requestId, BufferObserver responseObserver) throws StatusException {
         if (!serverConnected) {
             throw new StatusException(Status.UNAVAILABLE.withDescription("Server unavailable or MqttGrpcClient.init() was not called"));
         }
-        final String replyTo = Topics.replyTo(serverTopic, serviceName, method);
+        final String replyTo = Topics.replyTo(serverTopic, serviceName, method, requestId);
         log.debug("Subscribing for responses on: " + replyTo);
         final IMqttMessageListener messageListener = new MqttExceptionLogger((String topic, MqttMessage message) -> {
             log.debug("Received response on: " + topic);
