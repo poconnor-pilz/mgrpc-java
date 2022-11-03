@@ -1,7 +1,11 @@
 
-## General Design stuff
+## General 
+
+See also transport.md for stuff about the transport
+
 We should try for smart endpoints, dumb pipes. So let the final user client code deal with exceptions and lost connections and re-connecting etc.
 Responsibility of proxy and stub classes is just to map method names and protobufs to actual methods and typed messages.
+
 
 ## Ordering
 We should probably support a counter based id for this. It can be per stream as the stream will be distinguished by topid or if there is a shared topic then by something like a watchId or requestId. For request response ('unary' in grpc terms) can just set it to zero. Ordering will have to be managed as for services it will be important. For example a service that streams a project down to a device. So ordering should be built in. Look at the google mqtt javascript client code for this.
@@ -43,7 +47,6 @@ If there is a use case that requires pub sub then we will assume that this will 
 
 
 
-
 ## Topic structure
 In mqtt filtering is based on topic. This is inflexible because you cannot # subscribe something that you want to publish to.
 '#' matches all following segments and can only be at the end of a filter. '+' matches one segment
@@ -65,28 +68,34 @@ If we could filter by attributes then we could have whatever topic structure we 
 Microsoft use:
 devices/{device-id}/messages/devicebound/
 
-The second thing is that we are making point to point services so we want each MqttGrpcClient to be able to subscribe to something where it won't get messages that were supposed to be for other clients.
+Also we are making point to point services so we want each MqttGrpcClient to be able to subscribe to something where it won't get messages that were supposed to be for other clients.
 
 
-The structure will be
-server/i|o/svc/all|clientId/service/method
-server/i|o/sys/all|clientId/service/method
+The structure will be:
+
+    server/i|o/svc/all|clientId/service/method
+    server/i|o/sys/all|clientId/service/method
 
 Where 'all' just means all clients and if 'all' is not present then a specific client id has to be supplied. 
-So to call sayHello send a message to
+ 
+The client sends a request containing a requestId and a clientId (e.g. we2UL4O1SXyl5df7aY8bGA) to:
 
-device1/i/svc/all/helloservice/sayHello
+    device1/i/svc/all/helloservice/sayHello
 
-All input messages to services will be send to 'all' but they will have a header that has the clientId
-Then the reply will be send to 
+Then server sends a reply to: 
 
-device1/o/svc/we2UL4O1SXyl5df7aY8bGA/helloservice/sayHello
+    device1/o/svc/we2UL4O1SXyl5df7aY8bGA/helloservice/sayHello
 
-With this scheme it would also be possible to have a policy that restricts access to a service. i.e. You could grant read write access to the helloservice only with a topic policy like device1/+/svc/+/helloservice
+With this scheme ('all' or clientId) it would also be possible to have a policy that restricts access to a service. i.e. You could grant read write access to the helloservice only with a topic policy like device1/+/svc/+/helloservice (although that would mean that the implementation of MqttGrpcClient would have to explicitly subscribe for each service separately instead of subscribing for device1/0/svc/#. Note that it could subscribe for each one separately on a just in time basis i.e. if a client tries to send a message to /helloservice then it would subscribe to device1/o/svc/clientId/helloservice on the fly. We won't do this initially, just subscribe to device1/0/svc/#)
+If a uuid is used for clientId there is no chance of one client guessing another's id.
+The clientId could also be part of the call context (see security stuff) that any service could use 
 
-and if a uuid is used for clientId there is no chance of one client guessing another's id.
+Status will be reported at:
 
-server/o/sys/all/status/getStatus
+    server/o/sys/all/status
+
+The server will be expected to send a 'connected' message to this when it starts up and a 'disconnected' message when it is gracefully shut down. This will also be the LWT topic to which the broker will send a 'disconnected' message when the server is ungracefully disconnected. When the client starts up it can send a message to server/o/sys/all/promptstatus which will cause the server to send status to /status.
+Note that this implies that the server has its own mqtt connection to the broker where it can set the LWT etc. This seems reasonable. If the MqttGrpcServer had to share an mqtt connection then it probably could not dictate the structure of the LWT topic like this. Then we might have to have the MqttGrpcServer implement some interface that would notify it of connects and disconnects etc.
 
 
 We will support more than one hello service on a device or wherever but it will need to have a different topic. Note that grpc seems to only support one instance of a particular
@@ -119,7 +128,7 @@ In AuthServer they do
 
     `String clientId = Constant.CLIENT_ID_CONTEXT_KEY.get();`
 
-This gets the context which is some kind of threadLocal. This context class etc. may be re-usable so we should look into it. 
+This gets the context which is some kind of object stored in a threadLocal. We can easily do something similar this but it would be better to be able to reuse the gRPC Context class so any grpc service we write can also run in a classic grpc server. To understand this class put a breakpoint in Context.attach() and Run AuthServer and AuthClient. Up the call stack the system has a queue of runnables that it is running. Each one is a ContextRunnable. It's just a runnable that had some Context set in it as a .context member variable. Who knows where or when the runnable was created we don't care but we want to make sure that its context is put in thread local while it's running. So the run() of the runnable does Context.attach(). This puts the context into thread local. Then in a finally outside the run it makes sure to restore the previous context. Note that Context.attach() uses something called Storage but this is an instance of LazyStorage.storage whose createStorage() defaults to a Thread local. (they have some way of changing this but who knows if anyone even uses it). So we can use this. To create on there is a public static Context.ROOT. You create children from this using the with* methods. Then before doing a runnable make sure to set the context using .attach() (or use the Context.run(Runnable r) or Context.wrap() methods). Then in actual service implementation methods the service should be able to get e.g. an auth token from the Context.current() as in the example. Note that a context can also have a cancellation listene. so a method implementation could do Context.current() and register a listener on it and when the listener gets a cancel or deadline exceeded etc it could just stop and release resources or whatever. On the client side the deadline would be implemented some other way like waiting on a latch (or maybe using a context also? see the grpc impl of blocking stub with timeout or whatever). Anyway we would probably not support cancellation or timeouts initially.   
 
 ## Error handling
 Use this https://cloud.google.com/apis/design/errors

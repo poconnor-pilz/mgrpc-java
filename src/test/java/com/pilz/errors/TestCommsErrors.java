@@ -48,7 +48,7 @@ public class TestCommsErrors {
         //Setup the client stub
         //Make a MqttGrpcClient with an mqtt client that's not connected and verify that using a service with it
         //will cause UNAVAILABLE exceptions
-        MqttGrpcClient mgClient = new MqttGrpcClient(new MqttAsyncClient("tcp://localhost:1884", Base64Utils.randomId()), DEVICE);
+        MqttGrpcClient mgClient = new MqttGrpcClient(new MqttAsyncClient("tcp://localhost:1884", Base64Uuid.id()), DEVICE);
         StatusException ex = assertThrows(StatusException.class, () -> mgClient.init());
         assertEquals(Status.Code.UNAVAILABLE, ex.getStatus().getCode());
         HelloStub stub = new HelloStub(mgClient, SERVICE_NAME);

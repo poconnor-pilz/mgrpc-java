@@ -1,0 +1,114 @@
+
+# Transport
+
+Google:
+how to implement a grpc transport site:stackoverflow.com
+
+"In short, the answer is no. in Grpc.Core the native layer actually supports adding custom transports but doing so is a lot of work and requires expert knowledge of gRPC C core internals (and you'd need to recompile the native component from scratch) - so I wouldn't recommend going down this path. In grpc-dotnet this is currently also not possible (you need to use the default http2 transport)."
+https://stackoverflow.com/questions/65804270/how-to-create-and-use-a-custom-transport-channel-for-grpc
+
+There was some other answer saying that the transport is tied to the semantics of http/2 and is byte based not message based. So if your underlying protocol does not match this then don't use transport.
+
+The next level up is to use the Channel interface
+
+## Protcol buffers RPC
+The next level up from that again is to use protocol buffer RPC. You just modify the protocol buffer compiler to generate your own proxy and stub
+See the two links in the answer to this question
+https://stackoverflow.com/questions/59616929/how-can-i-write-my-own-rpc-implementation-for-protocol-buffers-utilizing-zeromq
+
+This is the main documentation
+https://developers.google.com/protocol-buffers/docs/proto#services
+
+See the javadoc here
+https://developers.google.com/protocol-buffers/docs/reference/java
+It says:
+Starting with version 2.3.0, RPC implementations should not try to build on this, but should instead provide code generator plugins which generate code specific to the particular RPC implementation. This way the generated code can be more appropriate for the implementation in use and can avoid unnecessary layers of indirection.
+
+So this contradicts the main documentation. But it looks like the protobuf services syntax is independent of grpc and you just plug into the compiler at a high level and generate your code.
+
+
+## Channel
+
+The next alternative is to use the channel interface and then get the benefit of generated blocking stubs etc. This means that we do not have to deal with bytes etc. A channel just creates a client call given a method descriptor. ClientCall is here:
+https://grpc.github.io/grpc-java/javadoc/io/grpc/ClientCall.html
+There is an example at the top of it that shows how it works
+When the client has no more requests to send on a client stream it calls halfClose(). So we would send completed here. In the case of a unary call we would send nothing.
+To debug the in channel version see C:\dev\gitpublic\grpc-java\examples\src\test\java\io\grpc\examples\helloworld\SimpleInprocessTest.java
+Also see:
+io.grpc.internal.ClientCallImpl
+This is a class that may have some helpers on how to implement a client call
+
+Note that errors are handled in ClientCall.onClose() by sending a bad status.
+
+TODO: Get an inprocess call going by using a manual registry? What is the registry? Debug into the InProcessChannelBuilder to see how that works.
+
+
+
+### Flow control/Backpressure
+
+
+
+The only other thing that is different from the mqtt implementation is flow control. Specifically the client does:
+// Notify gRPC to receive one additional response.
+call.request(1);
+
+Its not clear if the grpc client will buffer the message until it gets a request(n) or if it actually sends the request(n) on to the server. It probably sends it on.
+We are unlikely to send it on over mqtt as this would be expensive in terms of the number of messages back and forth for each value. This is not how mqtt works anyway and so mqtt solutions don't have this.
+In fact to do this it would probably be more efficient for the client to just pull i.e. to keep making requests on some stream id (well except that then there would be one value sent per request wheras with request(10) 10 values can be sent for one request so maybe that is not too bad if the n is big enough.)
+One way that might work is to use the broker as a buffer. If we use a shared client then all messages come off one pipe which is why each subscription blocks. But if we use a client per grpc client/stub then the subscription could just block on a lock until the client does request(n) and then it could read n messages and send them on.
+This would be expensive as clients are slow to connect and each client has a bit of memory and starts a few threads. The clients could be pooled but if things got busy then they might all end up blocking but this could be tested.
+
+A last way would be to have a pool of mqtt connnections and to only have one call ongoing on one connection at any time. The subscription for this call could then 'block' until the client requests more messages. This hopefully would cause the broker to buffer the messages until the subscription unblocks. But this would have to be tested to verify that if the sub blocks for a long time and in the meantime there are a lot of publishes to that topic that the broker doesn't end up dropping messages or failing a publish.
+
+In the end of the day though if we use the broker to buffer things then this solution would fail if we have a local broker like mosquitto. We will just be delegating the memory usage to mosquitto and the machine will eventually run out of memory. The only real way to do backpressure is to stop it at source.
+
+See C:\dev\gitpublic\grpc-java\examples\src\main\java\io\grpc\examples\manualflowcontrol\ManualFlowControlClient.java
+It looks from the comments in this that if you don't do manual flow control then there is no backpressure? Also it appears to depend on extending a special ClientResponseObserver class.
+
+Maybe if we have to do flow control or backpressure it might be better to use just request response where the response includes a batch of repeated fields. In the case of watches it will be ok anyway as we do flow control in the form of batching every 50ms max. If the client can't handle this then we could do it in the form of batching every 100ms.  
+
+
+## Older Transport Notes
+We could also aim so that the stub code behaves the same way although this will be harder as the stub is generated code. It's not some interface that we can implement. It's a pity that the grpc stub does not implement the same interface as the service. Then we could drop in another stub implementation. It's ok for us to have our own stub as long as we say that we only have to support two situations: Local in process calls and mqtt calls. If we also want to support https calls then we might need to support the full grpc stub but backed by something else. It may be possible to do this if we can support the channel interface. It looks like this is possible. Put a bp in the call to blockingStub.sayHello and watch how it is constructed. You have to just extend Channel and then implement the methods. The client will call newCall which passes a full method descriptor (service name, method name, method type e.g. UNARY). Then you return something that implements ClientCall. Then something will call ClientCall.start which takes a listener and that is what you pass the responses to. See DelayedListener and DelayedClientCall. Can put bps in these. So it is definitely possible. 
+See: 
+https://github.com/grpc/grpc-java/compare/master...jhump:jh/introduce-in-process-channel
+https://github.com/grpc/grpc-java/issues/518
+
+Transport is at too low a level, dealing with byte streams like sockets. Also deals with flow control and backpressur between client and server but this doesn't apply  in mqtt where client has no direct connection to server. Backpressure etc is handled by the broker.
+
+Also may be able to use some of the server infrastructure. Run the helloworld example and put bp in the GreeterImpl.sayHello. Up the stack there is a methodDescriptor etc.
+A GreeterImplBase is a BindableService (see in the HelloWorldServer.start it is used by addService). A BindableService has  a  ServerServiceDefinition on which you can call getMethod() and this returns a callble method. (Put a bp in sayHello and up the stack you will see it getting called). The problem is how do you reify the types that are being passed to it. It looks like it might not be needed as the method has the classes of the types when constructed (again see GreeterGrpc.java bindService() it makes the types there. So they may be fine. But where do we call with protobuf?. There is a MethodDescriptor.parseRequest and parseResponse and these may work fine.
+It looks like this is possible see HelloWorldServer.java
+    final HelloRequest hr = HelloRequest.newBuilder().setName("test1").build();
+    InputStream strm = new ByteArrayInputStream(hr.toByteArray());
+    final List<ServerServiceDefinition> services = server.getServices();
+    final ServerServiceDefinition serverServiceDefinition = services.get(0);
+    final ServerMethodDefinition<?, ?> sayHello = serverServiceDefinition.getMethod("helloworld.Greeter/SayHello");
+    final Object theHelloRequest = sayHello.getMethodDescriptor().parseRequest(strm);
+    final ServerCallHandler<?, ?> serverCallHandler = sayHello.getServerCallHandler();
+
+i.e. we have the HelloRequest parsed to theHelloRequest. But the handler is not the direct handler in GreeterImpl methodHandlers. Its a ServerCallHandler. This does contain the method handler but this is private and you have to go through the ServerCallHandler.start which gets passed a stream at some point. Maybe we could make a stream of the mqtt bytes for the param. But also its a unary call etc. So possibly TODO investigate later (maybe investigate the in process version to see what that does by running HelloWorldServerTest. It probably doesn't use streams? 
+**Also look at the git code above for the InprocessChannel stuff. This seems to call the server directly. Or even try to just make an inprocess call using the inprocess transport as below but use it generically?
+But for the moment this is not important because we can just generate the skeleton which much simpler than the generated code for GreeterImpl because it doesn't have to deal with streams and half close etc (broker handles all that). So it's probably better to use the simpler skeleton code than making it more complicated just to be able to use the default generated code.
+
+The more important thing is to try to mimic the client (blocking stub etc) because the client is the Interface. And we want to write our clients against a single interface. The server is just an implementation and ok there might be a bit of re-use of some but it's not about interoperability which is the important thing. 
+
+To run a service in process (see SimpleInprocessTest) as documented in InProcessServerBuilder:
+
+    public static void main(String[] args) throws IOException {
+        String uniqueName = InProcessServerBuilder.generateName();
+        Server server = InProcessServerBuilder.forName(uniqueName)
+                .directExecutor() 
+                .addService(new HelloWorldServer.GreeterImpl())
+                .build().start();
+        ManagedChannel channel = InProcessChannelBuilder.forName(uniqueName)
+                .directExecutor()
+                .build();
+        GreeterGrpc.GreeterBlockingStub blockingStub = GreeterGrpc.newBlockingStub(channel);
+        HelloReply reply =
+                blockingStub.sayHello(HelloRequest.newBuilder().setName( "test name").build());
+        assertEquals("Hello test name", reply.getMessage());
+        channel.shutdown();
+        server.shutdown();
+
+Although if directExecutor() above means that calls on the channel to any service will be serialised it might be better to have a threaded executor as that will be more efficient and also will mimic how the mqtt channel will behave.

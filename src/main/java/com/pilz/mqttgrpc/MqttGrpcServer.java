@@ -84,7 +84,6 @@ public class MqttGrpcServer implements Closeable {
             //it will disconnect the mqtt client
             log.debug("Received message on : " + topic);
             //TODO: this should be in thread pool
-            //TODO: Error handling needed everywhere
             final MqttGrpcRequest request = MqttGrpcRequest.parseFrom(message.getPayload());
             //TODO: When we unsubscribe will this protoService be garbage collected?
             //Maybe it should be in a map. instead and just have a single listener on the MqttProto class
@@ -164,7 +163,7 @@ public class MqttGrpcServer implements Closeable {
 
         @Override
         public void onNext(ByteString value) {
-            log.debug("Sending NEXT");
+            log.debug("Sending NEXT on: " + replyTo);
             MqttGrpcResponse reply = MqttGrpcResponse.newBuilder()
                     .setRequestId(requestId)
                     .setMessage(value)
@@ -179,7 +178,7 @@ public class MqttGrpcServer implements Closeable {
 
         @Override
         public void onSingle(ByteString value) {
-            log.debug("Sending SINGLE");
+            log.debug("Sending SINGLE on: " + replyTo);
             MqttGrpcResponse reply = MqttGrpcResponse.newBuilder()
                     .setRequestId(requestId)
                     .setMessage(value)
@@ -194,7 +193,7 @@ public class MqttGrpcServer implements Closeable {
 
         @Override
         public void onCompleted() {
-            log.debug("Sending COMPLETED");
+            log.debug("Sending COMPLETED on: " + replyTo);
             MqttGrpcResponse reply = MqttGrpcResponse.newBuilder()
                     .setRequestId(requestId)
                     .setType(MqttGrpcType.COMPLETED).build();
@@ -209,7 +208,7 @@ public class MqttGrpcServer implements Closeable {
 
         @Override
         public void onError(ByteString error) {
-            log.debug("Sending ERROR");
+            log.debug("Sending ERROR on " + replyTo);
             MqttGrpcResponse reply = MqttGrpcResponse.newBuilder()
                     .setRequestId(requestId)
                     .setMessage(error)

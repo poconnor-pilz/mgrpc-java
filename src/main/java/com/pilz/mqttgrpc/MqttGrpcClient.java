@@ -16,7 +16,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.Closeable;
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -35,7 +34,6 @@ public class MqttGrpcClient implements Closeable {
 
     /**
      * The topic prefix of the server e.g. devices/device1
-     * The LWT of the server will be expected to be at "server/o/sys/status/getStatus
      */
     private final String serverTopic;
 
@@ -242,7 +240,7 @@ public class MqttGrpcClient implements Closeable {
 
     private String send(String serviceName, String method, Builder request, BufferObserver responseObserver) {
 
-        String requestId = Base64Utils.randomId();
+        String requestId = Base64Uuid.id();
         try {
             request.setRequestId(requestId);
             String replyTo = subscribeForReplies(serviceName, method, requestId, responseObserver);

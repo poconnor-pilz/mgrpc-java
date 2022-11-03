@@ -4,13 +4,11 @@ import java.nio.ByteBuffer;
 import java.util.Base64;
 import java.util.UUID;
 
-public class Base64Utils {
+public class Base64Uuid {
 
 
-    public static String randomId(){return randomUuidAsBase64Url();}
-    public static String randomUuidAsBase64Url(){
-        return uuidToBase64Url(UUID.randomUUID());
-    }
+    public static String id(){return uuidToBase64Url(UUID.randomUUID());}
+
 
     private static final Base64.Encoder base64 = Base64.getUrlEncoder().withoutPadding();
 

@@ -24,15 +24,19 @@ package helloworld;
 
 service ExampleHelloService {
 
+  //Unary request response
   //Send a single HelloRequest message and return a single HelloReply
   rpc SayHello(HelloRequest) returns (HelloReply);
 
+  //Server streaming
   //Send a single HelloRequest message and return a stream of HelloReply messages
   rpc LotsOfReplies(HelloRequest) returns (stream HelloReply);
 
+  //Client streaming
   //Send a stream of HelloRequest messages and return a single HelloReply message
   rpc LotsOfGreetings(stream HelloRequest) returns (HelloReply);
 
+  //Bidirectional streaming
   //Send a stream of HelloRequest messages and return a stream of HelloReply messages
   rpc BidiHello(stream HelloRequest) returns (stream HelloReply);
 
