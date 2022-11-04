@@ -5,13 +5,13 @@ import com.pilz.examples.hello.HelloSkeleton;
 import com.pilz.examples.hello.HelloStub;
 import com.pilz.mqttgrpc.*;
 import com.pilz.utils.MqttUtils;
-import io.grpc.ManagedChannel;
-import io.grpc.Server;
+import io.grpc.*;
 import io.grpc.examples.helloworld.ExampleHelloServiceGrpc;
 import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.inprocess.InProcessChannelBuilder;
 import io.grpc.inprocess.InProcessServerBuilder;
+import io.grpc.internal.ServerStream;
 import io.grpc.stub.StreamObserver;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
@@ -19,14 +19,21 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.concurrent.CountDownLatch;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+
 public class TestHelloWithChannel {
+
+    private static Logger log = LoggerFactory.getLogger(TestHelloWithChannel.class);
 
     private static MqttAsyncClient serverMqtt;
     private static MqttAsyncClient clientMqtt;
@@ -77,10 +84,72 @@ public class TestHelloWithChannel {
     static class ExampleHelloServiceImpl extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase{
         @Override
         public void sayHello(HelloRequest request, StreamObserver<HelloReply> responseObserver) {
+            log.debug("ExampleHelloServiceImpl received: " + request);
             HelloReply reply = HelloReply.newBuilder().setMessage("Hello " + request.getName()).build();
             responseObserver.onNext(reply);
             responseObserver.onCompleted();
 
+        }
+    }
+
+    @Test
+    public void testServerCall(){
+
+        //Make an InputStream from a HelloRequest
+        final HelloRequest hr = HelloRequest.newBuilder().setName("joe").build();
+        InputStream stream = new ByteArrayInputStream(hr.toByteArray());
+
+
+        final ExampleHelloServiceImpl exampleHelloService = new ExampleHelloServiceImpl();
+        final ServerServiceDefinition serverServiceDefinition = exampleHelloService.bindService();
+        final ServerMethodDefinition<?, ?> sayHello = serverServiceDefinition.getMethod("helloworld.ExampleHelloService/SayHello");
+        final Object theHelloRequest = sayHello.getMethodDescriptor().parseRequest(stream);
+        final ServerCallHandler serverCallHandler = sayHello.getServerCallHandler();
+        ServerCall serverCall = new ServerCallTry(sayHello.getMethodDescriptor());
+        final ServerCall.Listener listener = serverCallHandler.startCall(serverCall, new Metadata());
+        listener.onMessage(theHelloRequest);
+        //notify this is the end of the client stream after which the onMessage() will go through
+        listener.onHalfClose();
+
+
+    }
+
+    static class ServerCallTry<ReqT, RespT> extends ServerCall<ReqT,RespT>{
+
+        final MethodDescriptor<ReqT, RespT> methodDescriptor;
+
+        ServerCallTry(MethodDescriptor<ReqT, RespT> methodDescriptor) {
+            this.methodDescriptor = methodDescriptor;
+        }
+
+        @Override
+        public void request(int numMessages) {
+
+        }
+
+        @Override
+        public void sendHeaders(Metadata headers) {
+
+        }
+
+        @Override
+        public void sendMessage(RespT message) {
+            log.debug("Got a response");
+        }
+
+        @Override
+        public void close(Status status, Metadata trailers) {
+
+        }
+
+        @Override
+        public boolean isCancelled() {
+            return false;
+        }
+
+        @Override
+        public MethodDescriptor<ReqT, RespT> getMethodDescriptor() {
+            return methodDescriptor;
         }
     }
 

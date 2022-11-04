@@ -27,7 +27,44 @@ Starting with version 2.3.0, RPC implementations should not try to build on this
 So this contradicts the main documentation. But it looks like the protobuf services syntax is independent of grpc and you just plug into the compiler at a high level and generate your code.
 
 
-## Channel
+## Channel, ClientCall, ServerCall
+
+This seems to be the middle level. The basic architecture is roughly:
+
+ClientCode->Request->ClientCall.sendMessage()->Transport->ServerCall.Listener.onMessage()
+ClientCall.Listener.onMessage()<-Transport<-ServerCall.sendMessage()<-Response
+
+There are two points where listeners and calls are wired together:
+
+ClientCall::start(Listener<RespT> responseListener, Metadata headers)
+and
+ServerCall.Listener<RequestT> ServerCall::startCall(ServerCall<RequestT, ResponseT> call, Metadata headers);
+
+And also there's code where StreamObserver is converted to the sendMessage/onMessage stuff above
+
+Where at the far right is the method implementation got from the ServiceImpl
+
+There's a bit more to it than that but can be worked out by debugging this:
+
+
+        //Make an InputStream from a HelloRequest
+        final HelloRequest hr = HelloRequest.newBuilder().setName("joe").build();
+        InputStream stream = new ByteArrayInputStream(hr.toByteArray());
+
+
+        final ExampleHelloServiceImpl exampleHelloService = new ExampleHelloServiceImpl();
+        final ServerServiceDefinition serverServiceDefinition = exampleHelloService.bindService();
+        final ServerMethodDefinition<?, ?> sayHello = serverServiceDefinition.getMethod("helloworld.ExampleHelloService/SayHello");
+        final Object theHelloRequest = sayHello.getMethodDescriptor().parseRequest(stream);
+        final ServerCallHandler serverCallHandler = sayHello.getServerCallHandler();
+        ServerCall serverCall = new ServerCallTry(sayHello.getMethodDescriptor());
+        final ServerCall.Listener listener = serverCallHandler.startCall(serverCall, new Metadata());
+        listener.onMessage(theHelloRequest);
+        //notify this is the end of the client stream after which the onMessage() will go through
+        listener.onHalfClose();
+
+Where ServerCallTry is just an empty implementation of ServerCall but whose getMethodDescriptor returns the method descriptor passed in ctr
+
 
 The next alternative is to use the channel interface and then get the benefit of generated blocking stubs etc. This means that we do not have to deal with bytes etc. A channel just creates a client call given a method descriptor. ClientCall is here:
 https://grpc.github.io/grpc-java/javadoc/io/grpc/ClientCall.html
