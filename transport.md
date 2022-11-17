@@ -31,7 +31,7 @@ So this contradicts the main documentation. But it looks like the protobuf servi
 
 This seems to be the middle level. The basic architecture is roughly:
 
-ClientCode->Request->ClientCall.sendMessage()->Transport->ServerCall.Listener.onMessage()
+Request->ClientCall.sendMessage()->Transport->ServerCall.Listener.onMessage()
 ClientCall.Listener.onMessage()<-Transport<-ServerCall.sendMessage()<-Response
 
 There are two points where listeners and calls are wired together:
@@ -50,7 +50,6 @@ There's a bit more to it than that but can be worked out by debugging this:
         //Make an InputStream from a HelloRequest
         final HelloRequest hr = HelloRequest.newBuilder().setName("joe").build();
         InputStream stream = new ByteArrayInputStream(hr.toByteArray());
-
 
         final ExampleHelloServiceImpl exampleHelloService = new ExampleHelloServiceImpl();
         final ServerServiceDefinition serverServiceDefinition = exampleHelloService.bindService();
@@ -95,14 +94,20 @@ In fact to do this it would probably be more efficient for the client to just pu
 One way that might work is to use the broker as a buffer. If we use a shared client then all messages come off one pipe which is why each subscription blocks. But if we use a client per grpc client/stub then the subscription could just block on a lock until the client does request(n) and then it could read n messages and send them on.
 This would be expensive as clients are slow to connect and each client has a bit of memory and starts a few threads. The clients could be pooled but if things got busy then they might all end up blocking but this could be tested.
 
-A last way would be to have a pool of mqtt connnections and to only have one call ongoing on one connection at any time. The subscription for this call could then 'block' until the client requests more messages. This hopefully would cause the broker to buffer the messages until the subscription unblocks. But this would have to be tested to verify that if the sub blocks for a long time and in the meantime there are a lot of publishes to that topic that the broker doesn't end up dropping messages or failing a publish.
+A last way would be to have a pool of mqtt connnections and to only have one call ongoing on one connection at any time. The subscription for this call could then 'block' until the client requests more messages. This hopefully would cause the broker to buffer the messages until the subscription unblocks. But this would have to be tested to verify that if the sub blocks for a long time and in the meantime there are a lot of publishes to that topic that the broker doesn't end up dropping messages or failing a publish. It is unusual in mqtt to have multiple connections. But the concept of many tcp connections to a server is not unusual - db connection pool, http client can have many connections to a server (and create and drop connections frequently) etc. One connection per method might not be ridiculous.
 
-In the end of the day though if we use the broker to buffer things then this solution would fail if we have a local broker like mosquitto. We will just be delegating the memory usage to mosquitto and the machine will eventually run out of memory. The only real way to do backpressure is to stop it at source.
+In the end of the day though if we use the broker to buffer things then this solution would fail if we have a local broker like mosquitto. We will just be delegating the memory usage to mosquitto and the machine will eventually run out of memory. The only real way to do backpressure is to stop the data getting in at source.
 
 See C:\dev\gitpublic\grpc-java\examples\src\main\java\io\grpc\examples\manualflowcontrol\ManualFlowControlClient.java
 It looks from the comments in this that if you don't do manual flow control then there is no backpressure? Also it appears to depend on extending a special ClientResponseObserver class.
 
-Maybe if we have to do flow control or backpressure it might be better to use just request response where the response includes a batch of repeated fields. In the case of watches it will be ok anyway as we do flow control in the form of batching every 50ms max. If the client can't handle this then we could do it in the form of batching every 100ms.  
+Maybe if we have to do flow control or backpressure it might be better to use just request response where the response includes a batch of repeated fields. In the case of watches it will be ok anyway as we do flow control in the form of batching every 50ms max. If the client can't handle this then we could do it in the form of batching every 100ms. 
+On the client side we are in the cloud so the client should be able to allocate plenty of memory and queue things if there are bursts. If there is just too much constant throughput then the solution to this is something like opc where the client tells the server the max update rate. This is better than backpressure becuase backpressure is only good for bursts. If we have a system with backpressure where there is constant high throughput then eventually the server will have to throw stuff away.
+For the server side then backpressure could be good to control a client stream. But we may not have many instances of client streams and there may be other ways of handling it like a bidi stream where the client only sends the next thing when it gets an 'ack' although this is very similar to backpressure.
+
+It may be possible to do a mix. For request response just use one connection for all methods. Then each method has a small bounded queue of requests. If that queue fills up the method fails the request. Then for streams use a separate connection pool and each stream just handles things directly on the subscribe thread, blocking it until it is ready for the next message, thereby using the broker as a buffer. Or else we could just implement backpressure for streams with the client telling the server to send on n messages. This is probably the best solution. It is not wasteful for request response (no request(n) messages being sent) and it also works for streams.
+
+Maybe for the first implementation just have a single subscription with each method having a bounded queue whether for requests or streams. If the queue fills then the request or stream fails. Then start to look at other ideas above later (starting with backpressure/request(n) for streams)
 
 
 ## Older Transport Notes
@@ -149,3 +154,4 @@ To run a service in process (see SimpleInprocessTest) as documented in InProcess
         server.shutdown();
 
 Although if directExecutor() above means that calls on the channel to any service will be serialised it might be better to have a threaded executor as that will be more efficient and also will mimic how the mqtt channel will behave.
+

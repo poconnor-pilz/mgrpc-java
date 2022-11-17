@@ -3,31 +3,25 @@ package com.pilz.examples.hellowithchannel;
 import com.pilz.examples.hello.HelloService;
 import com.pilz.examples.hello.HelloSkeleton;
 import com.pilz.examples.hello.HelloStub;
+import com.pilz.examples.hello.IHelloService;
 import com.pilz.mqttgrpc.*;
 import com.pilz.utils.MqttUtils;
-import io.grpc.*;
+import io.grpc.Channel;
 import io.grpc.examples.helloworld.ExampleHelloServiceGrpc;
 import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
-import io.grpc.inprocess.InProcessChannelBuilder;
-import io.grpc.inprocess.InProcessServerBuilder;
-import io.grpc.internal.ServerStream;
 import io.grpc.stub.StreamObserver;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.io.InputStream;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 
@@ -38,8 +32,8 @@ public class TestHelloWithChannel {
     private static MqttAsyncClient serverMqtt;
     private static MqttAsyncClient clientMqtt;
 
-    private HelloService service;
-    private HelloStub stub;
+    private MqttChannel channel;
+    private MqttServer server;
 
     private static final String DEVICE = "device1";
 
@@ -70,143 +64,71 @@ public class TestHelloWithChannel {
     @BeforeEach
     void setup() throws Exception{
 
-
         //Set up the server
-        MqttGrpcServer mqttGrpcServer = new MqttGrpcServer(serverMqtt, DEVICE);
-        mqttGrpcServer.init();
-        service = new HelloService();
-        HelloSkeleton skeleton = new HelloSkeleton(service);
-        mqttGrpcServer.subscribeService(SERVICE_BASE_TOPIC, skeleton);
-
+        server = new MqttServer(serverMqtt, DEVICE);
+        server.init();
+        server.addService(new HelloServiceTest());
+        channel = new MqttChannel(clientMqtt, DEVICE);
+        channel.init();
     }
 
-
-    static class ExampleHelloServiceImpl extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase{
-        @Override
-        public void sayHello(HelloRequest request, StreamObserver<HelloReply> responseObserver) {
-            log.debug("ExampleHelloServiceImpl received: " + request);
-            HelloReply reply = HelloReply.newBuilder().setMessage("Hello " + request.getName()).build();
-            responseObserver.onNext(reply);
-            responseObserver.onCompleted();
-
-        }
-    }
-
-    @Test
-    public void testServerCall(){
-
-        //Make an InputStream from a HelloRequest
-        final HelloRequest hr = HelloRequest.newBuilder().setName("joe").build();
-        InputStream stream = new ByteArrayInputStream(hr.toByteArray());
-
-
-        final ExampleHelloServiceImpl exampleHelloService = new ExampleHelloServiceImpl();
-        final ServerServiceDefinition serverServiceDefinition = exampleHelloService.bindService();
-        final ServerMethodDefinition<?, ?> sayHello = serverServiceDefinition.getMethod("helloworld.ExampleHelloService/SayHello");
-        final Object theHelloRequest = sayHello.getMethodDescriptor().parseRequest(stream);
-        final ServerCallHandler serverCallHandler = sayHello.getServerCallHandler();
-        ServerCall serverCall = new ServerCallTry(sayHello.getMethodDescriptor());
-        final ServerCall.Listener listener = serverCallHandler.startCall(serverCall, new Metadata());
-        listener.onMessage(theHelloRequest);
-        //notify this is the end of the client stream after which the onMessage() will go through
-        listener.onHalfClose();
-
-
-    }
-
-    static class ServerCallTry<ReqT, RespT> extends ServerCall<ReqT,RespT>{
-
-        final MethodDescriptor<ReqT, RespT> methodDescriptor;
-
-        ServerCallTry(MethodDescriptor<ReqT, RespT> methodDescriptor) {
-            this.methodDescriptor = methodDescriptor;
-        }
-
-        @Override
-        public void request(int numMessages) {
-
-        }
-
-        @Override
-        public void sendHeaders(Metadata headers) {
-
-        }
-
-        @Override
-        public void sendMessage(RespT message) {
-            log.debug("Got a response");
-        }
-
-        @Override
-        public void close(Status status, Metadata trailers) {
-
-        }
-
-        @Override
-        public boolean isCancelled() {
-            return false;
-        }
-
-        @Override
-        public MethodDescriptor<ReqT, RespT> getMethodDescriptor() {
-            return methodDescriptor;
-        }
-    }
-
-    @Test
-    public void testInProcess() throws Exception{
-        String uniqueName = InProcessServerBuilder.generateName();
-        Server server = InProcessServerBuilder.forName(uniqueName)
-                .directExecutor()
-                .addService(new ExampleHelloServiceImpl() {
-                })
-                .build().start();
-        ManagedChannel channel = InProcessChannelBuilder.forName(uniqueName)
-                .directExecutor()
-                .build();
-
-        ChannelWrapper wrapper = new ChannelWrapper(channel);
-        final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub blockingStub = ExampleHelloServiceGrpc.newBlockingStub(wrapper);
-        final HelloRequest name = HelloRequest.newBuilder().setName("test name").build();
-        HelloReply reply = blockingStub.sayHello(name);
-        assertEquals("Hello test name", reply.getMessage());
-
-
-        channel.shutdown();
-        server.shutdown();
-
+    @AfterEach
+    void tearDown() throws Exception{
+        server.close();
     }
 
 
     @Test
     public void testSayHello() {
-        //Test local and remote calls to the service
-        //Setup the client stub
-        MqttChannel channel = new MqttChannel(clientMqtt, DEVICE);
-        channel.init();
-        ChannelWrapper wrapper = new ChannelWrapper(channel);
-        final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub blockingStub = ExampleHelloServiceGrpc.newBlockingStub(wrapper);
+        final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub blockingStub = ExampleHelloServiceGrpc.newBlockingStub(channel);
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
         final HelloReply helloReply = blockingStub.sayHello(joe);
         assertEquals("Hello joe", helloReply.getMessage());
+    }
+
+    @Test
+    public void testLotsOfReplies() throws Throwable{
+
+        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
+        HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
+        StreamWaiter<HelloReply> waiter = new StreamWaiter<>(REQUEST_TIMEOUT);
+        stub.lotsOfReplies(joe, waiter);
+        List<HelloReply> responseList = waiter.getList();
+        assertEquals(responseList.size(), 2);
+        assertEquals("Hello joe", responseList.get(0).getMessage());
+        assertEquals("Hello again joe", responseList.get(1).getMessage());
 
     }
 
-    //@Test
-    public void testSayHelloCallBack() {
-        //Test local and remote calls to the service
-        //Setup the client stub
-        MqttChannel mqttChannel = new MqttChannel(clientMqtt, DEVICE);
-        mqttChannel.init();
-        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(mqttChannel);
-        HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
+    @Test
+    public void testLotsOfGreetings(){
 
-        CountDownLatch latch = new CountDownLatch(1);
-        String[] result = {""};
-        stub.sayHello(joe, new StreamObserver<HelloReply>() {
+        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
+        HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
+        HelloRequest jane = HelloRequest.newBuilder().setName("jane").build();
+        StreamWaiter<HelloReply> waiter = new StreamWaiter<>(REQUEST_TIMEOUT);
+        StreamObserver<HelloRequest> clientStreamObserver = stub.lotsOfGreetings(waiter);
+        clientStreamObserver.onNext(joe);
+        clientStreamObserver.onNext(jane);
+        clientStreamObserver.onCompleted();
+        final HelloReply reply = waiter.getSingle();
+        assertEquals("Hello joe,jane,", reply.getMessage());
+    }
+
+
+    @Test
+    public void testBidiHello() throws Throwable{
+
+        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
+
+        class TestHelloReplyObserver implements StreamObserver<HelloReply> {
+            public HelloReply lastReply;
+            public CountDownLatch latch = new CountDownLatch(1);
+
             @Override
             public void onNext(HelloReply value) {
-                result[0] = value.getMessage();
+                lastReply = value;
+                latch.countDown();
             }
 
             @Override
@@ -216,20 +138,25 @@ public class TestHelloWithChannel {
 
             @Override
             public void onCompleted() {
-                latch.countDown();
+
             }
-        });
-        try {
-            latch.await();
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
         }
-
-
-
-        assertEquals("Hello joe", result[0]);
-
+        HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
+        HelloRequest jane = HelloRequest.newBuilder().setName("jane").build();
+        TestHelloReplyObserver replyObserver = new TestHelloReplyObserver();
+        StreamObserver<HelloRequest> clientStreamObserver = stub.bidiHello(replyObserver);
+        clientStreamObserver.onNext(joe);
+        replyObserver.latch.await(10, TimeUnit.SECONDS);
+        assertEquals("Hello joe", replyObserver.lastReply.getMessage());
+        replyObserver.latch = new CountDownLatch(1);
+        clientStreamObserver.onNext(jane);
+        replyObserver.latch.await(10, TimeUnit.SECONDS);
+        assertEquals("Hello jane", replyObserver.lastReply.getMessage());
     }
+
+
+
+
 
 
 }

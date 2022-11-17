@@ -55,8 +55,8 @@ message HelloReply {
 
 //Example rich error
 message HelloCustomError{
-  string hello_error_description = 1;
-  int32 hello_error_code = 2;
+  int32 hello_error_code = 1;
+  string hello_error_description = 2;
 }
 
 

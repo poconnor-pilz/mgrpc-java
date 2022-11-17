@@ -21,6 +21,11 @@ public interface Topics {
         return make(server, IN , SVC, service, "#");
     }
 
+    static String allServicesIn(String server){
+        return make(server, IN , SVC, "#");
+    }
+
+
     static String replyTo(String server, String service, String method, String requestId){
         return make(server, OUT, SVC, service, method, requestId);
     }

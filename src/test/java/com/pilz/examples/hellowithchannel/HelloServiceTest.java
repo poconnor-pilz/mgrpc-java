@@ -1,5 +1,7 @@
-package com.pilz.examples.hello;
+package com.pilz.examples.hellowithchannel;
 
+import com.pilz.examples.hello.HelloService;
+import io.grpc.examples.helloworld.ExampleHelloServiceGrpc;
 import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.stub.StreamObserver;
@@ -7,7 +9,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
-public class HelloService implements IHelloService {
+
+public class HelloServiceTest extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
+
     private static Logger log = LoggerFactory.getLogger(HelloService.class);
 
     /**
@@ -92,4 +96,5 @@ public class HelloService implements IHelloService {
             }
         };
     }
+
 }

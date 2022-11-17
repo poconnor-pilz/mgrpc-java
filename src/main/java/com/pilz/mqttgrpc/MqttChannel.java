@@ -77,7 +77,6 @@ public class MqttChannel extends Channel {
             this.methodDescriptor = methodDescriptor;
             this.callOptions = callOptions;
             this.requestId = Base64Uuid.id();
-            //TODO: What do we default to if this is null?
             this.callerExecutor = callOptions.getExecutor();
         }
 
@@ -123,7 +122,7 @@ public class MqttChannel extends Channel {
         @Override
         public void sendMessage(ReqT message) {
             MqttGrpcRequest.Builder request = MqttGrpcRequest.newBuilder()
-                    .setType(MqttGrpcType.REQUEST)
+                    .setType(MqttGrpcType.NEXT)
                     .setMessage(((MessageLite)message).toByteString())
                     .setRequestId(requestId)
                     .setReplyTo(replyTo);
@@ -159,30 +158,22 @@ public class MqttChannel extends Channel {
                     switch (response.getType()) {
                         case NEXT:
                             log.debug("Received NEXT response on: " + topic);
-                            responseListener.onMessage(methodDescriptor.parseResponse(response.getMessage().newInput()));
-                            break;
-                        case SINGLE:
-                            log.debug("Received SINGLE response on: " + topic);
-                            //This is the only message in the stream so unsubscribe
-                            listeners.remove(responseListener);
                             exec(()->{
                                 responseListener.onHeaders(EMPTY_METADATA);
                                 responseListener.onMessage(methodDescriptor.parseResponse(response.getMessage().newInput()));
-                                responseListener.onClose(Status.OK, EMPTY_METADATA);
+                                if(methodDescriptor.getType().serverSendsOneMessage()){
+                                    responseListener.onClose(Status.OK, EMPTY_METADATA);
+                                }
                             });
-                            mqttAsyncClient.unsubscribe(replyTo);
-                            break;
-                        case ERROR:
-                            log.debug("Received ERROR response on: " + topic);
-                            listeners.remove(responseListener);
-                            final com.google.rpc.Status grpcStatus = com.google.rpc.Status.parseFrom(response.getMessage());
-                            exec(()->{responseListener.onClose(toStatus(grpcStatus), EMPTY_METADATA);});
-                            mqttAsyncClient.unsubscribe(replyTo);
+                            if(methodDescriptor.getType().serverSendsOneMessage()) {
+                                mqttAsyncClient.unsubscribe(replyTo);
+                            }
                             break;
                         case COMPLETED:
                             log.debug("Received COMPLETED response on: " + topic);
                             listeners.remove(responseListener);
-                            exec(()->{responseListener.onClose(Status.OK, EMPTY_METADATA);});
+                            final com.google.rpc.Status grpcStatus = com.google.rpc.Status.parseFrom(response.getMessage());
+                            exec(()->{responseListener.onClose(toStatus(grpcStatus), EMPTY_METADATA);});
                             mqttAsyncClient.unsubscribe(replyTo);
                             break;
                         default:
@@ -205,6 +196,7 @@ public class MqttChannel extends Channel {
         }
 
         private void exec(Runnable runnable){
+            //If the caller supplies an executor we must run on it (otherwise for example BlockingStub will just freeze)
             if(this.callerExecutor != null){
                 this.callerExecutor.execute(runnable);
             } else {
