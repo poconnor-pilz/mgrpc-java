@@ -1,25 +1,7 @@
 package com.pilz.errors;
 
-import com.pilz.examples.hello.HelloService;
-import com.pilz.examples.hello.HelloSkeleton;
-import com.pilz.examples.hello.HelloStub;
-import com.pilz.mqttgrpc.*;
-import com.pilz.utils.MqttUtils;
-import io.grpc.Status;
-import io.grpc.StatusException;
-import io.grpc.StatusRuntimeException;
-import io.grpc.examples.helloworld.HelloReply;
-import io.grpc.examples.helloworld.HelloRequest;
-import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
-import org.eclipse.paho.client.mqttv3.MqttException;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.io.IOException;
-
-import static org.junit.jupiter.api.Assertions.*;
 
 public class TestCommsErrors {
 
@@ -29,7 +11,7 @@ public class TestCommsErrors {
 
     private static final String SERVICE_NAME = "helloservice";
 
-
+/*
     @BeforeAll
     public static void startBroker() throws MqttException, IOException {
 
@@ -134,7 +116,7 @@ public class TestCommsErrors {
         assertEquals(sre.getStatus().getCode(), Status.Code.UNAVAILABLE);
 
     }
-
+*/
 
 
 }

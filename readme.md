@@ -108,6 +108,12 @@ Should we consider the azure structure of: devices/{device-id}/messages/devicebo
 
 ## Security/Authentication
 
+Note that we cannot secure the channel fully using JWT. This is because even if the device can reject an initial request the replies are published to a topic on the broker. So another client can wildcard subscribe to those. So we would need to secure the broker separately with policies. Another way to do it would be to make a kubernetes service that exposes grpc over https. Then that service only has access to the broker. It forwards requests to the mqtt service.
+https://stackoverflow.com/questions/58555788/generically-forwarding-a-grpc-call
+https://github.com/ejona86/grpc-java/blob/grpc-proxy/examples/src/main/java/io/grpc/examples/grpcproxy/GrpcProxy.java
+
+Note that the service could also do things like restarting watches etc. We needed some kind of service like this anyway.
+
 gRPC supports sending a JWT
 
 See the grpc-java github examples. To run it open

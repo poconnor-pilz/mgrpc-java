@@ -14,7 +14,7 @@ import java.util.logging.Logger;
 import static java.lang.Math.*;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 
-public class RouteGuideService implements IRouteGuideService {
+public class RouteGuideService extends RouteGuideGrpc.RouteGuideImplBase {
     private final Collection<Feature> features;
     private final ConcurrentMap<Point, List<RouteNote>> routeNotes =
             new ConcurrentHashMap<Point, List<RouteNote>>();

@@ -174,6 +174,44 @@ public class MqttServer {
             //TODO: Check this for leaks. How can we be sure everything is gc'd
 
 
+
+/*
+
+TODO: Branch and then use this message structure below.
+From server to client it's an MgMessage
+From client to server it's an MgRequest. Only the first request has an MgHeader
+
+message MgMessage{
+    //Every message must have a unique request id
+	string requestId;
+	//if completed=true then contents will be StatusProto otherwise contents will be
+	//input or output type of the method
+	boolean completed;
+	bytes contents;
+}
+
+message MgContext{
+	//encode grpc context here (is it just name value pairs?)
+}
+
+message MgHeader{
+    //The topic to which to send replies
+	string replyTo;
+	//This can be got from MethodDescriptor.toProto()
+	MethodDescriptorProto methodDescriptor;
+	//Somehow encode the key value pairs of context here
+	Context context;
+}
+
+
+message MgRequest{
+	MgHeader header; //if not null then this is the first request
+	MgMessage message;
+}
+
+}
+*/
+
         })).waitForCompletion(20000);
 
     }

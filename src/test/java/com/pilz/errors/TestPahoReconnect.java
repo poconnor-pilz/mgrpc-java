@@ -1,7 +1,6 @@
 package com.pilz.errors;
 
 import com.pilz.mqttgrpc.ConnectionStatus;
-import com.pilz.mqttgrpc.MqttGrpc;
 import com.pilz.mqttgrpc.Topics;
 import com.pilz.utils.MqttUtils;
 import org.eclipse.paho.client.mqttv3.*;

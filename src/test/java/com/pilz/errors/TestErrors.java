@@ -4,10 +4,15 @@ import com.google.protobuf.Any;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.rpc.Code;
 import com.google.rpc.ErrorInfo;
-import com.pilz.mqttgrpc.*;
+import com.pilz.examples.hello.HelloServiceForTest;
+import com.pilz.mqttgrpc.MqttChannel;
+import com.pilz.mqttgrpc.MqttServer;
+import com.pilz.mqttgrpc.StreamWaiter;
+import com.pilz.mqttgrpc.Topics;
 import com.pilz.utils.MqttUtils;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
+import io.grpc.examples.helloworld.ErrorsServiceGrpc;
 import io.grpc.examples.helloworld.HelloCustomError;
 import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
@@ -15,12 +20,10 @@ import io.grpc.protobuf.StatusProto;
 import io.grpc.stub.StreamObserver;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.*;
 
 import java.io.IOException;
+import java.util.Iterator;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -31,8 +34,10 @@ public class TestErrors {
     private static MqttAsyncClient serverMqtt;
     private static MqttAsyncClient clientMqtt;
 
-    private ErrorsService service;
-    private ErrorsStub stub;
+    private MqttChannel channel;
+    private MqttServer server;
+
+
 
     private static final String DEVICE = "device";
     private static final String SERVICE_NAME = "errorsservice";
@@ -60,37 +65,35 @@ public class TestErrors {
         MqttUtils.stopEmbeddedBroker();
     }
 
+
+
+
+
     @BeforeEach
     void setup() throws Exception{
 
-
         //Set up the server
-        MqttGrpcServer mqttGrpcServer = new MqttGrpcServer(serverMqtt, DEVICE);
-        mqttGrpcServer.init();
-        service = new ErrorsService();
-        ErrorsSkeleton skeleton = new ErrorsSkeleton(service);
-        mqttGrpcServer.subscribeService(SERVICE_NAME, skeleton);
+        server = new MqttServer(serverMqtt, DEVICE);
+        server.init();
+        server.addService(new HelloServiceForTest());
+        channel = new MqttChannel(clientMqtt, DEVICE);
+        channel.init();
+    }
 
-        //Setup the client stub
-        MqttGrpcClient mgClient = new MqttGrpcClient(clientMqtt, DEVICE);
-        mgClient.init();
-        stub = new ErrorsStub(mgClient, SERVICE_NAME);
+    @AfterEach
+    void tearDown() throws Exception{
+        server.close();
     }
 
 
     @Test
     public void testSingleResponseWithError() throws InterruptedException {
-        testSingleResponseWithError(service);
-        testSingleResponseWithError(stub);
-    }
 
-
-    public void testSingleResponseWithError(IErrorsService errorsService) throws InterruptedException {
-
+        final ErrorsServiceGrpc.ErrorsServiceStub stub = ErrorsServiceGrpc.newStub(channel);
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
         final Throwable[] ex = {null};
         CountDownLatch latch = new CountDownLatch(1);
-        errorsService.singleResponseWithError(joe, new StreamObserver<HelloReply>() {
+        stub.singleResponseWithError(joe, new StreamObserver<HelloReply>() {
             @Override
             public void onNext(HelloReply value) {}
 
@@ -115,19 +118,11 @@ public class TestErrors {
     }
 
     @Test
-    public void testSingleResponseWithErrorStreamWaiter() throws InterruptedException {
-        testSingleResponseWithErrorStreamWaiter(service);
-        testSingleResponseWithErrorStreamWaiter(stub);
-    }
-    public void testSingleResponseWithErrorStreamWaiter(IErrorsService errorsService) throws InterruptedException {
+    public void testSingleResponseWithBlockingStub() throws InterruptedException {
 
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
-        StreamWaiter waiter = new StreamWaiter(5000);
-        errorsService.singleResponseWithError(joe, waiter);
-        final StatusRuntimeException statusRuntimeException = assertThrows(StatusRuntimeException.class,
-                () -> waiter.getSingle());
-
-
+        final ErrorsServiceGrpc.ErrorsServiceBlockingStub stub = ErrorsServiceGrpc.newBlockingStub(channel);
+        final StatusRuntimeException statusRuntimeException = assertThrows(StatusRuntimeException.class, ()->stub.singleResponseWithError(joe));
         Status status = statusRuntimeException.getStatus();
         assertEquals(Status.Code.OUT_OF_RANGE, status.getCode());
         assertEquals("the value is out of range", status.getDescription());
@@ -136,17 +131,12 @@ public class TestErrors {
 
     @Test
     public void testMultiResponseWithError() throws InterruptedException {
-        testMultiResponseWithError(service);
-        testMultiResponseWithError(stub);
-    }
 
-
-    public void testMultiResponseWithError(IErrorsService errorsService) throws InterruptedException {
-
+        final ErrorsServiceGrpc.ErrorsServiceStub stub = ErrorsServiceGrpc.newStub(channel);
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
         final Throwable[] ex = {null};
         CountDownLatch latch = new CountDownLatch(1);
-        errorsService.multiResponseWithError(joe, new StreamObserver<HelloReply>() {
+        stub.multiResponseWithError(joe, new StreamObserver<HelloReply>() {
             @Override
             public void onNext(HelloReply value) {}
 
@@ -172,14 +162,10 @@ public class TestErrors {
 
     @Test
     public void testMultiResponseWithErrorIterator() throws InterruptedException {
-        testMultiResponseWithErrorIterator(service);
-        testMultiResponseWithErrorIterator(stub);
-    }
-    public void testMultiResponseWithErrorIterator(IErrorsService errorsService) throws InterruptedException {
 
+        final ErrorsServiceGrpc.ErrorsServiceBlockingStub stub = ErrorsServiceGrpc.newBlockingStub(channel);
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
-        StreamIterator<HelloReply> iter = new StreamIterator();
-        errorsService.multiResponseWithError(joe, iter);
+        final Iterator<HelloReply> iter = stub.multiResponseWithError(joe);
         assertEquals("Hello joe", iter.next().getMessage());
         final StatusRuntimeException statusRuntimeException = assertThrows(StatusRuntimeException.class,
                 () -> iter.next());
@@ -190,14 +176,10 @@ public class TestErrors {
     }
     @Test
     public void testErrorInClientStream(){
-        testErrorInClientStream(service);
-        testErrorInClientStream(stub);
-    }
-
-    public void testErrorInClientStream(IErrorsService errorsService){
+        final ErrorsServiceGrpc.ErrorsServiceStub stub = ErrorsServiceGrpc.newStub(channel);
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
         StreamWaiter<HelloReply> waiter = new StreamWaiter<>(REQUEST_TIMEOUT);
-        StreamObserver<HelloRequest> clientStreamObserver = errorsService.errorInClientStream(waiter);
+        StreamObserver<HelloRequest> clientStreamObserver = stub.errorInClientStream(waiter);
         clientStreamObserver.onNext(joe);
         clientStreamObserver.onError(Status.OUT_OF_RANGE.withDescription("some description").asRuntimeException());
         final HelloReply reply = waiter.getSingle();
@@ -207,21 +189,12 @@ public class TestErrors {
 
     @Test
     public void testSingleResponseWithRichError() throws InterruptedException, InvalidProtocolBufferException {
-        testSingleResponseWithRichError(service);
-        testSingleResponseWithRichError(stub);
-    }
 
-
-    public void testSingleResponseWithRichError(IErrorsService errorsService) throws InterruptedException, InvalidProtocolBufferException {
-
+        final ErrorsServiceGrpc.ErrorsServiceBlockingStub stub = ErrorsServiceGrpc.newBlockingStub(channel);
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
+        final StatusRuntimeException statusRuntimeException = assertThrows(StatusRuntimeException.class, ()->stub.singleResponseWithRichError(joe));
+        Status status = statusRuntimeException.getStatus();
 
-        StreamWaiter waiter = new StreamWaiter(5000);
-        errorsService.singleResponseWithError(joe, waiter);
-        final StatusRuntimeException statusRuntimeException = assertThrows(StatusRuntimeException.class,
-                () -> waiter.getSingle());
-
-        final Status status = statusRuntimeException.getStatus();
         assertEquals(status.getCode(), Status.Code.OUT_OF_RANGE);
         assertEquals("the value is out of range", status.getDescription());
 
@@ -247,20 +220,12 @@ public class TestErrors {
 
     @Test
     public void testSingleResponseWithRichCustomError() throws InterruptedException, InvalidProtocolBufferException {
-        testSingleResponseWithRichCustomError(service);
-        testSingleResponseWithRichCustomError(stub);
-    }
 
-
-    public void testSingleResponseWithRichCustomError(IErrorsService errorsService) throws InterruptedException, InvalidProtocolBufferException {
-
+        final ErrorsServiceGrpc.ErrorsServiceBlockingStub stub = ErrorsServiceGrpc.newBlockingStub(channel);
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
-        StreamWaiter waiter = new StreamWaiter(5000);
-        errorsService.singleResponseWithError(joe, waiter);
-        final StatusRuntimeException statusRuntimeException = assertThrows(StatusRuntimeException.class,
-                () -> waiter.getSingle());
+        final StatusRuntimeException statusRuntimeException = assertThrows(StatusRuntimeException.class, ()->stub.singleResponseWithRichCustomError(joe));
+        Status status = statusRuntimeException.getStatus();
 
-        final Status status = statusRuntimeException.getStatus();
         assertEquals(status.getCode(), Status.Code.OUT_OF_RANGE);
         assertEquals("the value is out of range", status.getDescription());
 
@@ -284,15 +249,11 @@ public class TestErrors {
 
     @Test
     public void testRichErrorInClientStream(){
-        testRichErrorInClientStream(service);
-        testRichErrorInClientStream(stub);
-    }
 
-    public void testRichErrorInClientStream(IErrorsService errorsService){
+        final ErrorsServiceGrpc.ErrorsServiceStub stub = ErrorsServiceGrpc.newStub(channel);
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
         StreamWaiter<HelloReply> waiter = new StreamWaiter<>(REQUEST_TIMEOUT);
-        StreamObserver<HelloRequest> clientStreamObserver = errorsService.richErrorInClientStream(waiter);
-        clientStreamObserver.onNext(joe);
+        StreamObserver<HelloRequest> clientStreamObserver = stub.richErrorInClientStream(waiter);
 
         com.google.rpc.Status status = com.google.rpc.Status.newBuilder()
                 .setCode(Code.OUT_OF_RANGE.getNumber())
