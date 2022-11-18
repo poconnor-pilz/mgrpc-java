@@ -6,39 +6,34 @@ option java_multiple_files = true;
 option java_package = "com.pilz.mqttgrpc";
 option java_outer_classname = "MqttGrpc";
 
-enum MqttGrpcType{
-  //An error message
-  ERROR = 0;
-  //Request
-  REQUEST = 1;
-  //Next message in stream
-  NEXT = 2;
-  //Single message in stream
-  SINGLE = 3;
-  //Stream completed
-  COMPLETED = 4;
+
+
+message MgMessage {
+  //Every message must have a unique request id
+  string requestId = 1;
+  //if completed=true then contents will be StatusProto otherwise contents will be
+  //input or output type of the method
+  bool completed = 2;
+  //The message contents
+  bytes contents = 3;
 }
 
-message MqttGrpcRequest {
-  //message type
-  MqttGrpcType type = 1;
-  //The message payload encoded as a protocol buffer
-  bytes message = 2;
-  //Topic to reply to. If this message is a request then replyTo must be set. Otherwise this message is part of a
-  //is part of an input stream (client side stream)
-  string replyTo = 3;
-  //The request id.
-  string requestId = 4;
+
+message MgRequest {
+  //The topic to which to send replies
+  string replyTo = 1;
+
+  //This can be got from MethodDescriptor.toProto()
+  //This will only be set for first message in a client stream
+  //MethodDescriptorProto methodDescriptor = 2;
+
+  //Somehow encode the key value pairs of context here
+  //This will only be set for first message in a client stream
+  //Context context;
+
+  MgMessage message = 2;
 }
 
-message MqttGrpcResponse {
-  //Message type
-  MqttGrpcType type = 1;
-  //The message payload encoded as a protocol buffer
-  bytes message = 2;
-  //The request id.
-  string requestId = 3;
-}
 
 //The connection status of a server. Sent to an mqtt LWT topic
 //When a service is connected it sends this message with connected = true

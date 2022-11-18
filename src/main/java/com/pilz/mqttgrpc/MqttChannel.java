@@ -1,6 +1,7 @@
 package com.pilz.mqttgrpc;
 
 import com.google.protobuf.MessageLite;
+import com.google.rpc.StatusProto;
 import io.grpc.*;
 import org.eclipse.paho.client.mqttv3.IMqttMessageListener;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
@@ -41,6 +42,7 @@ public class MqttChannel extends Channel {
      * This will cause the MqttGrpcClient to listen for server lwt messages so that it can then
      * send an error to any response observers when the server is disconnected.
      * A client must call init() before using any other methods on the MqttGrpcClient.
+     *
      * @throws StatusException
      */
     public void init() throws StatusRuntimeException {
@@ -69,6 +71,8 @@ public class MqttChannel extends Channel {
 
         final String requestId;
 
+        boolean firstMessage = true;
+
         String replyTo;
 
         Listener<RespT> responseListener;
@@ -88,7 +92,9 @@ public class MqttChannel extends Channel {
                     requestId,
                     responseListener);
             //TODO should we call responseListener.onReady() here?
-            exec(()->{responseListener.onReady();});
+            exec(() -> {
+                responseListener.onReady();
+            });
         }
 
         @Override
@@ -107,13 +113,16 @@ public class MqttChannel extends Channel {
         @Override
         public void halfClose() {
             //This will be sent by the client (e.g a stub) when the client stream is complete (or after one unary request)
-            if(methodDescriptor.getType().clientSendsOneMessage()){
+            if (methodDescriptor.getType().clientSendsOneMessage()) {
                 //Don't send a completed as the server doesn't care and it's an extra unnecessary mqtt message
                 return;
             }
-            MqttGrpcRequest.Builder request = MqttGrpcRequest.newBuilder()
-                    .setType(MqttGrpcType.COMPLETED)
-                    .setRequestId(requestId);
+            final com.google.rpc.Status ok = io.grpc.protobuf.StatusProto.fromStatusAndTrailers(Status.OK, null);
+            final MgMessage message = MgMessage.newBuilder()
+                    .setRequestId(requestId)
+                    .setCompleted(true)
+                    .setContents(ok.toByteString()).build();
+            MgRequest.Builder request = MgRequest.newBuilder().setMessage(message);
             //TODO: If the send fails then should this send an error back to the listener?
             //or will the exception suffice?
             send(methodDescriptor.getServiceName(), methodDescriptor.getBareMethodName(), request);
@@ -121,18 +130,25 @@ public class MqttChannel extends Channel {
 
         @Override
         public void sendMessage(ReqT message) {
-            MqttGrpcRequest.Builder request = MqttGrpcRequest.newBuilder()
-                    .setType(MqttGrpcType.NEXT)
-                    .setMessage(((MessageLite)message).toByteString())
+            final MgMessage msg = MgMessage.newBuilder()
                     .setRequestId(requestId)
-                    .setReplyTo(replyTo);
+                    .setCompleted(false)
+                    .setContents(((MessageLite) message).toByteString()).build();
+
+            if (firstMessage) {
+                //TODO: put in the method descriptor and context here
+                firstMessage = false;
+            }
+            MgRequest.Builder request = MgRequest.newBuilder()
+                    .setReplyTo(replyTo)
+                    .setMessage(msg);
             //TODO: If the send fails then should this send an error back to the listener?
             //or will the exception suffice?
             send(methodDescriptor.getServiceName(), methodDescriptor.getBareMethodName(), request);
             responseListener.onReady();
         }
 
-        private void send(String serviceName, String method, MqttGrpcRequest.Builder request) throws StatusRuntimeException {
+        private void send(String serviceName, String method, MgRequest.Builder request) throws StatusRuntimeException {
             if (!serverConnected) {
                 throw new StatusRuntimeException(Status.UNAVAILABLE.withDescription("Server unavailable or init() was not called"));
             }
@@ -154,35 +170,34 @@ public class MqttChannel extends Channel {
             log.debug("Subscribing for responses on: " + replyTo);
             final IMqttMessageListener messageListener = new MqttExceptionLogger((String topic, MqttMessage message) -> {
                 try {
-                    final MqttGrpcResponse response = MqttGrpcResponse.parseFrom(message.getPayload());
-                    switch (response.getType()) {
-                        case NEXT:
-                            log.debug("Received NEXT response on: " + topic);
-                            exec(()->{
-                                responseListener.onHeaders(EMPTY_METADATA);
-                                responseListener.onMessage(methodDescriptor.parseResponse(response.getMessage().newInput()));
-                                if(methodDescriptor.getType().serverSendsOneMessage()){
-                                    responseListener.onClose(Status.OK, EMPTY_METADATA);
-                                }
-                            });
-                            if(methodDescriptor.getType().serverSendsOneMessage()) {
-                                mqttAsyncClient.unsubscribe(replyTo);
+                    final MgMessage response = MgMessage.parseFrom(message.getPayload());
+                    if (response.getCompleted()) {
+                        log.debug("Received completed response on: " + topic);
+                        listeners.remove(responseListener);
+                        final com.google.rpc.Status grpcStatus = com.google.rpc.Status.parseFrom(response.getContents());
+                        exec(() -> {
+                            responseListener.onClose(toStatus(grpcStatus), EMPTY_METADATA);
+                        });
+                        mqttAsyncClient.unsubscribe(replyTo);
+                    } else {
+                        log.debug("Received message response on: " + topic);
+                        exec(() -> {
+                            responseListener.onHeaders(EMPTY_METADATA);
+                            responseListener.onMessage(methodDescriptor.parseResponse(response.getContents().newInput()));
+                            if (methodDescriptor.getType().serverSendsOneMessage()) {
+                                responseListener.onClose(Status.OK, EMPTY_METADATA);
                             }
-                            break;
-                        case COMPLETED:
-                            log.debug("Received COMPLETED response on: " + topic);
-                            listeners.remove(responseListener);
-                            final com.google.rpc.Status grpcStatus = com.google.rpc.Status.parseFrom(response.getMessage());
-                            exec(()->{responseListener.onClose(toStatus(grpcStatus), EMPTY_METADATA);});
+                        });
+                        if (methodDescriptor.getType().serverSendsOneMessage()) {
                             mqttAsyncClient.unsubscribe(replyTo);
-                            break;
-                        default:
-                            log.error("Unhandled message type on: " + topic);
+                        }
                     }
                 } catch (Throwable t) {
                     mqttAsyncClient.unsubscribe(replyTo);
                     listeners.remove(responseListener);
-                    exec(()->{responseListener.onClose(Status.fromThrowable(t), EMPTY_METADATA);});
+                    exec(() -> {
+                        responseListener.onClose(Status.fromThrowable(t), EMPTY_METADATA);
+                    });
                 }
             });
             //This will throw an exception if it times out.
@@ -195,9 +210,9 @@ public class MqttChannel extends Channel {
             return replyTo;
         }
 
-        private void exec(Runnable runnable){
+        private void exec(Runnable runnable) {
             //If the caller supplies an executor we must run on it (otherwise for example BlockingStub will just freeze)
-            if(this.callerExecutor != null){
+            if (this.callerExecutor != null) {
                 this.callerExecutor.execute(runnable);
             } else {
                 runnable.run();
