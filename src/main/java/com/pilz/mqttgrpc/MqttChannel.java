@@ -1,7 +1,7 @@
 package com.pilz.mqttgrpc;
 
+import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.protobuf.MessageLite;
-import com.google.rpc.StatusProto;
 import io.grpc.*;
 import org.eclipse.paho.client.mqttv3.IMqttMessageListener;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
@@ -11,10 +11,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.concurrent.Executor;
+import java.util.*;
+import java.util.concurrent.*;
 
 public class MqttChannel extends Channel {
 
@@ -23,7 +21,8 @@ public class MqttChannel extends Channel {
     public static final long SUBSCRIPTION_TIMEOUT_MILLIS = 10 * 1000;
     private final static Metadata EMPTY_METADATA = new Metadata();
 
-    private final MqttAsyncClient mqttAsyncClient;
+
+    private final MqttAsyncClient client;
     /**
      * The topic prefix of the server e.g. devices/device1
      */
@@ -31,10 +30,14 @@ public class MqttChannel extends Channel {
 
     private boolean serverConnected;
 
-    private final Collection<ClientCall.Listener<?>> listeners = Collections.synchronizedCollection(new ArrayList<>());
+    private final Map<String, MqttClientCall> clientCallsById = new ConcurrentHashMap<>();
 
-    public MqttChannel(MqttAsyncClient mqttAsyncClient, String serverTopic) {
-        this.mqttAsyncClient = mqttAsyncClient;
+
+    private static final int SINGLE_MESSAGE_STREAM = 0;
+
+
+    public MqttChannel(MqttAsyncClient client, String serverTopic) {
+        this.client = client;
         this.serverTopic = serverTopic;
     }
 
@@ -47,13 +50,45 @@ public class MqttChannel extends Channel {
      */
     public void init() throws StatusRuntimeException {
         //TODO: take the code from MqttGrpcClient and refactor it to work here.
+
+        final String replyTo = Topics.allServicesOut(serverTopic);
+        log.debug("Subscribing for responses on: " + replyTo);
+
+        final IMqttMessageListener messageListener = new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
+            final MgMessage message = MgMessage.parseFrom(mqttMessage.getPayload());
+            final MqttClientCall call = clientCallsById.get(message.getCall());
+            if (call == null) {
+                log.error("Could not find call with callId: " + message.getCall());
+                return;
+            }
+            call.onServerMessage(message);
+        });
+
+        try {
+            //This will throw an exception if it times out.
+            client.subscribe(replyTo, 1, messageListener).waitForCompletion(SUBSCRIPTION_TIMEOUT_MILLIS);
+        } catch (MqttException e) {
+            throw new StatusRuntimeException(Status.UNAVAILABLE.fromThrowable(e));
+        }
         serverConnected = true;
+
+    }
+
+    public void close() {
+        try {
+            //TODO: make const timeout, cancel all calls? Empty map?
+            client.unsubscribe(Topics.allServicesIn(serverTopic)).waitForCompletion(5000);
+        } catch (MqttException e) {
+            log.error("Failed to unsub", e);
+        }
     }
 
 
     @Override
     public <RequestT, ResponseT> ClientCall<RequestT, ResponseT> newCall(MethodDescriptor<RequestT, ResponseT> methodDescriptor, CallOptions callOptions) {
-        return new MqttCall<>(methodDescriptor, callOptions);
+        MqttClientCall call = new MqttClientCall<>(methodDescriptor, callOptions);
+        clientCallsById.put(call.getCallId(), call);
+        return call;
     }
 
     @Override
@@ -62,40 +97,115 @@ public class MqttChannel extends Channel {
     }
 
 
-    private class MqttCall<ReqT, RespT> extends ClientCall<ReqT, RespT> {
+    private class MqttClientCall<ReqT, RespT> extends ClientCall<ReqT, RespT> {
 
         final MethodDescriptor<ReqT, RespT> methodDescriptor;
         final CallOptions callOptions;
-
-        final Executor callerExecutor;
-
-        final String requestId;
-
-        boolean firstMessage = true;
-
-        String replyTo;
-
+        final Context context;
+        final Executor callExecutor;
+        final String callId;
+        int sequence = 0;
+        final String replyTo;
         Listener<RespT> responseListener;
+        private ScheduledFuture<?> deadlineCancellationFuture;
+        private boolean cancelCalled = false;
 
-        private MqttCall(MethodDescriptor<ReqT, RespT> methodDescriptor, CallOptions callOptions) {
+        private final ContextCancellationListener cancellationListener =
+                new ContextCancellationListener();
+
+
+        private MqttClientCall(MethodDescriptor<ReqT, RespT> methodDescriptor, CallOptions callOptions) {
+            this.callExecutor = callOptions.getExecutor();
             this.methodDescriptor = methodDescriptor;
             this.callOptions = callOptions;
-            this.requestId = Base64Uuid.id();
-            this.callerExecutor = callOptions.getExecutor();
+            this.context = Context.current();
+            this.callId = Base64Uuid.id();
+            this.replyTo = Topics.replyTo(serverTopic, methodDescriptor.getServiceName(),
+                    methodDescriptor.getBareMethodName(), callId);
+        }
+
+        public String getCallId() {
+            return callId;
         }
 
         @Override
         public void start(Listener<RespT> responseListener, Metadata headers) {
             this.responseListener = responseListener;
-            this.replyTo = subscribeForReplies(methodDescriptor.getServiceName(),
-                    methodDescriptor.getBareMethodName(),
-                    requestId,
-                    responseListener);
+
+            if (context.isCancelled()) {
+                //Call is already cancelled
+                exec(()->close(Status.CANCELLED));
+                return;
+            }
+
+            //Listen for cancellations
+            context.addListener(cancellationListener, command -> command.run());
+
+            //Close call if deadline exceeded
+            final Deadline effectiveDeadline = DeadlineTimer.min(callOptions.getDeadline(), context.getDeadline());
+            if (effectiveDeadline != null) {
+                this.deadlineCancellationFuture = DeadlineTimer.start(effectiveDeadline, (String deadlineMessage) -> {
+                    //TODO: We do not need to send a cancellation message to the server here but
+                    //we do need to send on the deadline to the server in the first request so
+                    //that it can set its own deadline timer
+                    close(Status.DEADLINE_EXCEEDED.augmentDescription(deadlineMessage));
+                });
+            }
             //TODO should we call responseListener.onReady() here?
-            exec(() -> {
-                responseListener.onReady();
-            });
+//            exec(() -> responseListener.onReady());
         }
+
+        private final class ContextCancellationListener implements Context.CancellationListener {
+            @Override
+            public void cancelled(Context context) {
+                log.debug("ContextCancellationListener cancelled()");
+                Throwable cause = context.cancellationCause();
+                if (cause == null) {
+                    cause = new Exception("Cancelled without cause");
+                }
+                cancel(cause.getMessage(), cause);
+            }
+        }
+
+
+        public void onServerMessage(MgMessage message) {
+
+            if (message.getType() == MgType.STATUS) {
+                log.debug("Received completed response");
+                final com.google.rpc.Status grpcStatus;
+                try {
+                    grpcStatus = com.google.rpc.Status.parseFrom(message.getContents());
+                    close(toStatus(grpcStatus));
+                } catch (InvalidProtocolBufferException e) {
+                    log.debug("Failed to parse status from server");
+                    close(Status.UNKNOWN.withDescription("Failed to parse status from server"));
+                }
+            } else {
+                log.debug("Received message response");
+                exec(() -> {
+                    responseListener.onHeaders(EMPTY_METADATA);
+                    responseListener.onMessage(methodDescriptor.parseResponse(message.getContents().newInput()));
+                    if (message.getSequence() == SINGLE_MESSAGE_STREAM) {
+                        //There is only a single message in this stream and it will not be followed by
+                        //a completed message so close the stream.
+                        close(Status.OK);
+                    }
+                });
+            }
+
+        }
+
+        public void close(Status status) {
+            log.debug("Closing call with status " + status.getDescription());
+            context.removeListener(cancellationListener);
+            ScheduledFuture<?> f = deadlineCancellationFuture;
+            if (f != null) {
+                f.cancel(false);
+            }
+            exec(() -> responseListener.onClose(status, EMPTY_METADATA));
+            clientCallsById.remove(this.callId);
+        }
+
 
         @Override
         public void request(int numMessages) {
@@ -107,8 +217,34 @@ public class MqttChannel extends Channel {
 
         @Override
         public void cancel(@Nullable String message, @Nullable Throwable cause) {
+            log.debug("Call cancelled");
+            if (cancelCalled) {
+                return;
+            }
+            cancelCalled = true;
+            Status status = Status.CANCELLED;
+            if (message != null) {
+                status = status.withDescription(message);
+            } else {
+                status = status.withDescription("Call cancelled without message");
+            }
+            if (cause != null) {
+                status = status.withCause(cause);
+            }
+            close(status);
+
+            final com.google.rpc.Status cancelled = io.grpc.protobuf.StatusProto.fromStatusAndTrailers(Status.CANCELLED, null);
+            sequence++;
+            final MgMessage.Builder msgBuilder = MgMessage.newBuilder()
+                    .setCall(callId)
+                    .setSequence(sequence)
+                    .setType(MgType.STATUS)
+                    .setContents(cancelled.toByteString());
+            sendToBroker(methodDescriptor.getServiceName(), methodDescriptor.getBareMethodName(), msgBuilder);
 
         }
+
+
 
         @Override
         public void halfClose() {
@@ -118,102 +254,67 @@ public class MqttChannel extends Channel {
                 return;
             }
             final com.google.rpc.Status ok = io.grpc.protobuf.StatusProto.fromStatusAndTrailers(Status.OK, null);
-            final MgMessage message = MgMessage.newBuilder()
-                    .setRequestId(requestId)
-                    .setCompleted(true)
-                    .setContents(ok.toByteString()).build();
-            MgRequest.Builder request = MgRequest.newBuilder().setMessage(message);
+            sequence++;
+            final MgMessage.Builder msgBuilder = MgMessage.newBuilder()
+                    .setCall(callId)
+                    .setSequence(sequence)
+                    .setType(MgType.STATUS)
+                    .setContents(ok.toByteString());
             //TODO: If the send fails then should this send an error back to the listener?
             //or will the exception suffice?
-            send(methodDescriptor.getServiceName(), methodDescriptor.getBareMethodName(), request);
+            sendToBroker(methodDescriptor.getServiceName(), methodDescriptor.getBareMethodName(), msgBuilder);
         }
 
         @Override
         public void sendMessage(ReqT message) {
-            final MgMessage msg = MgMessage.newBuilder()
-                    .setRequestId(requestId)
-                    .setCompleted(false)
-                    .setContents(((MessageLite) message).toByteString()).build();
 
-            if (firstMessage) {
-                //TODO: put in the method descriptor and context here
-                firstMessage = false;
+            //Send message to the server
+            final MgMessage.Builder msgBuilder = MgMessage.newBuilder()
+                    .setCall(callId);
+
+            if (sequence == 0) {
+                //This is the first message in the stream so it needs to be a START with a header
+                msgBuilder.setType(MgType.START);
+                final MgHeader header = MgHeader.newBuilder()
+                        .setReplyTo(replyTo).build();
+                msgBuilder.setHeader(header);
+            } else {
+                msgBuilder.setType(MgType.NEXT);
             }
-            MgRequest.Builder request = MgRequest.newBuilder()
-                    .setReplyTo(replyTo)
-                    .setMessage(msg);
+
+            msgBuilder.setContents(((MessageLite) message).toByteString()).build();
+            //Only increment sequence if there is potentially more than one message in the stream.
+            if (!methodDescriptor.getType().clientSendsOneMessage()) {
+                sequence++;
+            }
+            msgBuilder.setSequence(sequence);
+
             //TODO: If the send fails then should this send an error back to the listener?
             //or will the exception suffice?
-            send(methodDescriptor.getServiceName(), methodDescriptor.getBareMethodName(), request);
+            sendToBroker(methodDescriptor.getServiceName(), methodDescriptor.getBareMethodName(), msgBuilder);
             responseListener.onReady();
         }
 
-        private void send(String serviceName, String method, MgRequest.Builder request) throws StatusRuntimeException {
+        private void sendToBroker(String serviceName, String method, MgMessage.Builder messageBuilder) throws StatusRuntimeException {
             if (!serverConnected) {
                 throw new StatusRuntimeException(Status.UNAVAILABLE.withDescription("Server unavailable or init() was not called"));
             }
             try {
                 final String topic = Topics.methodIn(serverTopic, serviceName, method);
-                log.debug("Sending message on: " + topic);
-                mqttAsyncClient.publish(topic, new MqttMessage(request.build().toByteArray()));
+                final MgMessage message = messageBuilder.build();
+                log.debug("Sending message type: {} sequence: {} call: {} topic:{} ",
+                        new Object[]{message.getType(), message.getSequence(), message.getCall(), topic});
+                client.publish(topic, new MqttMessage(message.toByteArray()));
             } catch (MqttException e) {
                 throw new StatusRuntimeException(Status.UNAVAILABLE.fromThrowable(e));
             }
         }
 
-
-        private String subscribeForReplies(String serviceName, String method, String requestId, Listener<RespT> responseListener) throws StatusRuntimeException {
-            if (!serverConnected) {
-                throw new StatusRuntimeException(Status.UNAVAILABLE.withDescription("Server unavailable or MqttGrpcClient.init() was not called"));
-            }
-            final String replyTo = Topics.replyTo(serverTopic, serviceName, method, requestId);
-            log.debug("Subscribing for responses on: " + replyTo);
-            final IMqttMessageListener messageListener = new MqttExceptionLogger((String topic, MqttMessage message) -> {
-                try {
-                    final MgMessage response = MgMessage.parseFrom(message.getPayload());
-                    if (response.getCompleted()) {
-                        log.debug("Received completed response on: " + topic);
-                        listeners.remove(responseListener);
-                        final com.google.rpc.Status grpcStatus = com.google.rpc.Status.parseFrom(response.getContents());
-                        exec(() -> {
-                            responseListener.onClose(toStatus(grpcStatus), EMPTY_METADATA);
-                        });
-                        mqttAsyncClient.unsubscribe(replyTo);
-                    } else {
-                        log.debug("Received message response on: " + topic);
-                        exec(() -> {
-                            responseListener.onHeaders(EMPTY_METADATA);
-                            responseListener.onMessage(methodDescriptor.parseResponse(response.getContents().newInput()));
-                            if (methodDescriptor.getType().serverSendsOneMessage()) {
-                                responseListener.onClose(Status.OK, EMPTY_METADATA);
-                            }
-                        });
-                        if (methodDescriptor.getType().serverSendsOneMessage()) {
-                            mqttAsyncClient.unsubscribe(replyTo);
-                        }
-                    }
-                } catch (Throwable t) {
-                    mqttAsyncClient.unsubscribe(replyTo);
-                    listeners.remove(responseListener);
-                    exec(() -> {
-                        responseListener.onClose(Status.fromThrowable(t), EMPTY_METADATA);
-                    });
-                }
-            });
-            //This will throw an exception if it times out.
-            try {
-                mqttAsyncClient.subscribe(replyTo, 1, messageListener).waitForCompletion(SUBSCRIPTION_TIMEOUT_MILLIS);
-            } catch (MqttException e) {
-                throw new StatusRuntimeException(Status.UNAVAILABLE.fromThrowable(e));
-            }
-            listeners.add(responseListener);
-            return replyTo;
-        }
 
         private void exec(Runnable runnable) {
             //If the caller supplies an executor we must run on it (otherwise for example BlockingStub will just freeze)
-            if (this.callerExecutor != null) {
-                this.callerExecutor.execute(runnable);
+            if (this.callExecutor != null) {
+                this.callExecutor.execute(runnable);
             } else {
                 runnable.run();
             }

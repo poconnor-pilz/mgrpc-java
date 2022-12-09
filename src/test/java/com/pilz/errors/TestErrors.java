@@ -5,37 +5,44 @@ import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.rpc.Code;
 import com.google.rpc.ErrorInfo;
 import com.pilz.examples.hello.HelloServiceForTest;
-import com.pilz.mqttgrpc.MqttChannel;
-import com.pilz.mqttgrpc.MqttServer;
-import com.pilz.mqttgrpc.StreamWaiter;
-import com.pilz.mqttgrpc.Topics;
+import com.pilz.mqttgrpc.*;
 import com.pilz.utils.MqttUtils;
-import io.grpc.Status;
-import io.grpc.StatusRuntimeException;
-import io.grpc.examples.helloworld.ErrorsServiceGrpc;
-import io.grpc.examples.helloworld.HelloCustomError;
-import io.grpc.examples.helloworld.HelloReply;
-import io.grpc.examples.helloworld.HelloRequest;
+import io.grpc.*;
+import io.grpc.examples.helloworld.*;
+import io.grpc.inprocess.InProcessChannelBuilder;
+import io.grpc.inprocess.InProcessServerBuilder;
 import io.grpc.protobuf.StatusProto;
+import io.grpc.stub.ClientCallStreamObserver;
+import io.grpc.stub.ClientResponseObserver;
 import io.grpc.stub.StreamObserver;
+import org.eclipse.paho.client.mqttv3.IMqttMessageListener;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
+import org.eclipse.paho.client.mqttv3.MqttMessage;
 import org.junit.jupiter.api.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.Iterator;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 public class TestErrors {
 
+    private static final Logger log = LoggerFactory.getLogger(TestErrors.class);
+
     private static MqttAsyncClient serverMqtt;
     private static MqttAsyncClient clientMqtt;
 
     private MqttChannel channel;
     private MqttServer server;
+
+    private ErrorsService errorsService;
 
 
 
@@ -50,8 +57,8 @@ public class TestErrors {
 
         MqttUtils.startEmbeddedBroker();
 
-        serverMqtt = MqttUtils.makeClient(Topics.systemStatus(DEVICE));
-        clientMqtt = MqttUtils.makeClient(null);
+        serverMqtt = MqttUtils.makeClient(Topics.systemStatus(DEVICE), "tcp://localhost:1883");
+        clientMqtt = MqttUtils.makeClient(null, "tcp://localhost:1883");
     }
 
     @AfterAll
@@ -75,7 +82,8 @@ public class TestErrors {
         //Set up the server
         server = new MqttServer(serverMqtt, DEVICE);
         server.init();
-        server.addService(new HelloServiceForTest());
+        errorsService = new ErrorsService();
+        server.addService(errorsService);
         channel = new MqttChannel(clientMqtt, DEVICE);
         channel.init();
     }
@@ -85,6 +93,30 @@ public class TestErrors {
         server.close();
     }
 
+
+
+    public void testPubSub() throws Exception{
+        String topic = "test";
+        int[] count = {0};
+        serverMqtt.subscribe(topic, 1, new MqttExceptionLogger(new IMqttMessageListener() {
+            @Override
+            public void messageArrived(String topic, MqttMessage message) throws Exception {
+
+                log.debug("Got message: " + message.toString() );
+                if(count[0] == 0) {
+                    Thread.sleep(10 * 1000);
+                }
+                count[0] = 1;
+            }
+        }));
+
+        int i = 1;
+        while(true){
+            clientMqtt.publish(topic, new MqttMessage(("test" + i++).getBytes()));
+            log.debug("published");
+            Thread.sleep(200);
+        }
+    }
 
     @Test
     public void testSingleResponseWithError() throws InterruptedException {
@@ -116,6 +148,165 @@ public class TestErrors {
         assertEquals(status.getCode(), Status.Code.OUT_OF_RANGE);
         assertEquals("the value is out of range", status.getDescription());
     }
+
+    @Test
+    public void testTimeout() throws IOException {
+
+        String uniqueName = InProcessServerBuilder.generateName();
+        Server server = InProcessServerBuilder.forName(uniqueName)
+                .directExecutor()
+                .addService(new ErrorsService() {
+                })
+                .build().start();
+        ManagedChannel inProcChannel = InProcessChannelBuilder.forName(uniqueName)
+                .directExecutor()
+                .build();
+
+        HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
+        final ErrorsServiceGrpc.ErrorsServiceBlockingStub stub = ErrorsServiceGrpc.newBlockingStub(inProcChannel).withDeadlineAfter(1, TimeUnit.SECONDS);
+        final StatusRuntimeException statusRuntimeException = assertThrows(StatusRuntimeException.class, ()->stub.singleResponseWith5SecondDelay(joe));
+        Status status = statusRuntimeException.getStatus();
+        assertEquals(Status.Code.DEADLINE_EXCEEDED, status.getCode());
+        //assertEquals("the value is out of range", status.getDescription());
+
+    }
+
+    class CancelableObserver implements ClientResponseObserver<HelloRequest, HelloReply>{
+        private ClientCallStreamObserver requestStream;
+        private final CountDownLatch latch;
+
+        CancelableObserver(CountDownLatch latch) {
+            this.latch = latch;
+        }
+
+        @Override
+        public void beforeStart(ClientCallStreamObserver reqStream) {
+            requestStream = reqStream;
+        }
+        public void cancel(String message){
+            requestStream.cancel(message, null);
+        }
+
+        @Override
+        public void onNext(HelloReply value) {
+            log.debug("next");
+        }
+
+        @Override
+        public void onError(Throwable t) {
+            log.debug("Error", t);
+            latch.countDown();
+        }
+
+        @Override
+        public void onCompleted() {
+            log.debug("completed");
+            latch.countDown();
+        }
+
+    }
+
+
+    @Test
+    public void testCancel() throws IOException, InterruptedException {
+
+//        String uniqueName = InProcessServerBuilder.generateName();
+//        Server server = InProcessServerBuilder.forName(uniqueName)
+//                .directExecutor()
+//                .addService(new ErrorsService() {
+//                })
+//                .build().start();
+//        ManagedChannel inProcChannel = InProcessChannelBuilder.forName(uniqueName)
+//                .directExecutor()
+//                .build();
+//
+
+
+        int port = 50051;
+        Server remoteServer = ServerBuilder.forPort(port)
+                .addService(new ErrorsService())
+                .build()
+                .start();
+
+        String target = "localhost:50051";
+        ManagedChannel remoteChannel = ManagedChannelBuilder.forTarget(target)
+                // Channels are secure by default (via SSL/TLS). For the example we disable TLS to avoid
+                // needing certificates.
+                .usePlaintext()
+                .build();
+
+        HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
+        final ErrorsServiceGrpc.ErrorsServiceStub stub = ErrorsServiceGrpc.newStub(remoteChannel);
+        CountDownLatch latch = new CountDownLatch(1);
+
+        final Context.CancellableContext[] cancellableContext = {null};
+
+
+
+
+        final CancelableObserver cancelableObserver = new CancelableObserver(latch);
+        Executors.newSingleThreadExecutor().submit(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    Thread.sleep(2500);
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
+                }
+                log.debug("Sending cancel");
+                cancelableObserver.cancel("tryit");
+                //cancellableContext[0].cancel(null);
+            }
+        });
+
+
+
+        stub.cancelDuringServerStream(joe, cancelableObserver);
+
+        log.debug("waiting");
+
+
+
+        latch.await();
+    }
+
+
+    @Test
+    public void testCancelMqtt() throws IOException, InterruptedException {
+
+
+        HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
+        final ErrorsServiceGrpc.ErrorsServiceStub stub = ErrorsServiceGrpc.newStub(channel);
+        CountDownLatch latch = new CountDownLatch(1);
+
+        errorsService.cancelledLatch = new CountDownLatch(1);
+
+        final CancelableObserver cancelableObserver = new CancelableObserver(latch);
+        Executors.newSingleThreadExecutor().submit(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    Thread.sleep(2500);
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
+                }
+                log.debug("Sending cancel");
+                cancelableObserver.cancel("tryit");
+            }
+        });
+
+
+        stub.cancelDuringServerStream(joe, cancelableObserver);
+
+        log.debug("waiting");
+
+        assert(latch.await(5, TimeUnit.SECONDS));
+
+        errorsService.cancelledLatch.await();
+
+        log.debug("done");
+    }
+
 
     @Test
     public void testSingleResponseWithBlockingStub() throws InterruptedException {

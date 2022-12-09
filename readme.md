@@ -16,7 +16,93 @@ Note that the latest version of this doc states that you can specify to the pubs
 Is there a way of just doing this sorting only if the next message does not have the last message id+1? Then start buffering messages until you get the ones you are missing. But what if in the meantime there are more messages coming in out of order. When do you stop? Just make the buffer and keep sorting it until all the messages are one plus the last. Then send on that buffer's worth. Do this in a blocking function so you don't receive new messages while sorting. Maybe in the sending on bit have a blocking queue that you send the ordered messabes to and a separate thread to service that in case the client is slow. Also overall for the sorting have a timeout so that if you don't get ordered messages within a certain time you just fail. Also throw away duplicates. Overall this should not happen frequently and the out of order message should appear very soon as it's just a network delay. If qos is 1 then you are guaranteed to get it at least once. There should be no waiting for ages for it. The fact that you got message 3 before 2 means that 2 was sent already so it's not like you are waiting for the server to send it. See TryOrdering.java for this.
 
 ## Cancellation
-How do we implement stream cancellation? (Note that in ordinary mqtt (e.g. the watch code) we would not have supported something as sophisticated as this at all. Instead we explcitly registered and deregistered watches and this works fine. It looks like earlier versions of grpc did not support cancellation either (although a hack was for the client stream to send an errro) )
+How do we implement stream cancellation? (Note that in ordinary mqtt (e.g. the watch code) we would not have supported something as sophisticated as this at all. Instead we explcitly registered and deregistered watches and this works fine. It looks like earlier versions of grpc did not support cancellation either (although a hack was for the client stream to send an errror) )
+
+On cancellation MqttChannel.MqttCall.cancel() should get called.
+This does get called if we send an error in the client stream
+It doesn't get called if we do a blocking request with timeout.
+To see why make an in process call with timeout. Then put a bp in CallOptions.getDeadline
+You will see that ClientCallImpl.start calls startDeadlineTimer.
+Somehow this will eventually throw an exception that does the call cancel
+(use ChannelWrapper with bp in cancel to see this)
+It is a scheduled executor and the clientCall will also cancel it in case of a higher level cancel.
+
+But the summary is that you have to look in the calloptions for a deadline and then start something in the call start that calls back to cancel the call. But should also look at the current context (get context from thread local originally) like the ClientCall and see if it also has a deadline.
+When the call is cancelled it should clean up after itself and send a cancel down to the server
+This could be sent as an error/completion with deadline exceeded. Then even though the server call may already be  half closed it should be still possible to send a cancel to it.
+To send a cancel, send a completed message with Status==CANCELLED
+
+The following shows how the service code should check for cancellation
+https://grpc.io/blog/deadlines/
+`
+if (Context.current().isCancelled()) {
+    responseObserver.onError(Status.CANCELLED.withDescription("Cancelled by client").asRuntimeException());
+    return;
+}
+
+OR can do
+
+Context.current().addListener(listener, directExecutor())
+
+where listener is a Context.CancellationListener 
+`
+How ClientCallImpl does it:
+
+In its constructor
+    this.context = Context.current(); //It probably needs this in case it is part of a relay/forwarding ?
+    this.callOptions = callOptions;
+    this.deadlineCancellationExecutor = deadlineCancellationExecutor;//This will be a ScheduledExecutorService
+
+private Deadline effectiveDeadline() {
+    // Call options and context are immutable, so we don't need to cache the deadline.
+    return min(callOptions.getDeadline(), context.getDeadline());
+}
+
+Then at the end of its startInternal()
+It calls startDeadlineTimer which simply creates a runnable of type DeadLineTimer which just 
+calls back stream cancel when it runs (after the deadine)
+But this also returns a future which it if something does a high level cancel then it 
+does a cancel on that (so taht the scheduledexec is cancelled.)
+It does this in removeContextListenerAndCancelDeadlineFuture
+
+Also look at usages of ServerCallImpl.cancelled.
+
+Cancellation:
+It looks like for server cancellation because of timeout that the channel doesn't send a cancel on timeout. 
+Instead it sends the deadline in the header of the call and the server sets its own timer
+See ServerImpl.java  Context.CancellableContext createContext
+
+
+To explicitly cancel a call from a test it looks like the only thing that works is to run a http server
+(not inproc) and then make a
+class CancelableObserver implements ClientResponseObserver<HelloRequest, HelloReply>{
+    private ClientCallStreamObserver requestStream;
+    @Override
+    public void beforeStart(ClientCallStreamObserver reqStream) {requestStream = reqStream;}
+    public void cancel(String message){requestStream.cancel(message, null);
+....
+
+with OnNext etc. Then on the client side, pass this as the return stream to a method. 
+Then you can call cancel on this.
+You are also supposed to be able to do:
+cancellableContext = Context.current().withCancellation();
+cancellableContext.cancel(null);
+But in this case the server never gets the cancel. (because the context is wrong? Tried setting it even in the call )
+
+Also look at ManagedChannel. That has shutdown methods that are supposed to send cancels. Would need to test this.
+
+Because the cancel has nothing to do with the client stream or input request then it looks like we will need
+an MgType.CANCEL and send that. Then somehow the server has to put that in the context for that call.
+
+TODO: 
+- In MqttClientCall call removeContextListenerAndCancelDeadlineFuture() from close()
+- In MqttClientCall listen to context for cancels and call cancel()
+- Do MqttClientCall.cancel handler that sends a MgType.CANCEL to the server. 
+  - Note that on the server it should just do io.grpc.StatusRuntimeException: CANCELLED: RPC cancelled
+- Test the cancel by doing a context cancel and by using the CancelableObserver as above. 
+- Send a timeout in the header of the first request and do a timeout executor on the server
+- Do thread pools for client and server.
+
 
 ## Watch Batching
 Batching is something that comes up as a specific optimisation for a cloud visu server use case and is probably not a general concept at all. 
@@ -108,7 +194,7 @@ Should we consider the azure structure of: devices/{device-id}/messages/devicebo
 
 ## Security/Authentication
 
-Note that we cannot secure the channel fully using JWT. This is because even if the device can reject an initial request the replies are published to a topic on the broker. So another client can wildcard subscribe to those. So we would need to secure the broker separately with policies. Another way to do it would be to make a kubernetes service that exposes grpc over https. Then that service only has access to the broker. It forwards requests to the mqtt service.
+Note that we cannot secure the channel fully using JWT alone. This is because even if the device can reject an initial request the replies are published to a topic on the broker. So another client could wildcard subscribe to those. However because the topic contains the clientId it would not be hard to make policies for clients that only allow that client to access to that clients channels. Another way to do it would be to make a kubernetes service that exposes grpc over https. Then that service only has access to the broker. It forwards requests to the mqtt service.
 https://stackoverflow.com/questions/58555788/generically-forwarding-a-grpc-call
 https://github.com/ejona86/grpc-java/blob/grpc-proxy/examples/src/main/java/io/grpc/examples/grpcproxy/GrpcProxy.java
 

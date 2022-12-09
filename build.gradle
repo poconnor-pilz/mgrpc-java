@@ -48,6 +48,9 @@ dependencies {
     //This is just for the RouteGuideExample to parse json to protobuf
     testImplementation group: 'com.google.protobuf', name: 'protobuf-java-util', version: '3.21.2'
 
+    //For tests that use https server (as opposed to inprocess server)
+    testImplementation 'io.grpc:grpc-netty:1.51.0'
+
 }
 
 //Tell gradle and intellij about where the generated proto java files are

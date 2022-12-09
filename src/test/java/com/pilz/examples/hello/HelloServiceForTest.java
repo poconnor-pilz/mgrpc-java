@@ -60,6 +60,7 @@ public class HelloServiceForTest extends ExampleHelloServiceGrpc.ExampleHelloSer
 
             @Override
             public void onCompleted() {
+                log.debug("lotsOfGreetings onCompleted()");
                 String everyone = "";
                 for(String name: names){
                     everyone += name + ",";

@@ -53,9 +53,13 @@ public class MqttUtils {
     }
 
     public static MqttAsyncClient makeClient(String lwtTopic) throws MqttException {
+        return makeClient(lwtTopic, "tcp://localhost:1884");
+    }
+
+    public static MqttAsyncClient makeClient(String lwtTopic, String brokerUrl) throws MqttException {
         final MqttAsyncClient client;
         client = new MqttAsyncClient(
-                "tcp://localhost:1884",
+                brokerUrl,
                 MqttAsyncClient.generateClientId(),
                 new MemoryPersistence());
         MqttConnectOptions mqttConnectOptions = new MqttConnectOptions();
@@ -67,5 +71,4 @@ public class MqttUtils {
         client.connect(mqttConnectOptions).waitForCompletion();
         return client;
     }
-
 }
