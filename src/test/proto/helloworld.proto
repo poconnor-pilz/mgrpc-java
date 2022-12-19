@@ -48,7 +48,7 @@ service ErrorsService {
 
   rpc SingleResponseWith5SecondDelay(HelloRequest) returns (HelloReply);
 
-  rpc CancelDuringServerStream(HelloRequest) returns (stream HelloReply);
+  rpc TryCancelDuringServerStream(HelloRequest) returns (stream HelloReply);
 
   rpc SingleResponseWithRichError(HelloRequest) returns (HelloReply);
 

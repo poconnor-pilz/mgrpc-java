@@ -63,6 +63,7 @@ public class MqttUtils {
                 MqttAsyncClient.generateClientId(),
                 new MemoryPersistence());
         MqttConnectOptions mqttConnectOptions = new MqttConnectOptions();
+        mqttConnectOptions.setMaxInflight(1000);
 
         if(lwtTopic != null){
             final byte[] lwtMessage = ConnectionStatus.newBuilder().setConnected(false).build().toByteArray();

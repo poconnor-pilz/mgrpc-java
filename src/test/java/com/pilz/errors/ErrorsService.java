@@ -17,7 +17,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 
 public class ErrorsService extends ErrorsServiceGrpc.ErrorsServiceImplBase {
@@ -57,8 +56,7 @@ public class ErrorsService extends ErrorsServiceGrpc.ErrorsServiceImplBase {
         responseObserver.onCompleted();
     }
 
-    @Override
-    public void cancelDuringServerStream(HelloRequest request, StreamObserver<HelloReply> responseObserver) {
+    public void tryCancelDuringServerStream(HelloRequest request, StreamObserver<HelloReply> responseObserver) {
 
         final boolean[] cancelled = {false};
 

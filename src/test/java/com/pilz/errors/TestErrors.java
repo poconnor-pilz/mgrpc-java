@@ -184,6 +184,7 @@ public class TestErrors {
             requestStream = reqStream;
         }
         public void cancel(String message){
+            log.debug("CancelableObserver cancel()");
             requestStream.cancel(message, null);
         }
 
@@ -194,13 +195,13 @@ public class TestErrors {
 
         @Override
         public void onError(Throwable t) {
-            log.debug("Error", t);
+            log.debug("CancelableObserver onError()", t);
             latch.countDown();
         }
 
         @Override
         public void onCompleted() {
-            log.debug("completed");
+            log.debug("CancelableObserver onCompleted()");
             latch.countDown();
         }
 
@@ -242,8 +243,6 @@ public class TestErrors {
         final Context.CancellableContext[] cancellableContext = {null};
 
 
-
-
         final CancelableObserver cancelableObserver = new CancelableObserver(latch);
         Executors.newSingleThreadExecutor().submit(new Runnable() {
             @Override
@@ -261,7 +260,7 @@ public class TestErrors {
 
 
 
-        stub.cancelDuringServerStream(joe, cancelableObserver);
+        stub.tryCancelDuringServerStream(joe, cancelableObserver);
 
         log.debug("waiting");
 
@@ -286,7 +285,7 @@ public class TestErrors {
             @Override
             public void run() {
                 try {
-                    Thread.sleep(2500);
+                    Thread.sleep(500);
                 } catch (InterruptedException e) {
                     throw new RuntimeException(e);
                 }
@@ -296,13 +295,15 @@ public class TestErrors {
         });
 
 
-        stub.cancelDuringServerStream(joe, cancelableObserver);
+        stub.tryCancelDuringServerStream(joe, cancelableObserver);
 
         log.debug("waiting");
 
+        //Verify that on the client side the CancelableObserver.onError gets called
         assert(latch.await(5, TimeUnit.SECONDS));
 
-        errorsService.cancelledLatch.await();
+        //Verify that on the server side the errors service cancel handler gets called
+        assert(errorsService.cancelledLatch.await(5, TimeUnit.SECONDS));
 
         log.debug("done");
     }

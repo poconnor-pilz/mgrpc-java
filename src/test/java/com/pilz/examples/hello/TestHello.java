@@ -45,8 +45,8 @@ public class TestHello {
 
         MqttUtils.startEmbeddedBroker();
 
-        serverMqtt = MqttUtils.makeClient(Topics.systemStatus(DEVICE));
-        clientMqtt = MqttUtils.makeClient(null);
+        serverMqtt = MqttUtils.makeClient(Topics.systemStatus(DEVICE), "tcp://localhost:1883");
+        clientMqtt = MqttUtils.makeClient(null, "tcp://localhost:1883");
     }
 
     @AfterAll
@@ -91,15 +91,52 @@ public class TestHello {
     public void testLotsOfReplies() throws Throwable{
 
         final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
-        HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
+        HelloRequest joe = HelloRequest.newBuilder().setName("2").build();
         StreamWaiter<HelloReply> waiter = new StreamWaiter<>(REQUEST_TIMEOUT);
         stub.lotsOfReplies(joe, waiter);
         List<HelloReply> responseList = waiter.getList();
         assertEquals(responseList.size(), 2);
-        assertEquals("Hello joe", responseList.get(0).getMessage());
-        assertEquals("Hello again joe", responseList.get(1).getMessage());
+        assertEquals("Hello 0", responseList.get(0).getMessage());
+        assertEquals("Hello 1", responseList.get(1).getMessage());
 
     }
+
+    @Test
+    public void testLotsOfParallelReplies() throws Throwable{
+
+        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
+        HelloRequest joe = HelloRequest.newBuilder().setName("10").build();
+        int numRequests = 100;
+        final CountDownLatch latch = new CountDownLatch(numRequests);
+        for(int i = 0; i < numRequests; i++) {
+            final int index = i;
+            stub.lotsOfReplies(joe, new StreamObserver<HelloReply>() {
+                @Override
+                public void onNext(HelloReply value) {
+                    log.debug(index + " - " + value.getMessage());
+                    try {
+                        Thread.sleep(1000);
+                    } catch (InterruptedException e) {
+                        throw new RuntimeException(e);
+                    }
+                }
+
+                @Override
+                public void onError(Throwable t) {
+
+                }
+
+                @Override
+                public void onCompleted() {
+                    latch.countDown();
+                }
+            });
+        }
+
+        latch.await();
+
+    }
+
 
     @Test
     public void testLotsOfGreetings(){
@@ -139,7 +176,7 @@ public class TestHello {
 
             @Override
             public void onCompleted() {
-
+                latch.countDown();
             }
         }
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
@@ -153,7 +190,12 @@ public class TestHello {
         clientStreamObserver.onNext(jane);
         replyObserver.latch.await(10, TimeUnit.SECONDS);
         assertEquals("Hello jane", replyObserver.lastReply.getMessage());
+        //close the call cleanly
+        replyObserver.latch = new CountDownLatch(1);
+        clientStreamObserver.onCompleted();
+        replyObserver.latch.await(10, TimeUnit.SECONDS);
     }
+
 
 
 

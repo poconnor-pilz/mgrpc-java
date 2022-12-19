@@ -21,6 +21,19 @@ public class MqttChannel extends Channel {
     public static final long SUBSCRIPTION_TIMEOUT_MILLIS = 10 * 1000;
     private final static Metadata EMPTY_METADATA = new Metadata();
 
+    private static volatile Executor executor;
+    private static Executor getExecutorInstance(){
+        if(executor == null){
+            synchronized (MqttChannel.class){
+                if(executor== null){
+                    //TODO: What kind of thread pool should we use here. It should probably be limited to a fixed maximum
+                    executor = Executors.newCachedThreadPool();
+                }
+            }
+        }
+        return executor;
+    }
+
 
     private final MqttAsyncClient client;
     /**
@@ -61,7 +74,7 @@ public class MqttChannel extends Channel {
                 log.error("Could not find call with callId: " + message.getCall());
                 return;
             }
-            call.onServerMessage(message);
+            call.queueServerMessage(message);
         });
 
         try {
@@ -86,7 +99,7 @@ public class MqttChannel extends Channel {
 
     @Override
     public <RequestT, ResponseT> ClientCall<RequestT, ResponseT> newCall(MethodDescriptor<RequestT, ResponseT> methodDescriptor, CallOptions callOptions) {
-        MqttClientCall call = new MqttClientCall<>(methodDescriptor, callOptions);
+        MqttClientCall call = new MqttClientCall<>(methodDescriptor, callOptions, getExecutorInstance());
         clientCallsById.put(call.getCallId(), call);
         return call;
     }
@@ -102,7 +115,8 @@ public class MqttChannel extends Channel {
         final MethodDescriptor<ReqT, RespT> methodDescriptor;
         final CallOptions callOptions;
         final Context context;
-        final Executor callExecutor;
+        final Executor clientExecutor;
+        final Executor executor;
         final String callId;
         int sequence = 0;
         final String replyTo;
@@ -110,14 +124,19 @@ public class MqttChannel extends Channel {
         private ScheduledFuture<?> deadlineCancellationFuture;
         private boolean cancelCalled = false;
 
+        private static final int QUEUE_BUFFER_SIZE = 100;
+        private final BlockingQueue<MgMessage> messageQueue = new ArrayBlockingQueue<>(QUEUE_BUFFER_SIZE);
+
+
         private final ContextCancellationListener cancellationListener =
                 new ContextCancellationListener();
 
 
-        private MqttClientCall(MethodDescriptor<ReqT, RespT> methodDescriptor, CallOptions callOptions) {
-            this.callExecutor = callOptions.getExecutor();
+        private MqttClientCall(MethodDescriptor<ReqT, RespT> methodDescriptor, CallOptions callOptions, Executor executor) {
+            this.clientExecutor = callOptions.getExecutor();
             this.methodDescriptor = methodDescriptor;
             this.callOptions = callOptions;
+            this.executor = executor;
             this.context = Context.current();
             this.callId = Base64Uuid.id();
             this.replyTo = Topics.replyTo(serverTopic, methodDescriptor.getServiceName(),
@@ -134,7 +153,7 @@ public class MqttChannel extends Channel {
 
             if (context.isCancelled()) {
                 //Call is already cancelled
-                exec(()->close(Status.CANCELLED));
+                clientExec(()->close(Status.CANCELLED));
                 return;
             }
 
@@ -168,8 +187,26 @@ public class MqttChannel extends Channel {
         }
 
 
-        public void onServerMessage(MgMessage message) {
+        public void queueServerMessage(MgMessage message) {
+            try {
+                messageQueue.put(message);
+                //Process queue on thread pool
+                this.executor.execute(() -> processQueue());
+            } catch (InterruptedException e) {
+                log.error("Interrupted while putting message on queue", e);
+            }
+        }
 
+        public synchronized void processQueue() {
+            MgMessage message = messageQueue.poll();
+            while (!cancelCalled && (message != null)) {
+                handleServerMessage(message);
+                message = messageQueue.poll();
+            }
+        }
+
+
+        public void handleServerMessage(MgMessage message){
             if (message.getType() == MgType.STATUS) {
                 log.debug("Received completed response");
                 final com.google.rpc.Status grpcStatus;
@@ -182,7 +219,7 @@ public class MqttChannel extends Channel {
                 }
             } else {
                 log.debug("Received message response");
-                exec(() -> {
+                clientExec(() -> {
                     responseListener.onHeaders(EMPTY_METADATA);
                     responseListener.onMessage(methodDescriptor.parseResponse(message.getContents().newInput()));
                     if (message.getSequence() == SINGLE_MESSAGE_STREAM) {
@@ -192,7 +229,6 @@ public class MqttChannel extends Channel {
                     }
                 });
             }
-
         }
 
         public void close(Status status) {
@@ -202,7 +238,7 @@ public class MqttChannel extends Channel {
             if (f != null) {
                 f.cancel(false);
             }
-            exec(() -> responseListener.onClose(status, EMPTY_METADATA));
+            clientExec(() -> responseListener.onClose(status, EMPTY_METADATA));
             clientCallsById.remove(this.callId);
         }
 
@@ -311,10 +347,12 @@ public class MqttChannel extends Channel {
         }
 
 
-        private void exec(Runnable runnable) {
+        private void clientExec(Runnable runnable) {
             //If the caller supplies an executor we must run on it (otherwise for example BlockingStub will just freeze)
-            if (this.callExecutor != null) {
-                this.callExecutor.execute(runnable);
+            //It looks like this is only set when a BlockingStub is used and in that case it will be a
+            //ClientCalls$ThreadlessExecutor
+            if (this.clientExecutor != null) {
+                this.clientExecutor.execute(runnable);
             } else {
                 runnable.run();
             }

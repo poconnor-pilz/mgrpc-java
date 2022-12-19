@@ -11,6 +11,7 @@ import org.eclipse.paho.client.mqttv3.MqttMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Comparator;
 import java.util.Map;
 import java.util.concurrent.*;
 
@@ -19,8 +20,21 @@ public class MqttServer {
     private static final Logger log = LoggerFactory.getLogger(MqttServer.class);
     private final MqttInternalHandlerRegistry registry = new MqttInternalHandlerRegistry();
 
-    //TODO: What kind of thread pool should we use here. It should probably be limited to a fixed maximum
-    private final Executor executor = Executors.newCachedThreadPool();
+    private static volatile Executor executor;
+    private static Executor getExecutorInstance(){
+        if(executor == null){
+            synchronized (MqttServer.class){
+                if(executor== null){
+                    //TODO: What kind of thread pool should we use here. It should probably be limited to a fixed maximum
+                    executor = Executors.newCachedThreadPool();
+                }
+            }
+        }
+        return executor;
+    }
+
+
+
 
     private final MqttAsyncClient client;
 
@@ -48,7 +62,7 @@ public class MqttServer {
             //We use an MqttExceptionLogger here because if a we throw an exception in the subscribe handler
             //it will disconnect the mqtt client
             final MgMessage message = MgMessage.parseFrom(mqttMessage.getPayload());
-            log.debug("Received {} message on : {}", message.getType(), topic );
+            log.debug("Received {} message on : {}", message.getType(), topic);
             final String callId = message.getCall();
             if (callId.isEmpty()) {
                 log.error("Every message sent from the client must have a callId");
@@ -57,18 +71,12 @@ public class MqttServer {
 
             MgMessageHandler handler = handlersByCallId.get(callId);
             if (handler == null) {
-                handler = new MgMessageHandler(callId);
+                handler = new MgMessageHandler(callId, getExecutorInstance());
                 handlersByCallId.put(callId, handler);
-                final MgMessageHandler fHandler = handler;
-                //Each handler gets its own queue and thread to process the client stream
-                //The thread will terminate when the client stream is finished
-                executor.execute(() -> {
-                    fHandler.processQueue();
-                });
             }
 
             //put a message on the queue
-            handler.queueMessage(new CallMessage(topic, message));
+            handler.queueClientMessage(new CallMessage(topic, message));
             log.debug("Put {} message on queue", message.getType());
 
             //TODO: Check this for leaks. How can we be sure everything is gc'd
@@ -108,13 +116,12 @@ public class MqttServer {
             client.publish(topic, message.toByteArray(), 1, false);
         } catch (MqttException e) {
             //We can only log the exception here as the broker is broken
-            log.error("Failed to publish message to broker");
+            log.error("Failed to publish message to broker", e);
         }
 
     }
 
     class CallMessage {
-        boolean endOfQueue = false;
         final String topic;
         final MgMessage message;
 
@@ -124,28 +131,55 @@ public class MqttServer {
         }
     }
 
-    class TerminalMessage extends CallMessage{
-        TerminalMessage() {
-            super(null, null);
-            this.endOfQueue = true;
-        }
-    }
-
 
     private class MgMessageHandler {
         private final String callId;
 
         private MqttServerCall serverCall;
 
-        private static final int QUEUE_BUFFER_SIZE = 100;
-        private final BlockingQueue<CallMessage> messageQueue = new ArrayBlockingQueue<>(QUEUE_BUFFER_SIZE);
+        /**
+         * This will be set when the call is half closed or removed so that it will no longer
+         * process client calls.
+         */
+        private boolean removed = false;
+
+        private final Executor executor;
+
+        private int sequenceOfLastProcessedMessage = -1;
+
+        private static final int MAX_QUEUED_MESSAGES = 100;
+        //Messages are ordered by sequence
+        private final BlockingQueue<CallMessage> messageQueue = new PriorityBlockingQueue<>(11,
+                Comparator.comparingInt(o -> o.message.getSequence()));
 
 
-        private MgMessageHandler(String callId) {
+        private MgMessageHandler(String callId, Executor executor) {
             this.callId = callId;
+            this.executor = executor;
         }
 
-        public void queueMessage(CallMessage callMessage) {
+        public void queueClientMessage(CallMessage callMessage) {
+
+            /*
+            TODO: Change this to use priority queue and synchronized method
+            This method should enqueue the message and then call processQueue in an executor
+            processQueue should be synchronized.
+            This method should first check for a cancel message and cancel directly (maybe change to MgType.CANCEL?
+            or is it better to just cancel for any error that a client might send? - no because cancel is different
+            it's not just an error at the end of the stream it's meant to interrupt whatever is going on)
+            processQueue should take the message off the queue (use poll with no timeout)
+            First tt should also check if the message is in recents and if so then ignore it.
+            Then it shold  check if it's sequence is 1 more than previous
+            If not then it should put the message back on the queue.
+            It should set a cancel timer of 60s if this occurs and if the timer gets triggered before an in-order
+            message arrives then cancel the whole call.
+            This timer works just the same way as the normal cancel timer (or maybe we replace the normal cancel timer
+            if the normal cancel timer time left is less than or close to the timeout). The only reason
+            we want to cancel is to get the call garbage collected so it doesn't matter if it takes a long time.
+            ----------------------
+             */
+
+
             //This method may be called by multiple threads
             //Use a queue here because for a particular call the messages in a stream
             //must be handled one by one.
@@ -157,58 +191,69 @@ public class MqttServer {
             //First check if this is a cancel message.
             //If we queue a cancel message it won't get processed until after the previous message
             //which is what we are trying to cancel so we need to cancel straight away
-            if(!callMessage.endOfQueue){
-                if(callMessage.message.getType() == MgType.STATUS){
-                    boolean statusOk = false;
-                    try {
-                        com.google.rpc.Status grpcStatus = com.google.rpc.Status.parseFrom(callMessage.message.getContents());
-                        statusOk = (grpcStatus.getCode() == Status.OK.getCode().value());
-                    } catch (InvalidProtocolBufferException e) {
-                        log.debug("Failed to parse status from client");
+            if (callMessage.message.getType() == MgType.STATUS) {
+                boolean statusOk = false;
+                try {
+                    com.google.rpc.Status grpcStatus = com.google.rpc.Status.parseFrom(callMessage.message.getContents());
+                    statusOk = (grpcStatus.getCode() == Status.OK.getCode().value());
+                } catch (InvalidProtocolBufferException e) {
+                    log.debug("Failed to parse status from client");
+                }
+                if (!statusOk) {
+                    log.debug("Cancel or error received. Will cancel immediately");
+                    //If the call was constructed, cancel it.
+                    if (serverCall != null) {
+                        serverCall.cancel();
                     }
-                    if(!statusOk){
-                        log.debug("Cancel received");
-                        if(serverCall != null){
-                            serverCall.cancel();
-                        }
-                        handlersByCallId.remove(callId);
-                        //TODO: can we stop the queue more immediately here?
-                        callMessage = new TerminalMessage();
-                    }
+                    this.remove();
                 }
             }
             try {
                 messageQueue.put(callMessage);
+                //Process queue on thread pool
+                this.executor.execute(() -> processQueue());
             } catch (InterruptedException e) {
                 log.error("Interrupted while putting message on queue", e);
             }
         }
-        public void processQueue(){
-            //This method will only be called by a single thread.
-            while(true){
-                try {
-                    CallMessage callMessage = messageQueue.take();
-                    if(callMessage.endOfQueue){
-                        break;
-                    } else {
-                        handleMessage(callMessage.topic, callMessage.message);
-                    }
-                } catch (InterruptedException e) {
-                    log.error("Interrupted while processing queue", e);
-                    break;
-                }
+
+        public synchronized void processQueue() {
+            CallMessage callMessage = messageQueue.poll();
+            while (!removed && (callMessage != null)) {
+                handleClientMessage(callMessage.topic, callMessage.message);
+                callMessage = messageQueue.poll();
             }
-            log.debug("Finished processing queue");
-            handlersByCallId.remove(callId);
         }
 
-        public void handleMessage(String topic, MgMessage message) {
+        public void handleClientMessage(String topic, MgMessage message) {
 
             log.debug("Handling {} message", message.getType());
+            //TODO: First check for duplicates in recents and if there is one just return
+
+            //Messages may arrive out of sequence.
+            boolean sequential = true;
+            if(sequenceOfLastProcessedMessage == -1){
+                if( (message.getSequence()!=0) && (message.getSequence()!=1) ){
+                    sequential = false;
+                }
+            } else {
+                if(message.getSequence() - sequenceOfLastProcessedMessage != 1){
+                    sequential = false;
+                }
+            }
+            if(!sequential){
+                //Put this message back on the queue and wait for the sequential message
+                //TODO: Set a "cancellation" timer here that closes the call and sends an error to the client stream if no sequential message arrives
+                queueClientMessage(new CallMessage(topic, message));
+                return;
+            }
+            sequenceOfLastProcessedMessage = message.getSequence();
+
+
             try {
                 if (message.getType() != MgType.START) {
                     if (serverCall == null) {
-                        //We never received a valid start messsage for this call.
+                        //We never received a valid start message for this call.
                         //TODO: ordering. What if the second or third message in a client stream arrives after the start message
                         //Should we just make an exception in that case and fail the call?
                         //It would be better if we had an ordering system that gets called first
@@ -218,7 +263,7 @@ public class MqttServer {
                         //will happen to them.) If it is abandoned then we must send an error to that requestId.
                         //How do we distinguish between a stray callId from some previous connection and this condition?
                         log.error("Unrecognised call id: " + callId);
-                        MgMessageHandler.this.queueMessage(new TerminalMessage());
+                        this.remove();
                         return;
                     }
                     serverCall.onClientMessage(message);
@@ -259,6 +304,12 @@ public class MqttServer {
 
         }
 
+        public void remove() {
+            MqttServer.this.handlersByCallId.remove(this.callId);
+            this.removed = true;
+            log.debug("Call {} removed for client messages", callId);
+        }
+
         private class MqttServerCall<ReqT, RespT> extends ServerCall<ReqT, RespT> {
 
             final MethodDescriptor<ReqT, RespT> methodDescriptor;
@@ -268,7 +319,6 @@ public class MqttServer {
             int sequence = 0;
             private Listener listener;
             private boolean cancelled = false;
-
 
 
             MqttServerCall(MqttAsyncClient client, MethodDescriptor<ReqT, RespT> methodDescriptor, String replyTo, String callId) {
@@ -301,8 +351,7 @@ public class MqttServer {
                 if (message.getType() == MgType.STATUS) {
                     //MgMessageHandler will have already checked for a cancel so this is just an ok end of stream
                     listener.onHalfClose();
-                    //Send a dead letter to the queue to stop processing;
-                    MgMessageHandler.this.queueMessage(new TerminalMessage());
+                    MgMessageHandler.this.remove();
                 } else {
                     //TODO: What if this does not match the request type, the parse will not fail - use the methoddescriptor
                     Object requestParam = methodDescriptor.parseRequest(message.getContents().newInput());
@@ -310,8 +359,7 @@ public class MqttServer {
                     if (message.getSequence() == SINGLE_MESSAGE_STREAM) {
                         //We do not expect the client to send a completed if there is only one message
                         listener.onHalfClose();
-                        //Send a dead letter to the queue to stop processing;
-                        MgMessageHandler.this.queueMessage(new TerminalMessage());
+                        MgMessageHandler.this.remove();
                     }
                 }
             }
@@ -337,9 +385,9 @@ public class MqttServer {
             public void close(Status status, Metadata trailers) {
                 sequence++;
                 sendStatus(replyTo, callId, sequence, status);
-                //Send a dead letter to the queue to stop processing;
-                MgMessageHandler.this.queueMessage(new TerminalMessage());
+                MgMessageHandler.this.remove();
             }
+
 
             public void cancel() {
                 log.debug("server call cancelled");
@@ -363,7 +411,6 @@ public class MqttServer {
 
 
     }
-
 
 
 }

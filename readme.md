@@ -94,6 +94,8 @@ Also look at ManagedChannel. That has shutdown methods that are supposed to send
 Because the cancel has nothing to do with the client stream or input request then it looks like we will need
 an MgType.CANCEL and send that. Then somehow the server has to put that in the context for that call.
 
+The server call should not send back anything to the client when it is cancelled. If it is cancelled from the client then the client will know about the cancel anyway. In that case the channel should send an onError to any streams it has with Status.CANCELLED (this seems to be what grpc classic does).  If it is cancelled because the server is shut down then the channel should detect that through the LWT and send cancels to client streams.
+
 TODO: 
 - In MqttClientCall call removeContextListenerAndCancelDeadlineFuture() from close()
 - In MqttClientCall listen to context for cancels and call cancel()
@@ -102,7 +104,11 @@ TODO:
 - Test the cancel by doing a context cancel and by using the CancelableObserver as above. 
 - Send a timeout in the header of the first request and do a timeout executor on the server
 - Do thread pools for client and server.
-
+TODO: tests
+- Test if the queue bounds are exceeded, client and server
+- Test out of order, client and server
+- Test cancel
+- Test cancel beause of timeout
 
 ## Watch Batching
 Batching is something that comes up as a specific optimisation for a cloud visu server use case and is probably not a general concept at all. 
