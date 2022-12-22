@@ -123,6 +123,10 @@ public class MqttChannel extends Channel {
         Listener<RespT> responseListener;
         private ScheduledFuture<?> deadlineCancellationFuture;
         private boolean cancelCalled = false;
+        private boolean closed = false;
+        /**List of recent sequence ids, Used for checking for duplicate messages*/
+        private Recents recents = new Recents();
+
 
         private static final int QUEUE_BUFFER_SIZE = 100;
         private final BlockingQueue<MgMessage> messageQueue = new ArrayBlockingQueue<>(QUEUE_BUFFER_SIZE);
@@ -130,6 +134,7 @@ public class MqttChannel extends Channel {
 
         private final ContextCancellationListener cancellationListener =
                 new ContextCancellationListener();
+        private int sequenceOfLastProcessedMessage = -1;
 
 
         private MqttClientCall(MethodDescriptor<ReqT, RespT> methodDescriptor, CallOptions callOptions, Executor executor) {
@@ -167,6 +172,10 @@ public class MqttChannel extends Channel {
                     //TODO: We do not need to send a cancellation message to the server here but
                     //we do need to send on the deadline to the server in the first request so
                     //that it can set its own deadline timer
+
+                    //We close the call here which will call listener.onClose(Status.DEADLINE_EXCEEDED)
+                    //because this is what the listener expects.
+                    //The listener will then cancel on this call.
                     close(Status.DEADLINE_EXCEEDED.augmentDescription(deadlineMessage));
                 });
             }
@@ -198,6 +207,10 @@ public class MqttChannel extends Channel {
         }
 
         public synchronized void processQueue() {
+            //This method will be called by multiple threads but it is synchronized so that the
+            //service method call will only process one message in a stream at a time i.e. the
+            //service method *call* behaves like an actor. However, the service method itself may have
+            //many calls ongoing concurrently (unless the service developer synchronizes it).
             MgMessage message = messageQueue.poll();
             while (!cancelCalled && (message != null)) {
                 handleServerMessage(message);
@@ -207,6 +220,39 @@ public class MqttChannel extends Channel {
 
 
         public void handleServerMessage(MgMessage message){
+
+            final int sequence = message.getSequence();
+            if(sequence < 0){
+                log.error("Message received with sequence less than zero");
+                return;
+            }
+            //Check to see if a message with this sequence has recently been processed
+            //If so then this message is a duplicate sent by the broker so ignore it
+            if(recents.contains(sequence)){
+                log.warn("Duplicate message received, ignoring" + message);
+                return;
+            }
+            recents.add(sequence);
+
+            //Check for messages that are out of sequence.
+            boolean sequential = true;
+            if(sequenceOfLastProcessedMessage == -1){
+                if( (sequence!=0) && (sequence!=1) ){
+                    sequential = false;
+                }
+            } else {
+                if(sequence - sequenceOfLastProcessedMessage != 1){
+                    sequential = false;
+                }
+            }
+            if(!sequential){
+                //Put this message back on the queue and wait for the sequential message
+                //TODO: Set a "cancellation" timer here that closes the call and sends an error to the client stream if no sequential message arrives
+                queueServerMessage(message);
+                return;
+            }
+            sequenceOfLastProcessedMessage = sequence;
+
             if (message.getType() == MgType.STATUS) {
                 log.debug("Received completed response");
                 final com.google.rpc.Status grpcStatus;
@@ -232,6 +278,11 @@ public class MqttChannel extends Channel {
         }
 
         public void close(Status status) {
+            if(closed){
+                //
+                return;
+            }
+            closed = true;
             log.debug("Closing call with status " + status.getDescription());
             context.removeListener(cancellationListener);
             ScheduledFuture<?> f = deadlineCancellationFuture;
@@ -253,6 +304,13 @@ public class MqttChannel extends Channel {
 
         @Override
         public void cancel(@Nullable String message, @Nullable Throwable cause) {
+            if(closed){
+                //In the case of a deadline timeout we will call close on the listener and on this
+                //The listener will then call close on this with Status.CANCELLED
+                //In this case we do nothing. We don't want to send the cancel on to the server
+                //because the server will have its own timeout handler.
+                return;
+            }
             log.debug("Call cancelled");
             if (cancelCalled) {
                 return;

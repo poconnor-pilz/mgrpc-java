@@ -18,7 +18,7 @@ import java.util.concurrent.*;
 public class MqttServer {
 
     private static final Logger log = LoggerFactory.getLogger(MqttServer.class);
-    private final MqttInternalHandlerRegistry registry = new MqttInternalHandlerRegistry();
+    private MqttInternalHandlerRegistry registry = new MqttInternalHandlerRegistry();
 
     private static volatile Executor executor;
     private static Executor getExecutorInstance(){
@@ -54,6 +54,10 @@ public class MqttServer {
         registry.addService(service);
     }
 
+    public void removeAllServices() {
+        this.registry = new MqttInternalHandlerRegistry();
+    }
+
     public void init() throws MqttException {
         String allServicesIn = Topics.allServicesIn(serverTopic);
         log.debug("subscribe server at: " + allServicesIn);
@@ -75,7 +79,7 @@ public class MqttServer {
                 handlersByCallId.put(callId, handler);
             }
 
-            //put a message on the queue
+            //put the message on the handler's queue
             handler.queueClientMessage(new CallMessage(topic, message));
             log.debug("Put {} message on queue", message.getType());
 
@@ -148,6 +152,9 @@ public class MqttServer {
         private int sequenceOfLastProcessedMessage = -1;
 
         private static final int MAX_QUEUED_MESSAGES = 100;
+
+        /**List of recent sequence ids, Used for checking for duplicate messages*/
+        private Recents recents = new Recents();
         //Messages are ordered by sequence
         private final BlockingQueue<CallMessage> messageQueue = new PriorityBlockingQueue<>(11,
                 Comparator.comparingInt(o -> o.message.getSequence()));
@@ -159,34 +166,6 @@ public class MqttServer {
         }
 
         public void queueClientMessage(CallMessage callMessage) {
-
-            /*
-            TODO: Change this to use priority queue and synchronized method
-            This method should enqueue the message and then call processQueue in an executor
-            processQueue should be synchronized.
-            This method should first check for a cancel message and cancel directly (maybe change to MgType.CANCEL?
-            or is it better to just cancel for any error that a client might send? - no because cancel is different
-            it's not just an error at the end of the stream it's meant to interrupt whatever is going on)
-            processQueue should take the message off the queue (use poll with no timeout)
-            First tt should also check if the message is in recents and if so then ignore it.
-            Then it shold  check if it's sequence is 1 more than previous
-            If not then it should put the message back on the queue.
-            It should set a cancel timer of 60s if this occurs and if the timer gets triggered before an in-order
-            message arrives then cancel the whole call.
-            This timer works just the same way as the normal cancel timer (or maybe we replace the normal cancel timer
-            if the normal cancel timer time left is less than or close to the timeout). The only reason
-            we want to cancel is to get the call garbage collected so it doesn't matter if it takes a long time.
-            ----------------------
-             */
-
-
-            //This method may be called by multiple threads
-            //Use a queue here because for a particular call the messages in a stream
-            //must be handled one by one.
-            //Service methods themselves are re-entrant (unless the developer marks that method as synchronized)
-            //i.e. there can be more than one call concurrently to a service method but within a call
-            //the messages are expected by the call to be delivered one by one to its input stream
-            //TODO: messages should be sorted first by sequence in case mqtt sends them in wrong order
 
             //First check if this is a cancel message.
             //If we queue a cancel message it won't get processed until after the previous message
@@ -218,6 +197,10 @@ public class MqttServer {
         }
 
         public synchronized void processQueue() {
+            //This method will be called by multiple threads but it is synchronized so that the
+            //service method call will only process one message in a stream at a time i.e. the
+            //service method *call* behaves like an actor. However, the service method itself may have
+            //many calls ongoing concurrently (unless the service developer synchronizes it).
             CallMessage callMessage = messageQueue.poll();
             while (!removed && (callMessage != null)) {
                 handleClientMessage(callMessage.topic, callMessage.message);
@@ -228,16 +211,26 @@ public class MqttServer {
         public void handleClientMessage(String topic, MgMessage message) {
 
             log.debug("Handling {} message", message.getType());
-            //TODO: First check for duplicates in recents and if there is one just return
-
-            //Messages may arrive out of sequence.
+            final int sequence = message.getSequence();
+            if(sequence < 0){
+                log.error("Message received with sequence less than zero");
+                return;
+            }
+            //Check to see if a message with this sequence has recently been processed
+            //If so then this message is a duplicate sent by the broker so ignore it
+            if(recents.contains(sequence)){
+                log.warn("Duplicate message received, ignoring" + message);
+                return;
+            }
+            recents.add(sequence);
+            //Check for messages that are out of sequence.
             boolean sequential = true;
             if(sequenceOfLastProcessedMessage == -1){
-                if( (message.getSequence()!=0) && (message.getSequence()!=1) ){
+                if( (sequence!=0) && (sequence!=1) ){
                     sequential = false;
                 }
             } else {
-                if(message.getSequence() - sequenceOfLastProcessedMessage != 1){
+                if(sequence - sequenceOfLastProcessedMessage != 1){
                     sequential = false;
                 }
             }
@@ -247,7 +240,7 @@ public class MqttServer {
                 queueClientMessage(new CallMessage(topic, message));
                 return;
             }
-            sequenceOfLastProcessedMessage = message.getSequence();
+            sequenceOfLastProcessedMessage = sequence;
 
 
             try {
