@@ -1,6 +1,5 @@
 package com.pilz.mqttgrpc;
 
-import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.protobuf.MessageLite;
 import io.grpc.*;
 import org.eclipse.paho.client.mqttv3.IMqttMessageListener;
@@ -69,9 +68,9 @@ public class MqttChannel extends Channel {
 
         final IMqttMessageListener messageListener = new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
             final MgMessage message = MgMessage.parseFrom(mqttMessage.getPayload());
-            final MqttClientCall call = clientCallsById.get(message.getCall());
+            final MqttClientCall call = clientCallsById.get(message.getCallId());
             if (call == null) {
-                log.error("Could not find call with callId: " + message.getCall());
+                log.error("Could not find call with callId: " + message.getCallId());
                 return;
             }
             call.queueServerMessage(message);
@@ -253,27 +252,26 @@ public class MqttChannel extends Channel {
             }
             sequenceOfLastProcessedMessage = sequence;
 
-            if (message.getType() == MgType.STATUS) {
-                log.debug("Received completed response");
-                final com.google.rpc.Status grpcStatus;
-                try {
-                    grpcStatus = com.google.rpc.Status.parseFrom(message.getContents());
-                    close(toStatus(grpcStatus));
-                } catch (InvalidProtocolBufferException e) {
-                    log.debug("Failed to parse status from server");
-                    close(Status.UNKNOWN.withDescription("Failed to parse status from server"));
-                }
-            } else {
-                log.debug("Received message response");
-                clientExec(() -> {
-                    responseListener.onHeaders(EMPTY_METADATA);
-                    responseListener.onMessage(methodDescriptor.parseResponse(message.getContents().newInput()));
-                    if (message.getSequence() == SINGLE_MESSAGE_STREAM) {
-                        //There is only a single message in this stream and it will not be followed by
-                        //a completed message so close the stream.
-                        close(Status.OK);
-                    }
-                });
+            switch(message.getMessageCase()){
+                case STATUS:
+                    log.debug("Received completed response");
+                    close(toStatus(message.getStatus()));
+                    return;
+                case VALUE:
+                    log.debug("Received message response");
+                    clientExec(() -> {
+                        responseListener.onHeaders(EMPTY_METADATA);
+                        responseListener.onMessage(methodDescriptor.parseResponse(message.getValue().getContents().newInput()));
+                        if (message.getSequence() == SINGLE_MESSAGE_STREAM) {
+                            //There is only a single message in this stream and it will not be followed by
+                            //a completed message so close the stream.
+                            close(Status.OK);
+                        }
+                    });
+                    return;
+                default:
+                    log.error("Invalid message case");
+                    return;
             }
         }
 
@@ -330,10 +328,9 @@ public class MqttChannel extends Channel {
             final com.google.rpc.Status cancelled = io.grpc.protobuf.StatusProto.fromStatusAndTrailers(Status.CANCELLED, null);
             sequence++;
             final MgMessage.Builder msgBuilder = MgMessage.newBuilder()
-                    .setCall(callId)
+                    .setCallId(callId)
                     .setSequence(sequence)
-                    .setType(MgType.STATUS)
-                    .setContents(cancelled.toByteString());
+                    .setStatus(cancelled);
             sendToBroker(methodDescriptor.getServiceName(), methodDescriptor.getBareMethodName(), msgBuilder);
 
         }
@@ -350,10 +347,9 @@ public class MqttChannel extends Channel {
             final com.google.rpc.Status ok = io.grpc.protobuf.StatusProto.fromStatusAndTrailers(Status.OK, null);
             sequence++;
             final MgMessage.Builder msgBuilder = MgMessage.newBuilder()
-                    .setCall(callId)
+                    .setCallId(callId)
                     .setSequence(sequence)
-                    .setType(MgType.STATUS)
-                    .setContents(ok.toByteString());
+                    .setStatus(ok);
             //TODO: If the send fails then should this send an error back to the listener?
             //or will the exception suffice?
             sendToBroker(methodDescriptor.getServiceName(), methodDescriptor.getBareMethodName(), msgBuilder);
@@ -364,19 +360,21 @@ public class MqttChannel extends Channel {
 
             //Send message to the server
             final MgMessage.Builder msgBuilder = MgMessage.newBuilder()
-                    .setCall(callId);
+                    .setCallId(callId);
 
+            final Value value = Value.newBuilder()
+                    .setContents(((MessageLite) message).toByteString()).build();
             if (sequence == 0) {
                 //This is the first message in the stream so it needs to be a START with a header
-                msgBuilder.setType(MgType.START);
-                final MgHeader header = MgHeader.newBuilder()
-                        .setReplyTo(replyTo).build();
-                msgBuilder.setHeader(header);
+                Header header = Header.newBuilder().setReplyTo(replyTo).build();
+                final Start start = Start.newBuilder()
+                        .setHeader(header)
+                        .setValue(value).build();
+                msgBuilder.setStart(start);
             } else {
-                msgBuilder.setType(MgType.NEXT);
+                msgBuilder.setValue(value);
             }
 
-            msgBuilder.setContents(((MessageLite) message).toByteString()).build();
             //Only increment sequence if there is potentially more than one message in the stream.
             if (!methodDescriptor.getType().clientSendsOneMessage()) {
                 sequence++;
@@ -397,7 +395,7 @@ public class MqttChannel extends Channel {
                 final String topic = Topics.methodIn(serverTopic, serviceName, method);
                 final MgMessage message = messageBuilder.build();
                 log.debug("Sending message type: {} sequence: {} call: {} topic:{} ",
-                        new Object[]{message.getType(), message.getSequence(), message.getCall(), topic});
+                        new Object[]{message.getMessageCase(), message.getSequence(), message.getCallId(), topic});
                 client.publish(topic, new MqttMessage(message.toByteArray()));
             } catch (MqttException e) {
                 throw new StatusRuntimeException(Status.UNAVAILABLE.fromThrowable(e));

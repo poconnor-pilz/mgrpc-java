@@ -1,7 +1,6 @@
 package com.pilz.mqttgrpc;
 
 import com.google.protobuf.ByteString;
-import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.protobuf.MessageLite;
 import io.grpc.*;
 import io.grpc.protobuf.StatusProto;
@@ -14,6 +13,10 @@ import org.slf4j.LoggerFactory;
 import java.util.Comparator;
 import java.util.Map;
 import java.util.concurrent.*;
+
+import static com.pilz.mqttgrpc.MgMessage.MessageCase.START;
+import static com.pilz.mqttgrpc.MgMessage.MessageCase.STATUS;
+
 
 public class MqttServer {
 
@@ -66,8 +69,8 @@ public class MqttServer {
             //We use an MqttExceptionLogger here because if a we throw an exception in the subscribe handler
             //it will disconnect the mqtt client
             final MgMessage message = MgMessage.parseFrom(mqttMessage.getPayload());
-            log.debug("Received {} message on : {}", message.getType(), topic);
-            final String callId = message.getCall();
+            log.debug("Received {} message on : {}", message.getMessageCase(), topic);
+            final String callId = message.getCallId();
             if (callId.isEmpty()) {
                 log.error("Every message sent from the client must have a callId");
                 return;
@@ -81,7 +84,7 @@ public class MqttServer {
 
             //put the message on the handler's queue
             handler.queueClientMessage(new CallMessage(topic, message));
-            log.debug("Put {} message on queue", message.getType());
+            log.debug("Put {} message on queue", message.getMessageCase());
 
             //TODO: Check this for leaks. How can we be sure everything is gc'd
 
@@ -101,10 +104,9 @@ public class MqttServer {
     private void sendStatus(String replyTo, String callId, int sequence, Status status) {
         final com.google.rpc.Status grpcStatus = StatusProto.fromStatusAndTrailers(status, null);
         MgMessage message = MgMessage.newBuilder()
-                .setType(MgType.STATUS)
-                .setCall(callId)
+                .setStatus(grpcStatus)
+                .setCallId(callId)
                 .setSequence(sequence)
-                .setContents(grpcStatus.toByteString())
                 .build();
         if (!status.isOk()) {
             log.error("Sending error: " + status);
@@ -116,7 +118,7 @@ public class MqttServer {
 
     private void publish(String topic, MgMessage message) {
         try {
-            log.debug("Sending message Type: {} Sequence: {} Topic:{} ", new Object[]{message.getType(), message.getSequence(), topic});
+            log.debug("Sending message Type: {} Sequence: {} Topic:{} ", new Object[]{message.getMessageCase(), message.getSequence(), topic});
             client.publish(topic, message.toByteArray(), 1, false);
         } catch (MqttException e) {
             //We can only log the exception here as the broker is broken
@@ -170,14 +172,10 @@ public class MqttServer {
             //First check if this is a cancel message.
             //If we queue a cancel message it won't get processed until after the previous message
             //which is what we are trying to cancel so we need to cancel straight away
-            if (callMessage.message.getType() == MgType.STATUS) {
+            if (callMessage.message.getMessageCase() == STATUS) {
                 boolean statusOk = false;
-                try {
-                    com.google.rpc.Status grpcStatus = com.google.rpc.Status.parseFrom(callMessage.message.getContents());
-                    statusOk = (grpcStatus.getCode() == Status.OK.getCode().value());
-                } catch (InvalidProtocolBufferException e) {
-                    log.debug("Failed to parse status from client");
-                }
+                com.google.rpc.Status grpcStatus = callMessage.message.getStatus();
+                statusOk = (grpcStatus.getCode() == Status.OK.getCode().value());
                 if (!statusOk) {
                     log.debug("Cancel or error received. Will cancel immediately");
                     //If the call was constructed, cancel it.
@@ -210,7 +208,7 @@ public class MqttServer {
 
         public void handleClientMessage(String topic, MgMessage message) {
 
-            log.debug("Handling {} message", message.getType());
+            log.debug("Handling {} message", message.getMessageCase());
             final int sequence = message.getSequence();
             if(sequence < 0){
                 log.error("Message received with sequence less than zero");
@@ -244,10 +242,10 @@ public class MqttServer {
 
 
             try {
-                if (message.getType() != MgType.START) {
+                if (message.getMessageCase() != START) {
                     if (serverCall == null) {
-                        //We never received a valid start message for this call.
-                        //TODO: ordering. What if the second or third message in a client stream arrives after the start message
+                        //We never received a valid first message for this call.
+                        //TODO: ordering. What if the second or third message in a client stream arrives after the first message
                         //Should we just make an exception in that case and fail the call?
                         //It would be better if we had an ordering system that gets called first
                         //It should have a queue of messages per callId. Then it should sort them.
@@ -263,22 +261,22 @@ public class MqttServer {
                     return;
                 }
 
-                //This is the first message we have for this call id so it needs to be a START
-                if (message.getType() != MgType.START) {
-                    log.error("First message in client stream must be MgType.START: " + message);
+                //This is the first message we have for this call id so it needs to be a FIRST
+                if (message.getMessageCase() != START) {
+                    log.error("First message in client stream must be FIRST: " + message);
                     return;
                 }
 
-                final MgHeader header = message.getHeader();
-                if (header == null) {
-                    log.error("First message in client stream must have a header: " + message);
+                final Header header = message.getStart().getHeader();
+                if(header == null){
+                    log.error("Received start message without a header");
                     return;
                 }
 
                 //This is the first message for the call so lookup the method and construct an MqttServerCall
                 String fullMethodName = topic.substring(topic.lastIndexOf('/', topic.lastIndexOf('/') - 1) + 1);
                 //fullMethodName is e.g. "helloworld.ExampleHelloService/SayHello"
-                //TODO: Verify that the fullMethodName matches the methoddescriptor in the MsgStart
+                //TODO: Verify that the fullMethodName matches the methoddescriptor in the First
                 final ServerMethodDefinition<?, ?> serverMethodDefinition = registry.lookupMethod(fullMethodName);
                 if (serverMethodDefinition == null) {
                     sendStatus(header.getReplyTo(), callId, 1,
@@ -341,20 +339,35 @@ public class MqttServer {
 
             public void onClientMessage(MgMessage message) {
 
-                if (message.getType() == MgType.STATUS) {
-                    //MgMessageHandler will have already checked for a cancel so this is just an ok end of stream
-                    listener.onHalfClose();
-                    MgMessageHandler.this.remove();
-                } else {
-                    //TODO: What if this does not match the request type, the parse will not fail - use the methoddescriptor
-                    Object requestParam = methodDescriptor.parseRequest(message.getContents().newInput());
-                    listener.onMessage(requestParam);
-                    if (message.getSequence() == SINGLE_MESSAGE_STREAM) {
-                        //We do not expect the client to send a completed if there is only one message
+                Value value;
+                switch(message.getMessageCase()){
+                    case START:
+                        value = message.getStart().getValue();
+                        break;
+                    case VALUE:
+                        value = message.getValue();
+                        break;
+                    case STATUS:
+                        //MgMessageHandler will have already checked for a cancel so this is just an ok end of stream
                         listener.onHalfClose();
                         MgMessageHandler.this.remove();
-                    }
+                        return;
+                    default:
+                        log.error("Unrecognised message case " + message.getMessageCase());
+                        return;
                 }
+
+                //TODO: What if this does not match the request type, the parse will not fail - use the methoddescriptor
+                Object objValue;
+                objValue = methodDescriptor.parseRequest(value.getContents().newInput());
+
+                listener.onMessage(objValue);
+                if (message.getSequence() == SINGLE_MESSAGE_STREAM) {
+                    //We do not expect the client to send a completed if there is only one message
+                    listener.onHalfClose();
+                    MgMessageHandler.this.remove();
+                }
+
             }
 
 
@@ -366,11 +379,12 @@ public class MqttServer {
                     sequence++;
                 }
                 final ByteString msgBytes = ((MessageLite) message).toByteString();
-                MgMessage mgMessage = MgMessage.newBuilder()
-                        .setType(MgType.NEXT)
-                        .setCall(callId)
-                        .setSequence(sequence)
+                Value value = Value.newBuilder()
                         .setContents(msgBytes).build();
+                MgMessage mgMessage = MgMessage.newBuilder()
+                        .setValue(value)
+                        .setCallId(callId)
+                        .setSequence(sequence).build();
                 publish(replyTo, mgMessage);
             }
 

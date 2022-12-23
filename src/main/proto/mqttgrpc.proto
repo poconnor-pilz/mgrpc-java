@@ -2,67 +2,65 @@ syntax = "proto3";
 
 package com.pilz.mqttgrpc;
 
+import "google/rpc/status.proto";
+
 option java_multiple_files = true;
 option java_package = "com.pilz.mqttgrpc";
 option java_outer_classname = "MqttGrpc";
 
-//The type of a message
-enum MgType{
-  //The last message in a stream indicating the final status of the call. MgMessage.contents = StatusProto
-  STATUS = 0;
-  //This is set in the first message sent from a client to a server. MgMessage.contents will be The i/o type of the method
-  START = 1;
-  //The next message in a stream. MgMessage.contents will be The i/o type of the method
-  NEXT = 2;
-  //This is set if the message is a flow control message. MgMessage.contents = MgFlow
-  FLOW = 3;
+
+//Any message that is not a Status or the first message in a client stream is a Next message
+message Value{
+  //This the message/protobuf that is sent to/from the service method call as part of its input/output stream
+  bytes contents = 1;
+
+}
+
+message Header{
+  //The topic to which to send all replies for this call.
+  string replyTo = 1;
+
+  //This can be got from MethodDescriptor.toProto()
+  //This will only be set for first message in a client stream
+  //MethodDescriptorProto methodDescriptor = 2;
+}
+
+//The first message in a client stream must be a Start message
+message Start{
+  Header header = 1;
+  Value value = 2;
 }
 
 
-//Every message sent in either direction is contained in an MgMessage
-//The .type of the MgMessage will determine its contents
+
 message  MgMessage{
+  //Every message is part of a call and must have a universally unique call id
+  //This should be a base64 url and filename safe string so that it can be used in mqtt topics and is relatively short.
+  //See https://www.ietf.org/rfc/rfc4648.txt part 5
+  string callId = 1;
 
-  //The type of the message. This will determine the type of the .contents
-  MgType type = 1;
-
-  //Sequence number. This is required because some brokers do not preserve order (e.g. AWS)
+  //Sequence number. This is required because some brokers do not preserve order (e.g. AWS). Brokers may also send duplicates.
   //If there is potentially more than one message in a stream then the first message in a stream should
   //have a sequence number 1 and and each subsequent message in that stream (including the completed message)
   //should increase the number by 1
   //If there is only one non-error message in a stream then that message should have a sequence number zero
   //This indicates that there is only one message in the stream and that it terminates the stream
-  //(This means that for simple request/response the system will only send 2 messages instead of 4).
+  //(For request/response the client sends one message with sequence=0 and the server sends one message with sequence=0)
   uint32 sequence = 2;
 
-  //Every message is part of a call and must have a universally unique call id
-  //This should be a base64 url and filename safe string so that it can be used in mqtt topics and is relatively short.
-  //See https://www.ietf.org/rfc/rfc4648.txt part 5
-  string call = 3;
-
-  //A header. This is only set in the first message from a client to a server (when message.type = MgType.START).
-  MgHeader header = 4;
-
-  //.type will determine the type of .contents (see MgType)
-  bytes contents = 5;
+  //A message is either start, value or status where a start message also contains a value
+  //e.g. A client stream: start, value, value, status(ok)
+  //e.g. A server stream: value, value, status(ok or error)
+  //e.g. Request response: client stream: start, server stream: value or status(error)
+  //e.g. A client stream with cancellation: start, value, value, status(cancelled)
+  oneof message {
+    Start start = 3;
+    Value value = 4;
+    google.rpc.Status status = 5;
+  }
 }
 
 
-message MgHeader{
-
-  //The topic to which to send all replies for this call.
-  string replyTo = 1;
-
-
-  //This can be got from MethodDescriptor.toProto()
-  //This will only be set for first message in a client stream
-  //MethodDescriptorProto methodDescriptor = 2;
-
-  //Somehow encode the key value pairs of context here
-  //This will only be set for first message in a client stream
-  //Context context;
-
-}
 
 
 

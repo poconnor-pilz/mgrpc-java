@@ -42,28 +42,6 @@ service ExampleHelloService {
 
 }
 
-service ErrorsService {
-
-  rpc SingleResponseWithError(HelloRequest) returns (HelloReply);
-
-  rpc SingleResponseWith5SecondDelay(HelloRequest) returns (HelloReply);
-
-  rpc TryCancelDuringServerStream(HelloRequest) returns (stream HelloReply);
-
-  rpc SingleResponseWithRichError(HelloRequest) returns (HelloReply);
-
-  rpc SingleResponseWithRichCustomError(HelloRequest) returns (HelloReply);
-
-  rpc MultiResponseWithError(HelloRequest) returns (stream HelloReply);
-
-  rpc ErrorInClientStream(stream HelloRequest) returns (HelloReply);
-
-  rpc RichErrorInClientStream(stream HelloRequest) returns (HelloReply);
-
-}
-
-
-
 
 // The request message containing the user's name.
 message HelloRequest {

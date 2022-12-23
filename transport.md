@@ -9,10 +9,10 @@ https://stackoverflow.com/questions/65804270/how-to-create-and-use-a-custom-tran
 
 There was some other answer saying that the transport is tied to the semantics of http/2 and is byte based not message based. So if your underlying protocol does not match this then don't use transport.
 
-The next level up is to use the Channel interface
+The value level up is to use the Channel interface
 
 ## Protcol buffers RPC
-The next level up from that again is to use protocol buffer RPC. You just modify the protocol buffer compiler to generate your own proxy and stub
+The value level up from that again is to use protocol buffer RPC. You just modify the protocol buffer compiler to generate your own proxy and stub
 See the two links in the answer to this question
 https://stackoverflow.com/questions/59616929/how-can-i-write-my-own-rpc-implementation-for-protocol-buffers-utilizing-zeromq
 
@@ -65,7 +65,7 @@ There's a bit more to it than that but can be worked out by debugging this:
 Where ServerCallTry is just an empty implementation of ServerCall but whose getMethodDescriptor returns the method descriptor passed in ctr
 
 
-The next alternative is to use the channel interface and then get the benefit of generated blocking stubs etc. This means that we do not have to deal with bytes etc. A channel just creates a client call given a method descriptor. ClientCall is here:
+The value alternative is to use the channel interface and then get the benefit of generated blocking stubs etc. This means that we do not have to deal with bytes etc. A channel just creates a client call given a method descriptor. ClientCall is here:
 https://grpc.github.io/grpc-java/javadoc/io/grpc/ClientCall.html
 There is an example at the top of it that shows how it works
 When the client has no more requests to send on a client stream it calls halfClose(). So we would send completed here. In the case of a unary call we would send nothing.
@@ -105,11 +105,11 @@ It looks from the comments in this that if you don't do manual flow control then
 
 Maybe if we have to do flow control or backpressure it might be better to use just request response where the response includes a batch of repeated fields. In the case of watches it will be ok anyway as we do flow control in the form of batching every 50ms max. If the client can't handle this then we could do it in the form of batching every 100ms. 
 On the client side we are in the cloud so the client should be able to allocate plenty of memory and queue things if there are bursts. If there is just too much constant throughput then the solution to this is something like opc where the client tells the server the max update rate. This is better than backpressure becuase backpressure is only good for bursts. If we have a system with backpressure where there is constant high throughput then eventually the server will have to throw stuff away.
-For the server side then backpressure could be good to control a client stream. But we may not have many instances of client streams and there may be other ways of handling it like a bidi stream where the client only sends the next thing when it gets an 'ack' although this is very similar to backpressure.
+For the server side then backpressure could be good to control a client stream. But we may not have many instances of client streams and there may be other ways of handling it like a bidi stream where the client only sends the value thing when it gets an 'ack' although this is very similar to backpressure.
 
-It may be possible to do a mix. For request response just use one connection for all methods. Then each method has a small bounded queue of requests. If that queue fills up the method fails the request. Then for streams use a separate connection pool and each stream just handles things directly on the subscribe thread, blocking it until it is ready for the next message, thereby using the broker as a buffer. Or else we could just implement backpressure for streams with the client telling the server to send on n messages. This is probably the best solution. It is not wasteful for request response (no request(n) messages being sent) and it also works for streams.
+It may be possible to do a mix. For request response just use one connection for all methods. Then each method has a small bounded queue of requests. If that queue fills up the method fails the request. Then for streams use a separate connection pool and each stream just handles things directly on the subscribe thread, blocking it until it is ready for the value message, thereby using the broker as a buffer. Or else we could just implement backpressure for streams with the client telling the server to send on n messages. This is probably the best solution. It is not wasteful for request response (no request(n) messages being sent) and it also works for streams.
 
-Maybe for the first implementation just have a single subscription with each method having a bounded queue whether for requests or streams. If the queue fills then the request or stream fails. Then start to look at other ideas above later (starting with backpressure/request(n) for streams)
+Maybe for the start implementation just have a single subscription with each method having a bounded queue whether for requests or streams. If the queue fills then the request or stream fails. Then start to look at other ideas above later (starting with backpressure/request(n) for streams)
 Each method doesn't even have to have a bounded queue. There can just be a thread pool with each method running on one of the threads. Then just size the thread pool i.e. the same as the servlet model. This effectively becomes a kind of bounded queue anyway except it is across all methods so if one method is slow and gets called a lot then it may hog the pool though. The other thing about the bounded queue per method is that it guarantees that a particular method doesn't have to be thread safe which is important because the service of that method is a singleton. So the summary is. Each method has a bounded queue that is served by a single thread that may have come from a thread pool. When the queue is empty then the thread is returned to the pool.
 Actually: It looks like server methods are expected to be thread-safe/re-entrant (https://grpc.io/blog/optimizing-grpc-part-2/). If you run a test you can see that the methods are fully re-entrant. So it looks like we should just have a thread pool/executor and let the server decide whether or not to be parallel. If it doesn't want to be parallel then it can just put the synchronised keyword on the method as in the linked example. The only difference here with a queue is that it now hogs one of the threads in the pool (but loom will fix this later).
 
