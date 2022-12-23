@@ -20,6 +20,9 @@ message Header{
   //The topic to which to send all replies for this call.
   string replyTo = 1;
 
+  //Timeout in milliseconds. If not 0 then the server call should timeout after this interval.
+  uint64 timeoutMillis = 2;
+
   //This can be got from MethodDescriptor.toProto()
   //This will only be set for first message in a client stream
   //MethodDescriptorProto methodDescriptor = 2;

@@ -125,6 +125,7 @@ public class MqttChannel extends Channel {
         private boolean closed = false;
         /**List of recent sequence ids, Used for checking for duplicate messages*/
         private Recents recents = new Recents();
+        Deadline effectiveDeadline = null;
 
 
         private static final int QUEUE_BUFFER_SIZE = 100;
@@ -165,22 +166,55 @@ public class MqttChannel extends Channel {
             context.addListener(cancellationListener, command -> command.run());
 
             //Close call if deadline exceeded
-            final Deadline effectiveDeadline = DeadlineTimer.min(callOptions.getDeadline(), context.getDeadline());
+            effectiveDeadline = DeadlineTimer.min(callOptions.getDeadline(), context.getDeadline());
             if (effectiveDeadline != null) {
                 this.deadlineCancellationFuture = DeadlineTimer.start(effectiveDeadline, (String deadlineMessage) -> {
-                    //TODO: We do not need to send a cancellation message to the server here but
-                    //we do need to send on the deadline to the server in the first request so
-                    //that it can set its own deadline timer
-
                     //We close the call here which will call listener.onClose(Status.DEADLINE_EXCEEDED)
                     //because this is what the listener expects.
-                    //The listener will then cancel on this call.
+                    //The listener will then call cancel on this call.
                     close(Status.DEADLINE_EXCEEDED.augmentDescription(deadlineMessage));
                 });
             }
             //TODO should we call responseListener.onReady() here?
 //            exec(() -> responseListener.onReady());
         }
+
+        @Override
+        public void sendMessage(ReqT message) {
+
+            //Send message to the server
+            final MgMessage.Builder msgBuilder = MgMessage.newBuilder()
+                    .setCallId(callId);
+
+            final Value value = Value.newBuilder()
+                    .setContents(((MessageLite) message).toByteString()).build();
+            if (sequence == 0) {
+                //This is the start of the call so make a Start message with a header
+                Header.Builder header = Header.newBuilder();
+                header.setReplyTo(replyTo);
+                if(effectiveDeadline != null){
+                    header.setTimeoutMillis(effectiveDeadline.timeRemaining(TimeUnit.MILLISECONDS));
+                }
+                final Start start = Start.newBuilder()
+                        .setHeader(header.build())
+                        .setValue(value).build();
+                msgBuilder.setStart(start);
+            } else {
+                msgBuilder.setValue(value);
+            }
+
+            //Only increment sequence if there is potentially more than one message in the stream.
+            if (!methodDescriptor.getType().clientSendsOneMessage()) {
+                sequence++;
+            }
+            msgBuilder.setSequence(sequence);
+
+            //TODO: If the send fails then should this send an error back to the listener?
+            //or will the exception suffice?
+            sendToBroker(methodDescriptor.getServiceName(), methodDescriptor.getBareMethodName(), msgBuilder);
+            responseListener.onReady();
+        }
+
 
         private final class ContextCancellationListener implements Context.CancellationListener {
             @Override
@@ -276,19 +310,18 @@ public class MqttChannel extends Channel {
         }
 
         public void close(Status status) {
-            if(closed){
-                //
-                return;
-            }
             closed = true;
             log.debug("Closing call with status " + status.getDescription());
             context.removeListener(cancellationListener);
-            ScheduledFuture<?> f = deadlineCancellationFuture;
-            if (f != null) {
-                f.cancel(false);
-            }
+            cancelTimeouts();
             clientExec(() -> responseListener.onClose(status, EMPTY_METADATA));
             clientCallsById.remove(this.callId);
+        }
+
+        public void cancelTimeouts(){
+            if(this.deadlineCancellationFuture != null){
+                this.deadlineCancellationFuture.cancel(false);
+            }
         }
 
 
@@ -303,16 +336,17 @@ public class MqttChannel extends Channel {
         @Override
         public void cancel(@Nullable String message, @Nullable Throwable cause) {
             if(closed){
-                //In the case of a deadline timeout we will call close on the listener and on this
-                //The listener will then call close on this with Status.CANCELLED
+                //In the case of a deadline timeout we will call this.close(Status.CANCELLED)
+                //which will call responseListener.onClose(Status.CANCELLED)
+                //The listener will then call this.cancel()
                 //In this case we do nothing. We don't want to send the cancel on to the server
                 //because the server will have its own timeout handler.
                 return;
             }
-            log.debug("Call cancelled");
             if (cancelCalled) {
                 return;
             }
+            log.debug("Call cancelled");
             cancelCalled = true;
             Status status = Status.CANCELLED;
             if (message != null) {
@@ -355,37 +389,6 @@ public class MqttChannel extends Channel {
             sendToBroker(methodDescriptor.getServiceName(), methodDescriptor.getBareMethodName(), msgBuilder);
         }
 
-        @Override
-        public void sendMessage(ReqT message) {
-
-            //Send message to the server
-            final MgMessage.Builder msgBuilder = MgMessage.newBuilder()
-                    .setCallId(callId);
-
-            final Value value = Value.newBuilder()
-                    .setContents(((MessageLite) message).toByteString()).build();
-            if (sequence == 0) {
-                //This is the first message in the stream so it needs to be a START with a header
-                Header header = Header.newBuilder().setReplyTo(replyTo).build();
-                final Start start = Start.newBuilder()
-                        .setHeader(header)
-                        .setValue(value).build();
-                msgBuilder.setStart(start);
-            } else {
-                msgBuilder.setValue(value);
-            }
-
-            //Only increment sequence if there is potentially more than one message in the stream.
-            if (!methodDescriptor.getType().clientSendsOneMessage()) {
-                sequence++;
-            }
-            msgBuilder.setSequence(sequence);
-
-            //TODO: If the send fails then should this send an error back to the listener?
-            //or will the exception suffice?
-            sendToBroker(methodDescriptor.getServiceName(), methodDescriptor.getBareMethodName(), msgBuilder);
-            responseListener.onReady();
-        }
 
         private void sendToBroker(String serviceName, String method, MgMessage.Builder messageBuilder) throws StatusRuntimeException {
             if (!serverConnected) {

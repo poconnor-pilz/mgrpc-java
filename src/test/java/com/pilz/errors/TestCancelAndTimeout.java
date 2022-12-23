@@ -25,8 +25,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class TestCancelAndTimeout {
 
@@ -185,12 +184,22 @@ public class TestCancelAndTimeout {
 
 
     @Test
-    public void testTimeoutOnClient() throws Exception {
+    public void testTimeout() throws Exception {
 
+        final CountDownLatch serverCancelledLatch = new CountDownLatch(1);
         class SingleResponseWithDelay extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
             @Override
             public void sayHello(HelloRequest request, StreamObserver<HelloReply> responseObserver) {
+
+                ServerCallStreamObserver<HelloReply> serverObserver = (ServerCallStreamObserver<HelloReply>) responseObserver;
+                serverObserver.setOnCancelHandler(()->{
+                    log.debug("ServerCallStreamObserver cancel handler called");
+                    serverCancelledLatch.countDown();
+                    log.debug("Latch toggled");
+                });
+
                 try {
+                    //Block the call for 2 seconds so that the timeout expires
                     Thread.sleep(2000);
                 } catch (InterruptedException e) {
                     throw new RuntimeException(e);
@@ -203,11 +212,15 @@ public class TestCancelAndTimeout {
                 .newBlockingStub(channel).withDeadlineAfter(100, TimeUnit.MILLISECONDS);;
         final StatusRuntimeException statusRuntimeException = assertThrows(StatusRuntimeException.class, ()->stub.sayHello(joe));
         Status status = statusRuntimeException.getStatus();
+        //Verify that the timeout in MqttChannel is working on the client side
         assertEquals(Status.Code.DEADLINE_EXCEEDED, status.getCode());
+
+        //Verify that the timeout in MqttServer on the server side is working and the the cancelHandler gets called.
+        assertTrue(serverCancelledLatch.await(5, TimeUnit.SECONDS));
     }
 
 
-
+    
 
 
 }

@@ -285,9 +285,9 @@ public class MqttServer {
                 }
                 final ServerCallHandler<?, ?> serverCallHandler = serverMethodDefinition.getServerCallHandler();
                 serverCall = new MqttServerCall<>(client, serverMethodDefinition.getMethodDescriptor(),
-                        header.getReplyTo(), callId);
+                        header, callId);
                 final ServerCall.Listener listener = serverCallHandler.startCall(serverCall, new Metadata());
-                serverCall.setListener(listener);
+                serverCall.start(listener);
                 serverCall.onClientMessage(message);
             } catch (Exception ex) {
                 log.error("Error processing MgMessage", ex);
@@ -305,22 +305,31 @@ public class MqttServer {
 
             final MethodDescriptor<ReqT, RespT> methodDescriptor;
             final MqttAsyncClient client;
-            final String replyTo;
+            final Header header;
             final String callId;
             int sequence = 0;
             private Listener listener;
             private boolean cancelled = false;
+            private ScheduledFuture<?> deadlineCancellationFuture = null;
 
 
-            MqttServerCall(MqttAsyncClient client, MethodDescriptor<ReqT, RespT> methodDescriptor, String replyTo, String callId) {
+            MqttServerCall(MqttAsyncClient client, MethodDescriptor<ReqT, RespT> methodDescriptor, Header header, String callId) {
                 this.methodDescriptor = methodDescriptor;
                 this.client = client;
-                this.replyTo = replyTo;
+                this.header = header;
                 this.callId = callId;
             }
 
-            public void setListener(Listener listener) {
+            public void start(Listener listener) {
                 this.listener = listener;
+                if(header.getTimeoutMillis() > 0){
+                    Deadline deadline = Deadline.after(header.getTimeoutMillis(), TimeUnit.MILLISECONDS);
+                    this.deadlineCancellationFuture = DeadlineTimer.start(deadline, (String deadlineMessage) -> {
+                        cancel();
+                        MgMessageHandler.this.remove();
+                    });
+
+                }
             }
 
             public Listener getListener() {
@@ -385,16 +394,22 @@ public class MqttServer {
                         .setValue(value)
                         .setCallId(callId)
                         .setSequence(sequence).build();
-                publish(replyTo, mgMessage);
+                publish(header.getReplyTo(), mgMessage);
+            }
+
+            public void cancelTimeouts(){
+                if(this.deadlineCancellationFuture != null){
+                    this.deadlineCancellationFuture.cancel(false);
+                }
             }
 
             @Override
             public void close(Status status, Metadata trailers) {
                 sequence++;
-                sendStatus(replyTo, callId, sequence, status);
+                sendStatus(header.getReplyTo(), callId, sequence, status);
+                cancelTimeouts();
                 MgMessageHandler.this.remove();
             }
-
 
             public void cancel() {
                 log.debug("server call cancelled");
@@ -402,6 +417,8 @@ public class MqttServer {
                     return;
                 }
                 this.cancelled = true;
+                cancelTimeouts();
+                MgMessageHandler.this.remove();
                 this.getListener().onCancel();
             }
 
