@@ -1,12 +1,10 @@
 package com.pilz.errors;
 
-import com.pilz.examples.hello.HelloServiceForTest;
 import com.pilz.mqttgrpc.MqttChannel;
 import com.pilz.mqttgrpc.MqttServer;
 import com.pilz.mqttgrpc.Topics;
 import com.pilz.utils.MqttUtils;
-import io.grpc.Status;
-import io.grpc.StatusRuntimeException;
+import io.grpc.*;
 import io.grpc.examples.helloworld.ExampleHelloServiceGrpc;
 import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
@@ -25,13 +23,13 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class TestCancelAndTimeout {
 
 
     private static final Logger log = LoggerFactory.getLogger(TestCancelAndTimeout.class);
-
 
 
     private static MqttAsyncClient serverMqtt;
@@ -81,17 +79,16 @@ public class TestCancelAndTimeout {
 
     class CancelableObserver implements ClientResponseObserver<HelloRequest, HelloReply> {
         private ClientCallStreamObserver requestStream;
-        private final CountDownLatch latch;
+        public final CountDownLatch latch = new CountDownLatch(1);
+        public StatusRuntimeException exception = null;
 
-        CancelableObserver(CountDownLatch latch) {
-            this.latch = latch;
-        }
 
         @Override
         public void beforeStart(ClientCallStreamObserver reqStream) {
             requestStream = reqStream;
         }
-        public void cancel(String message){
+
+        public void cancel(String message) {
             log.debug("CancelableObserver cancel()");
             requestStream.cancel(message, null);
         }
@@ -104,82 +101,104 @@ public class TestCancelAndTimeout {
         @Override
         public void onError(Throwable t) {
             log.debug("CancelableObserver onError()", t);
+            this.exception = (StatusRuntimeException) t;
             latch.countDown();
         }
 
         @Override
         public void onCompleted() {
             log.debug("CancelableObserver onCompleted()");
-            latch.countDown();
         }
 
     }
 
+    class ErrorObserver implements StreamObserver {
+
+        public final CountDownLatch latch = new CountDownLatch(1);
+        StatusRuntimeException exception = null;
+
+        public Status.Code getStatusCode() {
+            return exception.getStatus().getCode();
+        }
+
+        @Override
+        public void onNext(Object o) {
+
+        }
+
+        @Override
+        public void onError(Throwable throwable) {
+            exception = (StatusRuntimeException) throwable;
+            latch.countDown();
+        }
+
+        @Override
+        public void onCompleted() {
+
+        }
+    }
+
+
 
     @Test
-    public void testCancel() throws InterruptedException {
+    void testCancel() throws Exception {
+
+
+        //The log from this test shows that on timeout
+        //the server cancel handler will be called and the service will receive an
+        //onError with io.grpc.StatusRuntimeException: CANCELLED: client cancelled
+        //The client CancelableObserver will receive onError() with
+        //io.grpc.StatusRuntimeException: CANCELLED: tryit
 
         final CountDownLatch serverCancelledLatch = new CountDownLatch(1);
-
-        class CancelDuringServerStreaming extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
+        class ListenForTimeout extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
+            public ErrorObserver errorObserver = new ErrorObserver();
 
             @Override
-            public void lotsOfReplies(HelloRequest request, StreamObserver<HelloReply> responseObserver) {
-                final boolean[] cancelled = {false};
-                //Note that if we do not set this an exception will be thrown on cancel that is handled by the
-                //MgMessagHandler.handleMessage and the service will terminate anyway.
+            public StreamObserver<HelloRequest> bidiHello(StreamObserver<HelloReply> responseObserver) {
                 ServerCallStreamObserver<HelloReply> serverObserver = (ServerCallStreamObserver<HelloReply>) responseObserver;
-                serverObserver.setOnCancelHandler(()->{
+                serverObserver.setOnCancelHandler(() -> {
                     log.debug("ServerCallStreamObserver cancel handler called");
                     serverCancelledLatch.countDown();
                     log.debug("Latch toggled");
-                    cancelled[0] = true;
                 });
-                while(!cancelled[0]){
-                    try {
-                        Thread.sleep(500);
-                    } catch (InterruptedException e) {
-                        throw new RuntimeException(e);
-                    }
-                    if(!cancelled[0]) {
-                        HelloReply reply = HelloReply.newBuilder().setMessage("Hello " + request.getName()).build();
-                        responseObserver.onNext(reply);
-                    }
-                }
+                return this.errorObserver;
             }
         }
-        server.addService(new CancelDuringServerStreaming());
+
+        final ListenForTimeout listenForTimeout = new ListenForTimeout();
+        server.addService(listenForTimeout);
+
         final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
 
-        CountDownLatch clientCancelledLatch = new CountDownLatch(1);
-        final CancelableObserver cancelableObserver = new CancelableObserver(clientCancelledLatch);
-        Executors.newSingleThreadExecutor().submit(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    Thread.sleep(500);
-                } catch (InterruptedException e) {
-                    throw new RuntimeException(e);
-                }
-                log.debug("Sending cancel");
-                cancelableObserver.cancel("tryit");
+        final CancelableObserver cancelableObserver = new CancelableObserver();
+        Executors.newSingleThreadExecutor().submit(() -> {
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
             }
+            log.debug("Sending cancel");
+            cancelableObserver.cancel("tryit");
         });
 
+        final StreamObserver<HelloRequest> inStream = stub.bidiHello(cancelableObserver);
+        inStream.onNext(joe);
 
-        stub.lotsOfReplies(joe, cancelableObserver);
 
         log.debug("waiting");
 
-        //Verify that on the client side the CancelableObserver.onError gets called
-        //This will test the cancel functionality in MqttChannel
-        assert(clientCancelledLatch.await(5, TimeUnit.SECONDS));
+        //The server cancel handler should get called
+        assertTrue(serverCancelledLatch.await(5, TimeUnit.SECONDS));
 
-        //Verify that on the server side the errors service cancel handler gets called
-        //This will test the cancel functionality in MqttServer
-        assert(serverCancelledLatch.await(5, TimeUnit.SECONDS));
+        //The client stream returned by the server should receive a onError() CANCELLED
+        assertTrue(listenForTimeout.errorObserver.latch.await(5, TimeUnit.SECONDS));
+        assertEquals(listenForTimeout.errorObserver.getStatusCode(), Status.CANCELLED.getCode());
 
+        //Verify that on the client side the CancelableObserver.onError gets called with CANCEL
+        assertTrue(cancelableObserver.latch.await(5, TimeUnit.SECONDS));
+        assertEquals(cancelableObserver.exception.getStatus().getCode(), Status.CANCELLED.getCode());
     }
 
 
@@ -187,40 +206,40 @@ public class TestCancelAndTimeout {
     public void testTimeout() throws Exception {
 
         final CountDownLatch serverCancelledLatch = new CountDownLatch(1);
-        class SingleResponseWithDelay extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
-            @Override
-            public void sayHello(HelloRequest request, StreamObserver<HelloReply> responseObserver) {
+        class ListenForTimeout extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
+            public ErrorObserver errorObserver = new ErrorObserver();
 
+            @Override
+            public StreamObserver<HelloRequest> bidiHello(StreamObserver<HelloReply> responseObserver) {
                 ServerCallStreamObserver<HelloReply> serverObserver = (ServerCallStreamObserver<HelloReply>) responseObserver;
-                serverObserver.setOnCancelHandler(()->{
+                serverObserver.setOnCancelHandler(() -> {
                     log.debug("ServerCallStreamObserver cancel handler called");
                     serverCancelledLatch.countDown();
                     log.debug("Latch toggled");
                 });
-
-                try {
-                    //Block the call for 2 seconds so that the timeout expires
-                    Thread.sleep(2000);
-                } catch (InterruptedException e) {
-                    throw new RuntimeException(e);
-                }
+                return this.errorObserver;
             }
         }
-        server.addService(new SingleResponseWithDelay());
-        HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
-        final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub stub = ExampleHelloServiceGrpc
-                .newBlockingStub(channel).withDeadlineAfter(100, TimeUnit.MILLISECONDS);;
-        final StatusRuntimeException statusRuntimeException = assertThrows(StatusRuntimeException.class, ()->stub.sayHello(joe));
-        Status status = statusRuntimeException.getStatus();
-        //Verify that the timeout in MqttChannel is working on the client side
-        assertEquals(Status.Code.DEADLINE_EXCEEDED, status.getCode());
 
-        //Verify that the timeout in MqttServer on the server side is working and the the cancelHandler gets called.
+        final ListenForTimeout listenForTimeout = new ListenForTimeout();
+        server.addService(listenForTimeout);
+        ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc
+                .newStub(channel).withDeadlineAfter(500, TimeUnit.MILLISECONDS);
+        HelloRequest request = HelloRequest.newBuilder().setName("joe").build();
+        final ErrorObserver clientErrorObserver = new ErrorObserver();
+        final StreamObserver<HelloRequest> inStream = stub.bidiHello(clientErrorObserver);
+        inStream.onNext(request);
+
+        //The server cancel handler should get called
         assertTrue(serverCancelledLatch.await(5, TimeUnit.SECONDS));
+
+        //The client stream returned by the server should receive a onError() CANCELLED
+        assertTrue(listenForTimeout.errorObserver.latch.await(5, TimeUnit.SECONDS));
+        assertEquals(listenForTimeout.errorObserver.getStatusCode(), Status.CANCELLED.getCode());
+
+        //The client should receive an onError() DEADLINE_EXCEEDED
+        assertTrue(clientErrorObserver.latch.await(5, TimeUnit.SECONDS));
+        assertEquals(clientErrorObserver.getStatusCode(), Status.DEADLINE_EXCEEDED.getCode());
     }
-
-
-
-
 
 }

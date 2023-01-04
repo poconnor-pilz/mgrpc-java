@@ -162,6 +162,7 @@ public class MqttServer {
 
 
         private MgMessageHandler(String callId, Executor executor) {
+            log.debug("Constructing MgMessageHandler for " + callId);
             this.callId = callId;
             this.executor = executor;
         }
@@ -349,8 +350,9 @@ public class MqttServer {
                         break;
                     case STATUS:
                         //MgMessageHandler will have already checked for a cancel so this is just an ok end of stream
+                        //We do not call remove() here as the call needs to remain available to handle a cancel
+                        //It will be removed when close() is called by the listener/service implementation
                         listener.onHalfClose();
-                        MgMessageHandler.this.remove();
                         return;
                     default:
                         log.error("Unrecognised message case " + message.getMessageCase());
@@ -364,8 +366,9 @@ public class MqttServer {
                 listener.onMessage(objValue);
                 if (message.getSequence() == SINGLE_MESSAGE_STREAM) {
                     //We do not expect the client to send a completed if there is only one message
+                    //We do not call remove() here as the call needs to remain available to handle a cancel
+                    //It will be removed when close() is called by the listener/service implementation
                     listener.onHalfClose();
-                    MgMessageHandler.this.remove();
                 }
 
             }
