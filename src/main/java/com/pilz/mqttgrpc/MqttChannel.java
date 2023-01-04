@@ -67,7 +67,7 @@ public class MqttChannel extends Channel {
         log.debug("Subscribing for responses on: " + replyTo);
 
         final IMqttMessageListener messageListener = new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
-            final MgMessage message = MgMessage.parseFrom(mqttMessage.getPayload());
+            final RpcMessage message = RpcMessage.parseFrom(mqttMessage.getPayload());
             final MqttClientCall call = clientCallsById.get(message.getCallId());
             if (call == null) {
                 log.error("Could not find call with callId: " + message.getCallId());
@@ -129,7 +129,7 @@ public class MqttChannel extends Channel {
 
 
         private static final int QUEUE_BUFFER_SIZE = 100;
-        private final BlockingQueue<MgMessage> messageQueue = new ArrayBlockingQueue<>(QUEUE_BUFFER_SIZE);
+        private final BlockingQueue<RpcMessage> messageQueue = new ArrayBlockingQueue<>(QUEUE_BUFFER_SIZE);
 
 
         private final ContextCancellationListener cancellationListener =
@@ -144,8 +144,7 @@ public class MqttChannel extends Channel {
             this.executor = executor;
             this.context = Context.current();
             this.callId = Base64Uuid.id();
-            this.replyTo = Topics.replyTo(serverTopic, methodDescriptor.getServiceName(),
-                    methodDescriptor.getBareMethodName(), callId);
+            this.replyTo = Topics.replyTo(serverTopic, methodDescriptor.getFullMethodName(), callId);
         }
 
         public String getCallId() {
@@ -183,7 +182,7 @@ public class MqttChannel extends Channel {
         public void sendMessage(ReqT message) {
 
             //Send message to the server
-            final MgMessage.Builder msgBuilder = MgMessage.newBuilder()
+            final RpcMessage.Builder msgBuilder = RpcMessage.newBuilder()
                     .setCallId(callId);
 
             final Value value = Value.newBuilder()
@@ -211,7 +210,7 @@ public class MqttChannel extends Channel {
 
             //TODO: If the send fails then should this send an error back to the listener?
             //or will the exception suffice?
-            sendToBroker(methodDescriptor.getServiceName(), methodDescriptor.getBareMethodName(), msgBuilder);
+            sendToBroker(methodDescriptor.getFullMethodName(), msgBuilder);
             responseListener.onReady();
         }
 
@@ -229,7 +228,7 @@ public class MqttChannel extends Channel {
         }
 
 
-        public void queueServerMessage(MgMessage message) {
+        public void queueServerMessage(RpcMessage message) {
             try {
                 messageQueue.put(message);
                 //Process queue on thread pool
@@ -244,7 +243,7 @@ public class MqttChannel extends Channel {
             //service method call will only process one message in a stream at a time i.e. the
             //service method *call* behaves like an actor. However, the service method itself may have
             //many calls ongoing concurrently (unless the service developer synchronizes it).
-            MgMessage message = messageQueue.poll();
+            RpcMessage message = messageQueue.poll();
             while (!cancelCalled && (message != null)) {
                 handleServerMessage(message);
                 message = messageQueue.poll();
@@ -252,7 +251,7 @@ public class MqttChannel extends Channel {
         }
 
 
-        public void handleServerMessage(MgMessage message){
+        public void handleServerMessage(RpcMessage message){
 
             final int sequence = message.getSequence();
             if(sequence < 0){
@@ -262,29 +261,34 @@ public class MqttChannel extends Channel {
             //Check to see if a message with this sequence has recently been processed
             //If so then this message is a duplicate sent by the broker so ignore it
             if(recents.contains(sequence)){
-                log.warn("Duplicate message received, ignoring" + message);
+                log.warn("Duplicate message received, ignoring. Sequence = " + sequence);
                 return;
             }
-            recents.add(sequence);
 
             //Check for messages that are out of sequence.
             boolean sequential = true;
             if(sequenceOfLastProcessedMessage == -1){
+                //The first message we receive for a call must have sequence 0 or 1
                 if( (sequence!=0) && (sequence!=1) ){
+                    log.warn("First message is out of order. Putting back on queue. Sequence = " + sequence);
                     sequential = false;
                 }
             } else {
+                //The sequence of each message must be one more than the previous
+                log.warn("Out of order message. Putting back on queue. Sequence = " + sequence);
                 if(sequence - sequenceOfLastProcessedMessage != 1){
                     sequential = false;
                 }
             }
             if(!sequential){
-                //Put this message back on the queue and wait for the sequential message
+                //Put this out-of-order message back on the ordered queue and wait for the in-order message to arrive.
                 //TODO: Set a "cancellation" timer here that closes the call and sends an error to the client stream if no sequential message arrives
                 queueServerMessage(message);
                 return;
             }
             sequenceOfLastProcessedMessage = sequence;
+            //only add to recents if it has not been put back on queue
+            recents.add(sequence);
 
             switch(message.getMessageCase()){
                 case STATUS:
@@ -335,6 +339,8 @@ public class MqttChannel extends Channel {
 
         @Override
         public void cancel(@Nullable String message, @Nullable Throwable cause) {
+            //Note that cancel is not called from a synchronized method and so all data
+            //accessed here needs to be thread safe.
             if(closed){
                 //In the case of a deadline timeout we will call this.close(Status.CANCELLED)
                 //which will call responseListener.onClose(Status.CANCELLED)
@@ -361,11 +367,11 @@ public class MqttChannel extends Channel {
 
             final com.google.rpc.Status cancelled = io.grpc.protobuf.StatusProto.fromStatusAndTrailers(Status.CANCELLED, null);
             sequence++;
-            final MgMessage.Builder msgBuilder = MgMessage.newBuilder()
+            final RpcMessage.Builder msgBuilder = RpcMessage.newBuilder()
                     .setCallId(callId)
                     .setSequence(sequence)
                     .setStatus(cancelled);
-            sendToBroker(methodDescriptor.getServiceName(), methodDescriptor.getBareMethodName(), msgBuilder);
+            sendToBroker(methodDescriptor.getFullMethodName(), msgBuilder);
 
         }
 
@@ -380,23 +386,24 @@ public class MqttChannel extends Channel {
             }
             final com.google.rpc.Status ok = io.grpc.protobuf.StatusProto.fromStatusAndTrailers(Status.OK, null);
             sequence++;
-            final MgMessage.Builder msgBuilder = MgMessage.newBuilder()
+            final RpcMessage.Builder msgBuilder = RpcMessage.newBuilder()
                     .setCallId(callId)
                     .setSequence(sequence)
                     .setStatus(ok);
             //TODO: If the send fails then should this send an error back to the listener?
             //or will the exception suffice?
-            sendToBroker(methodDescriptor.getServiceName(), methodDescriptor.getBareMethodName(), msgBuilder);
+            sendToBroker(methodDescriptor.getFullMethodName(), msgBuilder);
         }
 
 
-        private void sendToBroker(String serviceName, String method, MgMessage.Builder messageBuilder) throws StatusRuntimeException {
+        private void sendToBroker(String fullMethodName, RpcMessage.Builder messageBuilder) throws StatusRuntimeException {
+            //fullMethodName will be e.g. "helloworld.ExampleHelloService/LotsOfReplies"
             if (!serverConnected) {
                 throw new StatusRuntimeException(Status.UNAVAILABLE.withDescription("Server unavailable or init() was not called"));
             }
             try {
-                final String topic = Topics.methodIn(serverTopic, serviceName, method);
-                final MgMessage message = messageBuilder.build();
+                final String topic = Topics.methodIn(serverTopic, fullMethodName);
+                final RpcMessage message = messageBuilder.build();
                 log.debug("Sending message type: {} sequence: {} call: {} topic:{} ",
                         new Object[]{message.getMessageCase(), message.getSequence(), message.getCallId(), topic});
                 client.publish(topic, new MqttMessage(message.toByteArray()));

@@ -14,8 +14,8 @@ import java.util.Comparator;
 import java.util.Map;
 import java.util.concurrent.*;
 
-import static com.pilz.mqttgrpc.MgMessage.MessageCase.START;
-import static com.pilz.mqttgrpc.MgMessage.MessageCase.STATUS;
+import static com.pilz.mqttgrpc.RpcMessage.MessageCase.START;
+import static com.pilz.mqttgrpc.RpcMessage.MessageCase.STATUS;
 
 
 public class MqttServer {
@@ -68,8 +68,8 @@ public class MqttServer {
         client.subscribe(allServicesIn, 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
             //We use an MqttExceptionLogger here because if a we throw an exception in the subscribe handler
             //it will disconnect the mqtt client
-            final MgMessage message = MgMessage.parseFrom(mqttMessage.getPayload());
-            log.debug("Received {} message on : {}", message.getMessageCase(), topic);
+            final RpcMessage message = RpcMessage.parseFrom(mqttMessage.getPayload());
+            log.debug("Received {} with sequence {} message on : {}", new Object[]{message.getMessageCase(), message.getSequence(), topic});
             final String callId = message.getCallId();
             if (callId.isEmpty()) {
                 log.error("Every message sent from the client must have a callId");
@@ -84,7 +84,6 @@ public class MqttServer {
 
             //put the message on the handler's queue
             handler.queueClientMessage(new CallMessage(topic, message));
-            log.debug("Put {} message on queue", message.getMessageCase());
 
             //TODO: Check this for leaks. How can we be sure everything is gc'd
 
@@ -103,7 +102,7 @@ public class MqttServer {
 
     private void sendStatus(String replyTo, String callId, int sequence, Status status) {
         final com.google.rpc.Status grpcStatus = StatusProto.fromStatusAndTrailers(status, null);
-        MgMessage message = MgMessage.newBuilder()
+        RpcMessage message = RpcMessage.newBuilder()
                 .setStatus(grpcStatus)
                 .setCallId(callId)
                 .setSequence(sequence)
@@ -116,7 +115,7 @@ public class MqttServer {
         publish(replyTo, message);
     }
 
-    private void publish(String topic, MgMessage message) {
+    private void publish(String topic, RpcMessage message) {
         try {
             log.debug("Sending message Type: {} Sequence: {} Topic:{} ", new Object[]{message.getMessageCase(), message.getSequence(), topic});
             client.publish(topic, message.toByteArray(), 1, false);
@@ -129,9 +128,9 @@ public class MqttServer {
 
     class CallMessage {
         final String topic;
-        final MgMessage message;
+        final RpcMessage message;
 
-        CallMessage(String topic, MgMessage message) {
+        CallMessage(String topic, RpcMessage message) {
             this.topic = topic;
             this.message = message;
         }
@@ -206,10 +205,10 @@ public class MqttServer {
             }
         }
 
-        public void handleClientMessage(String topic, MgMessage message) {
+        public void handleClientMessage(String topic, RpcMessage message) {
 
-            log.debug("Handling {} message", message.getMessageCase());
             final int sequence = message.getSequence();
+            log.debug("Handling {} message with sequence {}", message.getMessageCase(), sequence);
             if(sequence < 0){
                 log.error("Message received with sequence less than zero");
                 return;
@@ -217,56 +216,48 @@ public class MqttServer {
             //Check to see if a message with this sequence has recently been processed
             //If so then this message is a duplicate sent by the broker so ignore it
             if(recents.contains(sequence)){
-                log.warn("Duplicate message received, ignoring" + message);
+                log.warn("Duplicate message received, ignoring. Sequence =  " + sequence);
                 return;
             }
-            recents.add(sequence);
             //Check for messages that are out of sequence.
             boolean sequential = true;
             if(sequenceOfLastProcessedMessage == -1){
+                //The first message we receive for a call must have sequence 0 or 1
                 if( (sequence!=0) && (sequence!=1) ){
+                    log.warn("First message is out of order. Putting back on queue. Sequence = " + sequence);
                     sequential = false;
                 }
             } else {
+                //The sequence of each message must be one more than the previous
+                log.warn("Out of order message. Putting back on queue. Sequence = " + sequence);
                 if(sequence - sequenceOfLastProcessedMessage != 1){
                     sequential = false;
                 }
             }
             if(!sequential){
-                //Put this message back on the queue and wait for the sequential message
+                //Put this out-of-order message back on the ordered queue and wait for the in-order message to arrive.
                 //TODO: Set a "cancellation" timer here that closes the call and sends an error to the client stream if no sequential message arrives
                 queueClientMessage(new CallMessage(topic, message));
                 return;
             }
             sequenceOfLastProcessedMessage = sequence;
-
+            //only add to recents if it has not been put back on queue
+            recents.add(sequence);
 
             try {
                 if (message.getMessageCase() != START) {
                     if (serverCall == null) {
-                        //We never received a valid first message for this call.
-                        //TODO: ordering. What if the second or third message in a client stream arrives after the first message
-                        //Should we just make an exception in that case and fail the call?
-                        //It would be better if we had an ordering system that gets called first
-                        //It should have a queue of messages per callId. Then it should sort them.
-                        //It should time out a queue receives e.g. seq=2, seq=3 etc doesn't receive 1 in a certain time then
-                        //the queue is emptied and abandoned (if more messages arrive later for that callId then the same thing
-                        //will happen to them.) If it is abandoned then we must send an error to that requestId.
-                        //How do we distinguish between a stray callId from some previous connection and this condition?
+                        //We never received a valid first message for this call or the first message is not of type START
                         log.error("Unrecognised call id: " + callId);
                         this.remove();
                         return;
                     }
+                    //This is a non-start message so just send it on to the service
                     serverCall.onClientMessage(message);
                     return;
                 }
 
-                //This is the first message we have for this call id so it needs to be a FIRST
-                if (message.getMessageCase() != START) {
-                    log.error("First message in client stream must be FIRST: " + message);
-                    return;
-                }
-
+                //This is a start message so we need to construct the server call.
                 final Header header = message.getStart().getHeader();
                 if(header == null){
                     log.error("Received start message without a header");
@@ -346,7 +337,7 @@ public class MqttServer {
 
             }
 
-            public void onClientMessage(MgMessage message) {
+            public void onClientMessage(RpcMessage message) {
 
                 Value value;
                 switch(message.getMessageCase()){
@@ -390,11 +381,11 @@ public class MqttServer {
                 final ByteString msgBytes = ((MessageLite) message).toByteString();
                 Value value = Value.newBuilder()
                         .setContents(msgBytes).build();
-                MgMessage mgMessage = MgMessage.newBuilder()
+                RpcMessage rpcMessage = RpcMessage.newBuilder()
                         .setValue(value)
                         .setCallId(callId)
                         .setSequence(sequence).build();
-                publish(header.getReplyTo(), mgMessage);
+                publish(header.getReplyTo(), rpcMessage);
             }
 
             public void cancelTimeouts(){
@@ -412,6 +403,8 @@ public class MqttServer {
             }
 
             public void cancel() {
+                //Note that cancel is not called from a synchronized method and so all data
+                //accessed here needs to be thread safe.
                 log.debug("server call cancelled");
                 if (cancelled) {
                     return;

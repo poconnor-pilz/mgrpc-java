@@ -101,14 +101,12 @@ TODO:
 - In MqttClientCall listen to context for cancels and call cancel()
 - Do MqttClientCall.cancel handler that sends a MgType.CANCEL to the server. 
   - Note that on the server it should just do io.grpc.StatusRuntimeException: CANCELLED: RPC cancelled
-- Test the cancel by doing a context cancel and by using the CancelableObserver as above. 
 - Send a timeout in the header of the start request and do a timeout executor on the server
 - Do thread pools for client and server.
 TODO: tests
 - Test if the queue bounds are exceeded, client and server
 - Test out of order, client and server
-- Test cancel
-- Test cancel beause of timeout
+- Test parallelisim
 
 ## Watch Batching
 Batching is something that comes up as a specific optimisation for a cloud visu server use case and is probably not a general concept at all. 

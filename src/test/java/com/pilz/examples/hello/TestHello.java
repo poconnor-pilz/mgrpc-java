@@ -110,7 +110,7 @@ public class TestHello {
         final CountDownLatch latch = new CountDownLatch(numRequests);
         for(int i = 0; i < numRequests; i++) {
             final int index = i;
-            stub.lotsOfReplies(joe, new StreamObserver<HelloReply>() {
+            stub.lotsOfReplies(joe, new NoopStreamObserver<HelloReply>() {
                 @Override
                 public void onNext(HelloReply value) {
                     log.debug(index + " - " + value.getMessage());
@@ -120,12 +120,6 @@ public class TestHello {
                         throw new RuntimeException(e);
                     }
                 }
-
-                @Override
-                public void onError(Throwable t) {
-
-                }
-
                 @Override
                 public void onCompleted() {
                     latch.countDown();

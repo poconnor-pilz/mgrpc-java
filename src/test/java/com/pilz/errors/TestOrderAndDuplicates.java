@@ -1,0 +1,237 @@
+package com.pilz.errors;
+
+import com.google.protobuf.MessageLite;
+import com.pilz.mqttgrpc.*;
+import com.pilz.utils.MqttUtils;
+import io.grpc.*;
+import io.grpc.examples.helloworld.ExampleHelloServiceGrpc;
+import io.grpc.examples.helloworld.HelloReply;
+import io.grpc.examples.helloworld.HelloRequest;
+import io.grpc.protobuf.StatusProto;
+import io.grpc.stub.StreamObserver;
+import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
+import org.eclipse.paho.client.mqttv3.MqttException;
+import org.eclipse.paho.client.mqttv3.MqttMessage;
+import org.junit.jupiter.api.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+public class TestOrderAndDuplicates {
+
+
+    private static final Logger log = LoggerFactory.getLogger(TestOrderAndDuplicates.class);
+
+    private static MqttAsyncClient serverMqtt;
+    private static MqttAsyncClient clientMqtt;
+
+
+    private static final String DEVICE = "device";
+
+
+    @BeforeAll
+    public static void startBrokerAndClients() throws MqttException, IOException {
+
+        MqttUtils.startEmbeddedBroker();
+        serverMqtt = MqttUtils.makeClient(Topics.systemStatus(DEVICE));
+        clientMqtt = MqttUtils.makeClient(null);
+    }
+
+    @AfterAll
+    public static void stopClientsAndBroker() throws MqttException {
+        serverMqtt.disconnect();
+        serverMqtt.close();
+        serverMqtt = null;
+        clientMqtt.disconnect();
+        clientMqtt.close();
+        clientMqtt = null;
+        MqttUtils.stopEmbeddedBroker();
+    }
+
+
+    class Accumulator extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
+        public final ArrayList<HelloRequest> requests = new ArrayList<>();
+        public final CountDownLatch latch = new CountDownLatch(1);
+        @Override
+        public StreamObserver<HelloRequest> lotsOfGreetings(StreamObserver<HelloReply> singleResponse) {
+            return new NoopStreamObserver<HelloRequest>() {
+                @Override
+                public void onNext(HelloRequest value) {
+                    log.debug("Received " + value.getName());
+                    requests.add(value);
+                }
+                @Override
+                public void onCompleted() {
+                    log.debug("onCompleted()");
+                    latch.countDown();
+                }
+            };
+        }
+    }
+
+    @Test
+    public void testOutOfOrderClientStream() throws Exception{
+
+
+        final Accumulator accumulator = new Accumulator();
+        MqttServer server = new MqttServer(serverMqtt, DEVICE);
+        server.init();
+        server.addService(accumulator);
+
+        String fullMethodName = "helloworld.ExampleHelloService/LotsOfGreetings";
+        String callId = Base64Uuid.id();
+        String topic = Topics.methodIn(DEVICE, fullMethodName);
+        String replyTo = Topics.replyTo(DEVICE, fullMethodName, callId);
+        clientMqtt.publish(topic, new MqttMessage(makeStartRequest(callId, 1, replyTo).toByteArray()));
+        clientMqtt.publish(topic, new MqttMessage(makeValueRequest(callId, 5).toByteArray()));
+        clientMqtt.publish(topic, new MqttMessage(makeValueRequest(callId, 2).toByteArray()));
+        clientMqtt.publish(topic, new MqttMessage(makeValueRequest(callId, 3).toByteArray()));
+        clientMqtt.publish(topic, new MqttMessage(makeValueRequest(callId, 4).toByteArray()));
+        clientMqtt.publish(topic, new MqttMessage(makeStatus(callId, 6, Status.OK).toByteArray()));
+
+        accumulator.latch.await();
+        assertEquals(5, accumulator.requests.size());
+        int seq = 0;
+        for (HelloRequest request: accumulator.requests) {
+            int current = Integer.parseInt(request.getName());
+            if( current - seq != 1){
+                assertTrue(false);
+            }
+            seq = current;
+        }
+        server.close();
+    }
+
+    @Test
+    public void testOutOfOrderClientStreamWithDuplicates() throws Exception{
+
+
+        final Accumulator accumulator = new Accumulator();
+        MqttServer server = new MqttServer(serverMqtt, DEVICE);
+        server.init();
+        server.addService(accumulator);
+
+        String fullMethodName = "helloworld.ExampleHelloService/LotsOfGreetings";
+        String callId = Base64Uuid.id();
+        String topic = Topics.methodIn(DEVICE, fullMethodName);
+        String replyTo = Topics.replyTo(DEVICE, fullMethodName, callId);
+        clientMqtt.publish(topic, new MqttMessage(makeValueRequest(callId, 5).toByteArray()));
+        clientMqtt.publish(topic, new MqttMessage(makeValueRequest(callId, 5).toByteArray()));
+        clientMqtt.publish(topic, new MqttMessage(makeValueRequest(callId, 2).toByteArray()));
+        clientMqtt.publish(topic, new MqttMessage(makeValueRequest(callId, 3).toByteArray()));
+        clientMqtt.publish(topic, new MqttMessage(makeStartRequest(callId, 1, replyTo).toByteArray()));
+        clientMqtt.publish(topic, new MqttMessage(makeValueRequest(callId, 2).toByteArray()));
+        clientMqtt.publish(topic, new MqttMessage(makeStatus(callId, 6, Status.OK).toByteArray()));
+        clientMqtt.publish(topic, new MqttMessage(makeValueRequest(callId, 4).toByteArray()));
+
+        accumulator.latch.await();
+        assertEquals(5, accumulator.requests.size());
+        int seq = 0;
+        for (HelloRequest request: accumulator.requests) {
+            int current = Integer.parseInt(request.getName());
+            if( current - seq != 1){
+                assertTrue(false);
+            }
+            seq = current;
+        }
+        server.close();
+    }
+
+    @Test
+    public void testOutOfOrderServerStreamWithDuplicates() throws Exception {
+
+        String allServicesIn = Topics.allServicesIn(DEVICE);
+        log.debug("subscribe server at: " + allServicesIn);
+
+        serverMqtt.subscribe(allServicesIn, 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
+            final RpcMessage message = RpcMessage.parseFrom(mqttMessage.getPayload());
+            log.debug("Received {} with sequence {} message on : {}", new Object[]{message.getMessageCase(), message.getSequence(), topic});
+            final String callId = message.getCallId();
+            final String replyTo = message.getStart().getHeader().getReplyTo();
+            serverMqtt.publish(replyTo, new MqttMessage(makeValueResponse(callId, 5).toByteArray()));
+            serverMqtt.publish(replyTo, new MqttMessage(makeValueResponse(callId, 5).toByteArray()));
+            serverMqtt.publish(replyTo, new MqttMessage(makeValueResponse(callId, 2).toByteArray()));
+            serverMqtt.publish(replyTo, new MqttMessage(makeValueResponse(callId, 3).toByteArray()));
+            serverMqtt.publish(replyTo, new MqttMessage(makeValueResponse(callId, 1).toByteArray()));
+            serverMqtt.publish(replyTo, new MqttMessage(makeValueResponse(callId, 2).toByteArray()));
+            serverMqtt.publish(replyTo, new MqttMessage(makeStatus(callId, 6, Status.OK).toByteArray()));
+            serverMqtt.publish(replyTo, new MqttMessage(makeValueResponse(callId, 4).toByteArray()));
+        })).waitForCompletion(20000);
+
+        MqttChannel channel = new MqttChannel(clientMqtt, DEVICE);
+        channel.init();
+
+        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
+        HelloRequest request = HelloRequest.newBuilder().setName("test").build();
+        StreamWaiter<HelloReply> waiter = new StreamWaiter<>();
+        stub.lotsOfReplies(request, waiter);
+        List<HelloReply> responseList = waiter.getList();
+        assertEquals(responseList.size(), 5);
+
+        int seq = 0;
+        for (HelloReply reply: responseList) {
+            int current = Integer.parseInt(reply.getMessage());
+            if( current - seq != 1){
+                assertTrue(false);
+            }
+            seq = current;
+        }
+
+        serverMqtt.unsubscribe(allServicesIn);
+        channel.close();
+
+    }
+
+    public RpcMessage makeStartRequest(String callId, int sequence, String replyTo){
+        HelloRequest request = HelloRequest.newBuilder().setName(""+sequence).build();
+        return makeStart(callId, sequence, replyTo, request);
+    }
+    public RpcMessage makeValueRequest(String callId, int sequence){
+        HelloRequest request = HelloRequest.newBuilder().setName(""+sequence).build();
+        return makeValue(callId, sequence,  request);
+    }
+    public RpcMessage makeValueResponse(String callId, int sequence){
+        HelloReply reply = HelloReply.newBuilder().setMessage(""+sequence).build();
+        return makeValue(callId, sequence,  reply);
+    }
+    
+    public RpcMessage makeStart(String callId, int sequence, String replyTo, MessageLite payload){
+        Header header = Header.newBuilder()
+                .setReplyTo(replyTo)
+                .build();
+        Value value = Value.newBuilder().setContents(payload.toByteString()).build();
+        Start start = Start.newBuilder()
+                .setHeader(header)
+                .setValue(value).build();
+        RpcMessage rpcMessage = RpcMessage.newBuilder()
+                .setCallId(callId)
+                .setSequence(sequence)
+                .setStart(start).build();
+        return rpcMessage;
+    }
+
+    public RpcMessage makeValue(String callId, int sequence, MessageLite payload){
+        Value value = Value.newBuilder().setContents(payload.toByteString()).build();
+        RpcMessage rpcMessage = RpcMessage.newBuilder()
+                .setCallId(callId)
+                .setSequence(sequence)
+                .setValue(value).build();
+        return rpcMessage;
+    }
+
+    public RpcMessage makeStatus(String callId, int sequence, Status status){
+        final com.google.rpc.Status grpcStatus = StatusProto.fromStatusAndTrailers(status, null);
+        RpcMessage rpcMessage = RpcMessage.newBuilder()
+                .setCallId(callId)
+                .setSequence(sequence)
+                .setStatus(grpcStatus).build();
+        return rpcMessage;
+    }
+
+}

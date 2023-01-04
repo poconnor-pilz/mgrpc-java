@@ -6,7 +6,7 @@ import com.google.rpc.Code;
 import com.google.rpc.ErrorInfo;
 import com.pilz.mqttgrpc.MqttChannel;
 import com.pilz.mqttgrpc.MqttServer;
-import com.pilz.mqttgrpc.StreamWaiter;
+import com.pilz.mqttgrpc.NoopStreamObserver;
 import com.pilz.mqttgrpc.Topics;
 import com.pilz.utils.MqttUtils;
 import io.grpc.Status;
@@ -95,19 +95,11 @@ public class TestErrors {
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
         final Throwable[] ex = {null};
         CountDownLatch latch = new CountDownLatch(1);
-        stub.sayHello(joe, new StreamObserver<HelloReply>() {
-            @Override
-            public void onNext(HelloReply value) {
-            }
-
+        stub.sayHello(joe, new NoopStreamObserver<HelloReply>() {
             @Override
             public void onError(Throwable t) {
                 ex[0] = t;
                 latch.countDown();
-            }
-
-            @Override
-            public void onCompleted() {
             }
         });
 
@@ -158,19 +150,11 @@ public class TestErrors {
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
         final Throwable[] ex = {null};
         CountDownLatch latch = new CountDownLatch(1);
-        stub.lotsOfReplies(joe, new StreamObserver<HelloReply>() {
-            @Override
-            public void onNext(HelloReply value) {
-            }
-
+        stub.lotsOfReplies(joe, new NoopStreamObserver<HelloReply>() {
             @Override
             public void onError(Throwable t) {
                 ex[0] = t;
                 latch.countDown();
-            }
-
-            @Override
-            public void onCompleted() {
             }
         });
 
@@ -185,7 +169,7 @@ public class TestErrors {
     }
 
     @Test
-    public void testMultiResponseWithErrorIterator() {
+    public void testMultiResponseWithErrorBlockingStub() {
 
         class MultiResponseWithError extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
             @Override

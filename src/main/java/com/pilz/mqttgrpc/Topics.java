@@ -17,6 +17,11 @@ public interface Topics {
         return make(server, IN , SVC, service, method);
     }
 
+    static String methodIn(String server, String fullMethodName){
+        //fullMethodName will be e.g. "helloworld.ExampleHelloService/LotsOfReplies"
+        return make(server, IN , SVC, fullMethodName);
+    }
+
     static String allMethodsIn(String server, String service){
         return make(server, IN , SVC, service, "#");
     }
@@ -29,10 +34,14 @@ public interface Topics {
         return make(server, OUT , SVC, "#");
     }
 
-    static String replyTo(String server, String service, String method, String requestId){
-        return make(server, OUT, SVC, service, method, requestId);
+    static String replyTo(String server, String service, String method, String callId){
+        return make(server, OUT, SVC, service, method, callId);
     }
 
+    static String replyTo(String server, String fullMethodName, String callId){
+        //fullMethodName will be e.g. "helloworld.ExampleHelloService/LotsOfReplies"
+        return make(server, OUT, SVC, fullMethodName, callId);
+    }
 
     static String systemStatus(String server){
         return make(server, OUT, SYS, STATUS);
