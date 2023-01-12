@@ -97,15 +97,8 @@ an MgType.CANCEL and send that. Then somehow the server has to put that in the c
 The server call should not send back anything to the client when it is cancelled. If it is cancelled from the client then the client will know about the cancel anyway. In that case the channel should send an onError to any streams it has with Status.CANCELLED (this seems to be what grpc classic does).  If it is cancelled because the server is shut down then the channel should detect that through the LWT and send cancels to client streams.
 
 TODO: 
-- In MqttClientCall call removeContextListenerAndCancelDeadlineFuture() from close()
 - In MqttClientCall listen to context for cancels and call cancel()
-- Do MqttClientCall.cancel handler that sends a MgType.CANCEL to the server. 
-  - Note that on the server it should just do io.grpc.StatusRuntimeException: CANCELLED: RPC cancelled
-- Send a timeout in the header of the start request and do a timeout executor on the server
-- Do thread pools for client and server.
 TODO: tests
-- Test if the queue bounds are exceeded, client and server
-- Test out of order, client and server
 - Test parallelisim
 
 ## Watch Batching
@@ -218,7 +211,14 @@ In AuthClient.java they do:
             .withCallCredentials(callCredentials)
             .sayHello(request);`
 
+Note that the credentials will be populated in the MqttClientCall CallOptions
+
 We could do something similar or the same on the stub and the generated stub code would pass the credentials to MqttGrpcClient
+
+To put something in a context do
+Context.Key<Integer> akey = Context.key("akey");
+myContext = myContext.withValue(akey, 10);
+
 
 In AuthServer they do
 

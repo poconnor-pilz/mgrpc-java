@@ -6,7 +6,7 @@ import java.util.Arrays;
  * Holds an unordered list of recent counter values
  * Counter values are assumed to be >=0
  */
-class Recents {
+public class Recents {
 
     public static final int DEFAULT_SIZE = 20;
     private static final int EMPTY_VALUE = -1;

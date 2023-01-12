@@ -21,7 +21,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.*;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -91,13 +91,12 @@ public class TestOrderAndDuplicates {
         String callId = Base64Uuid.id();
         String topic = Topics.methodIn(DEVICE, fullMethodName);
         String replyTo = Topics.replyTo(DEVICE, fullMethodName, callId);
-        clientMqtt.publish(topic, new MqttMessage(makeStartRequest(callId, 1, replyTo).toByteArray()));
-        clientMqtt.publish(topic, new MqttMessage(makeValueRequest(callId, 5).toByteArray()));
-        clientMqtt.publish(topic, new MqttMessage(makeValueRequest(callId, 2).toByteArray()));
-        clientMqtt.publish(topic, new MqttMessage(makeValueRequest(callId, 3).toByteArray()));
-        clientMqtt.publish(topic, new MqttMessage(makeValueRequest(callId, 4).toByteArray()));
-        clientMqtt.publish(topic, new MqttMessage(makeStatus(callId, 6, Status.OK).toByteArray()));
-
+        publishAndPause(clientMqtt, topic, makeStartRequest(callId, 1, replyTo));
+        publishAndPause(clientMqtt, topic, makeValueRequest(callId, 5));
+        publishAndPause(clientMqtt, topic, makeValueRequest(callId, 2));
+        publishAndPause(clientMqtt, topic, makeValueRequest(callId, 3));
+        publishAndPause(clientMqtt, topic, makeValueRequest(callId, 4));
+        publishAndPause(clientMqtt, topic, makeStatus(callId, 6, Status.OK));
         accumulator.latch.await();
         assertEquals(5, accumulator.requests.size());
         int seq = 0;
@@ -108,7 +107,21 @@ public class TestOrderAndDuplicates {
             }
             seq = current;
         }
+        //Note cannot call server.getStats() and check for leaks here as there is no
+        //listener/implementation of the service that will call close on it so it will remain in memory.
         server.close();
+    }
+
+
+
+
+    public void publishAndPause(MqttAsyncClient client, String topic, MessageLite messageLite) throws Exception{
+        clientMqtt.publish(topic, new MqttMessage(messageLite.toByteArray()));
+        //Introduce slight pause between messages to simulate a real system
+        //If we don't do this then the thread pool that processes the messages won't get activated
+        //until after all the messages are received by which time they are automatically ordered by the queue
+        //so we don't get to test the out of order condition.
+        Thread.sleep(50);
     }
 
     @Test
@@ -124,14 +137,14 @@ public class TestOrderAndDuplicates {
         String callId = Base64Uuid.id();
         String topic = Topics.methodIn(DEVICE, fullMethodName);
         String replyTo = Topics.replyTo(DEVICE, fullMethodName, callId);
-        clientMqtt.publish(topic, new MqttMessage(makeValueRequest(callId, 5).toByteArray()));
-        clientMqtt.publish(topic, new MqttMessage(makeValueRequest(callId, 5).toByteArray()));
-        clientMqtt.publish(topic, new MqttMessage(makeValueRequest(callId, 2).toByteArray()));
-        clientMqtt.publish(topic, new MqttMessage(makeValueRequest(callId, 3).toByteArray()));
-        clientMqtt.publish(topic, new MqttMessage(makeStartRequest(callId, 1, replyTo).toByteArray()));
-        clientMqtt.publish(topic, new MqttMessage(makeValueRequest(callId, 2).toByteArray()));
-        clientMqtt.publish(topic, new MqttMessage(makeStatus(callId, 6, Status.OK).toByteArray()));
-        clientMqtt.publish(topic, new MqttMessage(makeValueRequest(callId, 4).toByteArray()));
+        publishAndPause(clientMqtt, topic, makeValueRequest(callId, 5));
+        publishAndPause(clientMqtt, topic, makeValueRequest(callId, 5));
+        publishAndPause(clientMqtt, topic, makeValueRequest(callId, 2));
+        publishAndPause(clientMqtt, topic, makeValueRequest(callId, 3));
+        publishAndPause(clientMqtt, topic, makeStartRequest(callId, 1, replyTo));
+        publishAndPause(clientMqtt, topic, makeValueRequest(callId, 2));
+        publishAndPause(clientMqtt, topic, makeStatus(callId, 6, Status.OK));
+        publishAndPause(clientMqtt, topic, makeValueRequest(callId, 4));
 
         accumulator.latch.await();
         assertEquals(5, accumulator.requests.size());
@@ -143,6 +156,8 @@ public class TestOrderAndDuplicates {
             }
             seq = current;
         }
+        //Note cannot call server.getStats() and check for leaks here as there is no
+        //listener/implementation of the service that will call close on it so it will remain in memory.
         server.close();
     }
 
@@ -157,14 +172,14 @@ public class TestOrderAndDuplicates {
             log.debug("Received {} with sequence {} message on : {}", new Object[]{message.getMessageCase(), message.getSequence(), topic});
             final String callId = message.getCallId();
             final String replyTo = message.getStart().getHeader().getReplyTo();
-            serverMqtt.publish(replyTo, new MqttMessage(makeValueResponse(callId, 5).toByteArray()));
-            serverMqtt.publish(replyTo, new MqttMessage(makeValueResponse(callId, 5).toByteArray()));
-            serverMqtt.publish(replyTo, new MqttMessage(makeValueResponse(callId, 2).toByteArray()));
-            serverMqtt.publish(replyTo, new MqttMessage(makeValueResponse(callId, 3).toByteArray()));
-            serverMqtt.publish(replyTo, new MqttMessage(makeValueResponse(callId, 1).toByteArray()));
-            serverMqtt.publish(replyTo, new MqttMessage(makeValueResponse(callId, 2).toByteArray()));
-            serverMqtt.publish(replyTo, new MqttMessage(makeStatus(callId, 6, Status.OK).toByteArray()));
-            serverMqtt.publish(replyTo, new MqttMessage(makeValueResponse(callId, 4).toByteArray()));
+            publishAndPause(serverMqtt, replyTo, makeValueResponse(callId, 5));
+            publishAndPause(serverMqtt, replyTo, makeValueResponse(callId, 5));
+            publishAndPause(serverMqtt, replyTo, makeValueResponse(callId, 2));
+            publishAndPause(serverMqtt, replyTo, makeValueResponse(callId, 3));
+            publishAndPause(serverMqtt, replyTo, makeValueResponse(callId, 1));
+            publishAndPause(serverMqtt, replyTo, makeValueResponse(callId, 2));
+            publishAndPause(serverMqtt, replyTo, makeStatus(callId, 6, Status.OK));
+            publishAndPause(serverMqtt, replyTo, makeValueResponse(callId, 4));
         })).waitForCompletion(20000);
 
         MqttChannel channel = new MqttChannel(clientMqtt, DEVICE);
@@ -187,6 +202,7 @@ public class TestOrderAndDuplicates {
         }
 
         serverMqtt.unsubscribe(allServicesIn);
+        assertEquals(0, channel.getStats().getActiveCalls());
         channel.close();
 
     }

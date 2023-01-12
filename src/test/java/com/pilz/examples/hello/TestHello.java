@@ -76,6 +76,10 @@ public class TestHello {
         server.close();
     }
 
+    public void checkForLeaks(int numActiveCalls){
+        assertEquals(numActiveCalls, channel.getStats().getActiveCalls());
+        assertEquals(numActiveCalls, server.getStats().getActiveCalls());
+    }
 
     @Test
     public void testSayHello() {
@@ -83,6 +87,7 @@ public class TestHello {
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
         final HelloReply helloReply = blockingStub.sayHello(joe);
         assertEquals("Hello joe", helloReply.getMessage());
+        checkForLeaks(0);
     }
 
 
@@ -98,7 +103,7 @@ public class TestHello {
         assertEquals(responseList.size(), 2);
         assertEquals("Hello 0", responseList.get(0).getMessage());
         assertEquals("Hello 1", responseList.get(1).getMessage());
-
+        checkForLeaks(0);
     }
 
     @Test
@@ -115,7 +120,7 @@ public class TestHello {
                 public void onNext(HelloReply value) {
                     log.debug(index + " - " + value.getMessage());
                     try {
-                        Thread.sleep(1000);
+                        Thread.sleep(100);
                     } catch (InterruptedException e) {
                         throw new RuntimeException(e);
                     }
@@ -128,7 +133,7 @@ public class TestHello {
         }
 
         latch.await();
-
+        checkForLeaks(0);
     }
 
 
@@ -145,6 +150,7 @@ public class TestHello {
         clientStreamObserver.onCompleted();
         final HelloReply reply = waiter.getSingle();
         assertEquals("Hello joe,jane,", reply.getMessage());
+        checkForLeaks(0);
     }
 
 
@@ -188,6 +194,7 @@ public class TestHello {
         replyObserver.latch = new CountDownLatch(1);
         clientStreamObserver.onCompleted();
         replyObserver.latch.await(10, TimeUnit.SECONDS);
+        checkForLeaks(0);
     }
 
 
@@ -212,6 +219,7 @@ public class TestHello {
 
         channel.shutdown();
         server.shutdown();
+        checkForLeaks(0);
     }
 
 

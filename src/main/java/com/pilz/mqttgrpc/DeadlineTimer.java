@@ -4,7 +4,6 @@ import io.grpc.Deadline;
 
 import javax.annotation.Nullable;
 import java.util.Locale;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -20,11 +19,11 @@ public class DeadlineTimer implements Runnable{
         void onDeadline(String deadLineMessage);
     }
 
-    private final static ScheduledExecutorService SCHEDULED_EXECUTOR_SERVICE = Executors.newScheduledThreadPool(1);
-
 
     private final long remainingNanos;
     private final DeadlineTimerListener listener;
+
+
 
     DeadlineTimer(long remainingNanos, DeadlineTimerListener listener) {
         this.remainingNanos = remainingNanos;
@@ -34,7 +33,7 @@ public class DeadlineTimer implements Runnable{
 
     public static ScheduledFuture<?> start(Deadline deadline, DeadlineTimerListener listener) {
         long remainingNanos = deadline.timeRemaining(TimeUnit.NANOSECONDS);
-        return SCHEDULED_EXECUTOR_SERVICE.schedule(
+        return TimerService.get().schedule(
                 new DeadlineTimer(remainingNanos, listener), remainingNanos, TimeUnit.NANOSECONDS);
     }
 

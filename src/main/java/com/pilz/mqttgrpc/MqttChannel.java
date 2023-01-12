@@ -20,17 +20,17 @@ public class MqttChannel extends Channel {
     public static final long SUBSCRIPTION_TIMEOUT_MILLIS = 10 * 1000;
     private final static Metadata EMPTY_METADATA = new Metadata();
 
-    private static volatile Executor executor;
+    private static volatile Executor executorSingleton;
     private static Executor getExecutorInstance(){
-        if(executor == null){
+        if(executorSingleton == null){
             synchronized (MqttChannel.class){
-                if(executor== null){
+                if(executorSingleton == null){
                     //TODO: What kind of thread pool should we use here. It should probably be limited to a fixed maximum
-                    executor = Executors.newCachedThreadPool();
+                    executorSingleton = Executors.newCachedThreadPool();
                 }
             }
         }
-        return executor;
+        return executorSingleton;
     }
 
 
@@ -47,11 +47,25 @@ public class MqttChannel extends Channel {
 
     private static final int SINGLE_MESSAGE_STREAM = 0;
 
+    private final Executor executor;
+    private static final int DEFAULT_QUEUE_SIZE = 100;
+    private final int queueSize;
 
-    public MqttChannel(MqttAsyncClient client, String serverTopic) {
+    public MqttChannel(MqttAsyncClient client, String serverTopic,  int queueSize, Executor executor) {
         this.client = client;
         this.serverTopic = serverTopic;
+        this.executor = executor;
+        this.queueSize = queueSize;
     }
+
+    public MqttChannel(MqttAsyncClient client, String serverTopic, int queueSize) {
+        this(client, serverTopic, queueSize, getExecutorInstance());
+    }
+
+    public MqttChannel(MqttAsyncClient client, String serverTopic) {
+        this(client, serverTopic, DEFAULT_QUEUE_SIZE, getExecutorInstance());
+    }
+
 
     /**
      * This will cause the MqttGrpcClient to listen for server lwt messages so that it can then
@@ -70,7 +84,7 @@ public class MqttChannel extends Channel {
             final RpcMessage message = RpcMessage.parseFrom(mqttMessage.getPayload());
             final MqttClientCall call = clientCallsById.get(message.getCallId());
             if (call == null) {
-                log.error("Could not find call with callId: " + message.getCallId());
+                log.error("Could not find call with callId: " + message.getCallId() + " for message " + message.getSequence());
                 return;
             }
             call.queueServerMessage(message);
@@ -98,7 +112,7 @@ public class MqttChannel extends Channel {
 
     @Override
     public <RequestT, ResponseT> ClientCall<RequestT, ResponseT> newCall(MethodDescriptor<RequestT, ResponseT> methodDescriptor, CallOptions callOptions) {
-        MqttClientCall call = new MqttClientCall<>(methodDescriptor, callOptions, getExecutorInstance());
+        MqttClientCall call = new MqttClientCall<>(methodDescriptor, callOptions, executor, queueSize);
         clientCallsById.put(call.getCallId(), call);
         return call;
     }
@@ -108,14 +122,16 @@ public class MqttChannel extends Channel {
         return serverTopic;
     }
 
+    public Stats getStats(){
+        return new Stats(clientCallsById.size());
+    }
 
-    private class MqttClientCall<ReqT, RespT> extends ClientCall<ReqT, RespT> {
+    private class MqttClientCall<ReqT, RespT> extends ClientCall<ReqT, RespT> implements MessageProcessor.MessageHandler {
 
         final MethodDescriptor<ReqT, RespT> methodDescriptor;
         final CallOptions callOptions;
-        final Context context;
+        final Context.CancellableContext context;
         final Executor clientExecutor;
-        final Executor executor;
         final String callId;
         int sequence = 0;
         final String replyTo;
@@ -128,23 +144,20 @@ public class MqttChannel extends Channel {
         Deadline effectiveDeadline = null;
 
 
-        private static final int QUEUE_BUFFER_SIZE = 100;
-        private final BlockingQueue<RpcMessage> messageQueue = new ArrayBlockingQueue<>(QUEUE_BUFFER_SIZE);
-
-
         private final ContextCancellationListener cancellationListener =
                 new ContextCancellationListener();
-        private int sequenceOfLastProcessedMessage = -1;
 
+        private final MessageProcessor messageProcessor;
 
-        private MqttClientCall(MethodDescriptor<ReqT, RespT> methodDescriptor, CallOptions callOptions, Executor executor) {
+        private MqttClientCall(MethodDescriptor<ReqT, RespT> methodDescriptor, CallOptions callOptions,
+                               Executor executor, int queueSize) {
             this.clientExecutor = callOptions.getExecutor();
             this.methodDescriptor = methodDescriptor;
             this.callOptions = callOptions;
-            this.executor = executor;
-            this.context = Context.current();
+            this.context = Context.current().withCancellation();
             this.callId = Base64Uuid.id();
             this.replyTo = Topics.replyTo(serverTopic, methodDescriptor.getFullMethodName(), callId);
+            messageProcessor = new MessageProcessor(executor, queueSize, this);
         }
 
         public String getCallId() {
@@ -215,6 +228,7 @@ public class MqttChannel extends Channel {
         }
 
 
+
         private final class ContextCancellationListener implements Context.CancellationListener {
             @Override
             public void cancelled(Context context) {
@@ -229,66 +243,19 @@ public class MqttChannel extends Channel {
 
 
         public void queueServerMessage(RpcMessage message) {
-            try {
-                messageQueue.put(message);
-                //Process queue on thread pool
-                this.executor.execute(() -> processQueue());
-            } catch (InterruptedException e) {
-                log.error("Interrupted while putting message on queue", e);
-            }
-        }
-
-        public synchronized void processQueue() {
-            //This method will be called by multiple threads but it is synchronized so that the
-            //service method call will only process one message in a stream at a time i.e. the
-            //service method *call* behaves like an actor. However, the service method itself may have
-            //many calls ongoing concurrently (unless the service developer synchronizes it).
-            RpcMessage message = messageQueue.poll();
-            while (!cancelCalled && (message != null)) {
-                handleServerMessage(message);
-                message = messageQueue.poll();
-            }
+           this.messageProcessor.queueMessage(new MessageProcessor.MessageWithTopic(message));
         }
 
 
-        public void handleServerMessage(RpcMessage message){
+        /**
+         * onMessage() may be called from multiple threads but only one onMessage will be active at a time.
+         * So it is thread safe with respect to itself but cannot use thread locals
+         * @param messageWithTopic
+         */
+        @Override
+        public void onBrokerMessage(MessageProcessor.MessageWithTopic messageWithTopic) {
 
-            final int sequence = message.getSequence();
-            if(sequence < 0){
-                log.error("Message received with sequence less than zero");
-                return;
-            }
-            //Check to see if a message with this sequence has recently been processed
-            //If so then this message is a duplicate sent by the broker so ignore it
-            if(recents.contains(sequence)){
-                log.warn("Duplicate message received, ignoring. Sequence = " + sequence);
-                return;
-            }
-
-            //Check for messages that are out of sequence.
-            boolean sequential = true;
-            if(sequenceOfLastProcessedMessage == -1){
-                //The first message we receive for a call must have sequence 0 or 1
-                if( (sequence!=0) && (sequence!=1) ){
-                    log.warn("First message is out of order. Putting back on queue. Sequence = " + sequence);
-                    sequential = false;
-                }
-            } else {
-                //The sequence of each message must be one more than the previous
-                log.warn("Out of order message. Putting back on queue. Sequence = " + sequence);
-                if(sequence - sequenceOfLastProcessedMessage != 1){
-                    sequential = false;
-                }
-            }
-            if(!sequential){
-                //Put this out-of-order message back on the ordered queue and wait for the in-order message to arrive.
-                //TODO: Set a "cancellation" timer here that closes the call and sends an error to the client stream if no sequential message arrives
-                queueServerMessage(message);
-                return;
-            }
-            sequenceOfLastProcessedMessage = sequence;
-            //only add to recents if it has not been put back on queue
-            recents.add(sequence);
+            final RpcMessage message = messageWithTopic.message;
 
             switch(message.getMessageCase()){
                 case STATUS:
@@ -311,6 +278,27 @@ public class MqttChannel extends Channel {
                     log.error("Invalid message case");
                     return;
             }
+        }
+
+        /**
+         * onQueueCapacityExceeded() is not thread safe and can be called at the same time as an
+         * ongoing onMessage() call
+         */
+        @Override
+        public void onQueueCapacityExceeded() {
+            log.error("Client queue capacity exceeded for call " + callId);
+            this.close(Status.RESOURCE_EXHAUSTED.withDescription("Client queue capacity exceeded."));
+
+            //Send a cancel on to the server. We cannot send it an error on its input stream as it may only expect one message
+            //On the server side the listener.onCancel will cause an error to be sent to the server input stream if it has one.
+            final com.google.rpc.Status cancelled = io.grpc.protobuf.StatusProto.fromStatusAndTrailers(Status.CANCELLED, null);
+            sequence++;
+            final RpcMessage.Builder msgBuilder = RpcMessage.newBuilder()
+                    .setCallId(callId)
+                    .setSequence(sequence)
+                    .setStatus(cancelled);
+            sendToBroker(methodDescriptor.getFullMethodName(), msgBuilder);
+
         }
 
         public void close(Status status) {
@@ -430,6 +418,19 @@ public class MqttChannel extends Channel {
             return status.withDescription(statusProto.getMessage());
         }
     }
+
+    public static class Stats{
+        private final int activeCalls;
+
+        public Stats(int activeCalls) {
+            this.activeCalls = activeCalls;
+        }
+
+        public int getActiveCalls(){
+            return activeCalls;
+        }
+    }
+
 
 
 }

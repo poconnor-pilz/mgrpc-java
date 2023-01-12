@@ -9,8 +9,7 @@ import com.pilz.mqttgrpc.MqttServer;
 import com.pilz.mqttgrpc.NoopStreamObserver;
 import com.pilz.mqttgrpc.Topics;
 import com.pilz.utils.MqttUtils;
-import io.grpc.Status;
-import io.grpc.StatusRuntimeException;
+import io.grpc.*;
 import io.grpc.examples.helloworld.ExampleHelloServiceGrpc;
 import io.grpc.examples.helloworld.HelloCustomError;
 import io.grpc.examples.helloworld.HelloReply;
@@ -79,6 +78,10 @@ public class TestErrors {
         server.close();
     }
 
+    public void checkForLeaks(int numActiveCalls) {
+        assertEquals(numActiveCalls, channel.getStats().getActiveCalls());
+        assertEquals(numActiveCalls, server.getStats().getActiveCalls());
+    }
 
     @Test
     public void testSingleResponseWithError() throws InterruptedException {
@@ -111,6 +114,7 @@ public class TestErrors {
 
         assertEquals(status.getCode(), Status.Code.OUT_OF_RANGE);
         assertEquals("the value is out of range", status.getDescription());
+        checkForLeaks(0);
     }
 
     @Test
@@ -130,6 +134,8 @@ public class TestErrors {
         Status status = statusRuntimeException.getStatus();
         assertEquals(Status.Code.OUT_OF_RANGE, status.getCode());
         assertEquals("the value is out of range", status.getDescription());
+        checkForLeaks(0);
+
     }
 
     @Test
@@ -166,6 +172,7 @@ public class TestErrors {
 
         assertEquals(status.getCode(), Status.Code.OUT_OF_RANGE);
         assertEquals("the value is out of range", status.getDescription());
+        checkForLeaks(0);
     }
 
     @Test
@@ -192,6 +199,7 @@ public class TestErrors {
         Status status = statusRuntimeException.getStatus();
         assertEquals(status.getCode(), Status.Code.OUT_OF_RANGE);
         assertEquals("the value is out of range", status.getDescription());
+        checkForLeaks(0);
     }
 
     @Test
@@ -239,6 +247,7 @@ public class TestErrors {
                 assertEquals("somevalue", errorInfo.getMetadataMap().get("somekey"));
             }
         }
+        checkForLeaks(0);
     }
 
 
@@ -285,7 +294,10 @@ public class TestErrors {
                 assertEquals("an error description", helloCustomError.getHelloErrorDescription());
             }
         }
+        checkForLeaks(0);
     }
+
+
 
 
 
