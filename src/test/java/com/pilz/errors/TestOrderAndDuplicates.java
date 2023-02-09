@@ -88,9 +88,11 @@ public class TestOrderAndDuplicates {
         server.addService(accumulator);
 
         String fullMethodName = "helloworld.ExampleHelloService/LotsOfGreetings";
-        String callId = Base64Uuid.id();
+        String callId = IdGen.randomBase32(10);
         String topic = Topics.methodIn(DEVICE, fullMethodName);
+        log.debug(topic);
         String replyTo = Topics.replyTo(DEVICE, fullMethodName, callId);
+        log.debug(replyTo);
         publishAndPause(clientMqtt, topic, makeStartRequest(callId, 1, replyTo));
         publishAndPause(clientMqtt, topic, makeValueRequest(callId, 5));
         publishAndPause(clientMqtt, topic, makeValueRequest(callId, 2));
@@ -124,6 +126,8 @@ public class TestOrderAndDuplicates {
         Thread.sleep(50);
     }
 
+
+
     @Test
     public void testOutOfOrderClientStreamWithDuplicates() throws Exception{
 
@@ -134,7 +138,7 @@ public class TestOrderAndDuplicates {
         server.addService(accumulator);
 
         String fullMethodName = "helloworld.ExampleHelloService/LotsOfGreetings";
-        String callId = Base64Uuid.id();
+        String callId = IdGen.randomBase32(10);
         String topic = Topics.methodIn(DEVICE, fullMethodName);
         String replyTo = Topics.replyTo(DEVICE, fullMethodName, callId);
         publishAndPause(clientMqtt, topic, makeValueRequest(callId, 5));

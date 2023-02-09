@@ -33,6 +33,7 @@ dependencies {
     //For errors using com.google.rpc.Status
     implementation group: 'io.grpc', name: 'grpc-protobuf', version: grpcVersion
 
+
     //https://mvnrepository.com/artifact/org.eclipse.paho/org.eclipse.paho.client.mqttv3
     implementation group: 'org.eclipse.paho', name: 'org.eclipse.paho.client.mqttv3', version: '1.2.5'
 

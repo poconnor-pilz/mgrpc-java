@@ -10,21 +10,21 @@ option java_outer_classname = "MqttGrpc";
 
 
 message  RpcMessage{
-  //Every rpc message is part of a call and must have a universally unique call id
-  //This should be a base64 url and filename safe string so that it can be used in mqtt topics and is relatively short.
-  //See https://www.ietf.org/rfc/rfc4648.txt part 5
+  //Every rpc message is part of a call and should have a unique call id relative to all other calls
+  //that are ongoing concurrently for a server. The string should be valid for use in mqtt topics.
   string callId = 1;
 
   //Sequence number. This is required because some brokers do not preserve order (e.g. AWS). Brokers may also send duplicates.
   //If there is potentially more than one message in a stream then the first message in a stream should
-  //have a sequence number 1 and and each subsequent message in that stream (including the completed message)
+  //have a sequence number 1 and each subsequent message in that stream (including the completed message)
   //should increase the number by 1
   //If there is only one non-error message in a stream then that message should have a sequence number 0
   //This indicates that there is only one message in the stream and that it terminates the stream
   //(For request/response the client sends one message with sequence=0 and the server sends one message with sequence=0)
   uint32 sequence = 2;
 
-  //A message is either value, start (which contains a value) or status. Examples:
+  //A message is either Start, Value or Status (where Start contains a Value)
+  //Examples:
   //Request response:
   //    client stream:   start.
   //    server stream:   value or status.
@@ -45,9 +45,9 @@ message Start{
   Value value = 2;
 }
 
-//Any message that is not a Status or the first message in a client stream is a Next message
+//Any message that is not a Status or the first message in a client stream is a Value
 message Value{
-  //This the message/protobuf that is sent to/from the service method call as part of its input/output stream
+  //This the message/protobuf that is sent to/from the service method call as part of its request/response stream
   bytes contents = 1;
 
 }

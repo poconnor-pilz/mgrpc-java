@@ -17,6 +17,7 @@ import java.util.concurrent.PriorityBlockingQueue;
  * used to call it (so it can't use thread locals)
  * This is used to cater for brokers that differ from the mqtt spec and do not guarantee ordering or duplicates e.g.
  * https://docs.aws.amazon.com/iot/latest/developerguide/mqtt.html#mqtt-differences
+ *
  */
 public class MessageProcessor {
 
@@ -83,6 +84,14 @@ public class MessageProcessor {
         //But this would mean that a call with low activity would hog that thread for it's duration
         //With java project loom this would not matter as threads are cheap.
         //So it might be worth doing that when loom becomes available.
+
+        //(Note that this is more like the actor model than classic gRPC because we are using a queue instead
+        // of flow control. Although we may implement flow control later)
+        //"In Akka, actors are purely reactive components: an actor is passive until a message is sent to it.
+        //When a message arrives to the actor's mailbox one thread is allocated to the actor,
+        //the message is extracted from the mailbox and the actor applies the behavior.
+        //When the processing is done, the thread is returned to the pool.
+        //This way actors don't occupy any CPU resources when they are inactive."
         try {
             if(queueCapacityExceeded){
                 //Some messages may come in from the broker after the queue is exceeded, ignore them.

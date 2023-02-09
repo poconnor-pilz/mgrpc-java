@@ -156,8 +156,8 @@ Also we are making point to point services so we want each MqttGrpcClient to be 
 
 The structure will be:
 
-    server/i|o/svc/all|clientId/service/method
-    server/i|o/sys/all|clientId/service/method
+    {server}/i|o/svc/all|{clientId}/service/method
+    {server}/i|o/sys/all|{clientId}/service/method
 
 Where 'all' just means all clients and if 'all' is not present then a specific client id has to be supplied. 
  
@@ -169,9 +169,44 @@ Then server sends a reply to:
 
     device1/o/svc/we2UL4O1SXyl5df7aY8bGA/helloservice/sayHello
 
-With this scheme ('all' or clientId) it would also be possible to have a policy that restricts access to a service. i.e. You could grant read write access to the helloservice only with a topic policy like device1/+/svc/+/helloservice (although that would mean that the implementation of MqttGrpcClient would have to explicitly subscribe for each service separately instead of subscribing for device1/0/svc/#. Note that it could subscribe for each one separately on a just in time basis i.e. if a client tries to send a message to /helloservice then it would subscribe to device1/o/svc/clientId/helloservice on the fly. We won't do this initially, just subscribe to device1/0/svc/#)
+With this scheme ('all' or clientId) it would also be possible to have a policy that restricts access to a service. i.e. You could grant read write access to the helloservice only with a topic policy like device1/+/svc/+/helloservice (although that would mean that the implementation of MqttGrpcClient would have to explicitly subscribe for each service separately instead of subscribing for device1/o/svc/#. Note that it could subscribe for each one separately on a just in time basis i.e. if a client tries to send a message to /helloservice then it would subscribe to device1/o/svc/clientId/helloservice on the fly. We won't do this initially, just subscribe to device1/o/svc/#)
+What would be better is that the client is granted publish access to
+    device1/i/svc/all/helloservice
+and subscribe access to
+    device1/o/svc/clientId/helloservice
+
+Or more likely publish to:
+device1/i/svc/all/*
+and subscribe access to
+device1/o/svc/clientId/*
+
+Is there any problem in using the mqtt client id here? Probably not and it means that we can paramterise a single policy on {clientId}
+
+The MqttChannel can be parameterised with any replyToPrefix. If not the default replyToPrefix will be {server}/o/svc/{clientId}
+In this case replies will be at
+{server}/o/svc/{clientId}/service/method
+So forget about "all"
+Requests are always at
+{server}/i/svc/service/method
+
+This makes it possible for the client to do a kind of pub sub if it wants to. So the client could specify replyToPrefix of myAnalytics
+Then replies would go to 
+myAnalytics/service/method.
+and many things could subscribe to it 
+
+If using the default then to be secure the client can have policy
+
+pub server/i/svc/#
+sub server/o/clientId/#
+
+
+Note always that {server} does not have to be device1 it can be devices/device1
+
+
 If a uuid is used for clientId there is no chance of one client guessing another's id.
 The clientId could also be part of the call context (see security stuff) that any service could use 
+
+If the clientId is used then there is no need for a uuid for callID because the call is unique on clientId and callId. So the callId could just be a short number (but we would have to hash on both callId and clientId)
 
 Status will be reported at:
 

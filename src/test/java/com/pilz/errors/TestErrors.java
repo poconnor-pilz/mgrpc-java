@@ -4,10 +4,7 @@ import com.google.protobuf.Any;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.rpc.Code;
 import com.google.rpc.ErrorInfo;
-import com.pilz.mqttgrpc.MqttChannel;
-import com.pilz.mqttgrpc.MqttServer;
-import com.pilz.mqttgrpc.NoopStreamObserver;
-import com.pilz.mqttgrpc.Topics;
+import com.pilz.mqttgrpc.*;
 import com.pilz.utils.MqttUtils;
 import io.grpc.*;
 import io.grpc.examples.helloworld.ExampleHelloServiceGrpc;
@@ -24,6 +21,8 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.Iterator;
+import java.util.Locale;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -116,6 +115,7 @@ public class TestErrors {
         assertEquals("the value is out of range", status.getDescription());
         checkForLeaks(0);
     }
+
 
     @Test
     public void testSingleResponseWithBlockingStub() throws InterruptedException {
