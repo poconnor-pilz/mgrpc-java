@@ -96,7 +96,8 @@ public class MqttServer {
             //We use an MqttExceptionLogger here because if a we throw an exception in the subscribe handler
             //it will disconnect the mqtt client
             final RpcMessage message = RpcMessage.parseFrom(mqttMessage.getPayload());
-            log.debug("Received {} with sequence {} on : {}", new Object[]{message.getMessageCase(), message.getSequence(), topic});
+            log.debug("Received {} {} {} on : {}", new Object[]{message.getMessageCase(),
+                    message.getSequence(), message.getCallId(), topic});
             final String callId = message.getCallId();
             if (callId.isEmpty()) {
                 log.error("Every message sent from the client must have a callId");
@@ -109,7 +110,7 @@ public class MqttServer {
             //This could also occur when the call's queue has reached its limit but the client hasn't
             //got the error message yet.
             if (recentlyRemovedCallIds.contains(callId)) {
-                log.warn("Message received for removed call {}. Ignoring", callId);
+                log.warn("Message received for removed call {}. Ignoring", Id.shrt(callId));
                 return;
             }
 
@@ -162,7 +163,8 @@ public class MqttServer {
 
     private void publish(String topic, RpcMessage message) {
         try {
-            log.debug("Sending message Type: {} Sequence: {} Topic:{} ", new Object[]{message.getMessageCase(), message.getSequence(), topic});
+            log.debug("Sending {} {} {} on: {} ",
+                    new Object[]{message.getMessageCase(), message.getSequence(), message.getCallId(), topic});
             client.publish(topic, message.toByteArray(), 1, false);
         } catch (MqttException e) {
             //We can only log the exception here as the broker is broken
@@ -181,7 +183,7 @@ public class MqttServer {
                 recentlyRemovedCallIds.put(callId, System.currentTimeMillis());
             }
         }
-        log.debug("Call {} removed for client messages", callId);
+        log.debug("Call {} removed for client messages", Id.shrt(callId));
     }
 
 
@@ -200,7 +202,6 @@ public class MqttServer {
         private final MessageProcessor messageProcessor;
 
         private MgMessageHandler(String callId, Executor executor, int queueSize) {
-            log.debug("Constructing MgMessageHandler for " + callId);
             this.callId = callId;
             messageProcessor = new MessageProcessor(executor, queueSize, this);
         }

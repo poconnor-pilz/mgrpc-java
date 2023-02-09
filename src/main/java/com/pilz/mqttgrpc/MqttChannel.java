@@ -84,7 +84,7 @@ public class MqttChannel extends Channel {
             final RpcMessage message = RpcMessage.parseFrom(mqttMessage.getPayload());
             final MqttClientCall call = clientCallsById.get(message.getCallId());
             if (call == null) {
-                log.error("Could not find call with callId: " + message.getCallId() + " for message " + message.getSequence());
+                log.error("Could not find call with callId: " + Id.shrt(message.getCallId()) + " for message " + message.getSequence());
                 return;
             }
             call.queueServerMessage(message);
@@ -158,7 +158,7 @@ public class MqttChannel extends Channel {
             //Use a random 10 byte id. It encodes to base32 evenly (16 chars - 5 bits per char). It is valid for topics.
             //It is easier than base64UrlSafe to read in logs and match.
             //The probability of collision for 10,000 concurrent calls is zero (for 100,000 it is about 4E-15)
-            this.callId = IdGen.randomBase32(10);
+            this.callId = Id.randomBase32(10);
             this.replyTo = Topics.replyTo(serverTopic, methodDescriptor.getFullMethodName(), callId);
             messageProcessor = new MessageProcessor(executor, queueSize, this);
         }
@@ -395,7 +395,7 @@ public class MqttChannel extends Channel {
             try {
                 final String topic = Topics.methodIn(serverTopic, fullMethodName);
                 final RpcMessage message = messageBuilder.build();
-                log.debug("Sending message type: {} sequence: {} call: {} topic:{} ",
+                log.debug("Sending {} {} {} on :{} ",
                         new Object[]{message.getMessageCase(), message.getSequence(), message.getCallId(), topic});
                 client.publish(topic, new MqttMessage(message.toByteArray()));
             } catch (MqttException e) {

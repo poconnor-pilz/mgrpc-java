@@ -100,7 +100,7 @@ public class MessageProcessor {
             }
             if ((messageQueue.size() + 1) > queueSize) {
                 log.error("Queue capacity ({}) exceeded for call {}",
-                        queueSize, messageWithTopic.message.getCallId());
+                        queueSize, Id.shrt(messageWithTopic.message.getCallId()));
                 this.messageHandler.onQueueCapacityExceeded();
                 queueCapacityExceeded = true;
                 return;
@@ -147,7 +147,8 @@ public class MessageProcessor {
                 //only add to recents if it has not been put back on queue
                 recents.add(sequence);
 
-                log.debug("Handling {} with sequence {}", message.getMessageCase(), message.getSequence());
+                log.debug("Handling {} {} {}", new Object[]{message.getMessageCase(), message.getSequence(),
+                        Id.shrt(message.getCallId())});
                 this.messageHandler.onBrokerMessage(messageWithTopic);
             }
 

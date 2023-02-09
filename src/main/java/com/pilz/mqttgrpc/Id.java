@@ -8,14 +8,13 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.security.SecureRandom;
-import java.util.Arrays;
 import java.util.Base64;
 import java.util.UUID;
 
 
-public class IdGen {
+public class Id {
 
-    private static final Logger log = LoggerFactory.getLogger(IdGen.class);
+    private static final Logger log = LoggerFactory.getLogger(Id.class);
 
     private static final String ALPHABET = "abcdefghijklmnopqrstuvwxyz2345678";
 
@@ -31,11 +30,6 @@ public class IdGen {
         return Holder.numberGenerator;
     }
 
-    public static String base64Uuid(){
-        return uuidToBase64Url(UUID.randomUUID());
-    }
-
-
 
     public static String randomBase32(int numBytes){
         byte[] bytes = new byte[numBytes];
@@ -43,15 +37,21 @@ public class IdGen {
         return toBase32(bytes);
     }
 
+    /**
+     * Return the first 7 chars of id for short debug Strings
+     */
+    public static String shrt(final String id){
+        final int shortLen = 7;
+        if(id.length() < shortLen){
+            return id;
+        }
+        return id.substring(0, shortLen);
+    }
 
 
-    public static String base64Random8ByteId(){
-        //The chances of collision for this with 500 million ids is 0.7%
-        //We are only likely to have a few calls ongoing at any one time
-        SecureRandom ng = Holder.numberGenerator;
-        byte[] bytes = new byte[8];
-        ng.nextBytes(bytes);
-        return new String(base64.encode(bytes));
+
+    public static String base64Uuid(){
+        return uuidToBase64Url(UUID.randomUUID());
     }
 
 
@@ -214,14 +214,14 @@ public class IdGen {
 
 
     public static double collisionProbability(double numberOfObjects, double possibleNumberOfObjects){
+        //For probabilities less than 1/2 the probability of a collision can be approximated as
+        //p ~= (n*n)/(2*m)
+        //Where n is the number of items and m is the number of possibilities for each item.
+        return (numberOfObjects*numberOfObjects)/(2*possibleNumberOfObjects);
+
+        //Note: more complex version
         //Given r objects the possibility of collision where there are N possible objects is
         //1-exp(-r**2/(2N))
-        //So if we were to generate 1000 32 bit numbers what is the probability that two of them
-        //would be the same?
-        //collisonProbability(1000, Math.pow(2, 32);
-        final double r = numberOfObjects;
-        final double n = possibleNumberOfObjects;
-        return 1 - Math.exp(-(r*r)/(2*n));
     }
 
 

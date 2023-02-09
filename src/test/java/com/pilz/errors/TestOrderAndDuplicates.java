@@ -88,7 +88,7 @@ public class TestOrderAndDuplicates {
         server.addService(accumulator);
 
         String fullMethodName = "helloworld.ExampleHelloService/LotsOfGreetings";
-        String callId = IdGen.randomBase32(10);
+        String callId = Id.randomBase32(10);
         String topic = Topics.methodIn(DEVICE, fullMethodName);
         log.debug(topic);
         String replyTo = Topics.replyTo(DEVICE, fullMethodName, callId);
@@ -138,7 +138,7 @@ public class TestOrderAndDuplicates {
         server.addService(accumulator);
 
         String fullMethodName = "helloworld.ExampleHelloService/LotsOfGreetings";
-        String callId = IdGen.randomBase32(10);
+        String callId = Id.randomBase32(10);
         String topic = Topics.methodIn(DEVICE, fullMethodName);
         String replyTo = Topics.replyTo(DEVICE, fullMethodName, callId);
         publishAndPause(clientMqtt, topic, makeValueRequest(callId, 5));
