@@ -97,7 +97,7 @@ public class MqttServer {
             //it will disconnect the mqtt client
             final RpcMessage message = RpcMessage.parseFrom(mqttMessage.getPayload());
             log.debug("Received {} {} {} on : {}", new Object[]{message.getMessageCase(),
-                    message.getSequence(), message.getCallId(), topic});
+                    message.getSequence(), Id.shrt(message.getCallId()), topic});
             final String callId = message.getCallId();
             if (callId.isEmpty()) {
                 log.error("Every message sent from the client must have a callId");
@@ -164,7 +164,7 @@ public class MqttServer {
     private void publish(String topic, RpcMessage message) {
         try {
             log.debug("Sending {} {} {} on: {} ",
-                    new Object[]{message.getMessageCase(), message.getSequence(), message.getCallId(), topic});
+                    new Object[]{message.getMessageCase(), message.getSequence(), Id.shrt(message.getCallId()), topic});
             client.publish(topic, message.toByteArray(), 1, false);
         } catch (MqttException e) {
             //We can only log the exception here as the broker is broken

@@ -396,7 +396,7 @@ public class MqttChannel extends Channel {
                 final String topic = Topics.methodIn(serverTopic, fullMethodName);
                 final RpcMessage message = messageBuilder.build();
                 log.debug("Sending {} {} {} on :{} ",
-                        new Object[]{message.getMessageCase(), message.getSequence(), message.getCallId(), topic});
+                        new Object[]{message.getMessageCase(), message.getSequence(), Id.shrt(message.getCallId()), topic});
                 client.publish(topic, new MqttMessage(message.toByteArray()));
             } catch (MqttException e) {
                 throw new StatusRuntimeException(Status.UNAVAILABLE.fromThrowable(e));
