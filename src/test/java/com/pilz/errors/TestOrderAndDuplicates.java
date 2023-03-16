@@ -3,6 +3,7 @@ package com.pilz.errors;
 import com.google.protobuf.MessageLite;
 import com.pilz.mqttgrpc.*;
 import com.pilz.utils.MqttUtils;
+import com.pilz.utils.ToList;
 import io.grpc.Status;
 import io.grpc.examples.helloworld.ExampleHelloServiceGrpc;
 import io.grpc.examples.helloworld.HelloReply;
@@ -189,11 +190,9 @@ public class TestOrderAndDuplicates {
         MqttChannel channel = new MqttChannel(clientMqtt, DEVICE);
         channel.init();
 
-        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
+        final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub stub = ExampleHelloServiceGrpc.newBlockingStub(channel);
         HelloRequest request = HelloRequest.newBuilder().setName("test").build();
-        StreamWaiter<HelloReply> waiter = new StreamWaiter<>();
-        stub.lotsOfReplies(request, waiter);
-        List<HelloReply> responseList = waiter.getList();
+        List<HelloReply> responseList = ToList.toList(stub.lotsOfReplies(request));
         assertEquals(responseList.size(), 5);
 
         int seq = 0;

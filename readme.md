@@ -129,8 +129,25 @@ Note that the main difference request response and events is that for events the
 If there is a use case that requires pub sub then we will assume that this will only work when there is a broker. Therefore this kind of service will be cloud only. 99% of tooling use cases will not need this. When there is a broker then we can just make a subscribe method that wraps the broker subscribe but takes a topic as the request and a StreamObserver. subscribe(String topic, StreamObserver<V> responseObserver)
 You could argue that pubsub or mqtt is a more consistent model. The topic is first class and exposed to the user. So the same model covers both publish and subscribe. In both cases you specify a topic. But for grpc when you make a request you don't specify a topic. You specify a method. Then if you want to subscribe you have to have a subscribe method. But you could say that grpc is also a general model. You have a method that has two streams. The output stream can be used for subscription. You just have to specify the topic in the single message that you send to the input stream.
 This would work even without a special subscribe method. We could just have a listenToWatch(watchId) method. It will work. But if many clients listen to the same watch then there will be many underlying mqtt subscriptions and duplicate messages. So the special subscribe method is just an optimisation. The client has to use normal grpc to call a createWatch method. The createWatch method will just return ok or fail (or maybe a watchId). Then the client has to subscribe to the watch topic to actually get the values. But the subscribe method looks like just a normal grpc method as far as the client is concerned. It takes a protobuf etc and it returns a stream of messages (which happen to have no end). It could be backed by any technology, an mqtt broker, an amqp broker or just something that is implemented internally in some server.
-We could also consider just writing the service normally where it does not call mqtt publish. It is unaware of a broker like any normal grpc service and can run without a broker. But we provide some facility on the client side for mapping that to a topic. That manager on the client side would make sure to only call the grpc service once and then when other clients ask for the same topic or watch it would distribute that stream to them. So it is a fanout service that runs on the client side. Or maybe we don't provide this. Just provide grpc services on the device that happen to go through mqtt. If something on the client side wants to broadcast this then let the client write that. They can use whatever they want to do it, it doesn't have to be the mqtt broker. In a lot of cases, if the stream has a lot of traffic, then they will forward it to kafka anyway. In practice in most systems there are not many cases for multicast. That's why udp is not used frequently. And if multicast is needed it can naturally be bolted on top of unicast. Layering it like this may make for a simpler system conceptually as the source of anything is always a single stream initially. 
+We could also consider just writing the service normally where it does not call mqtt publish. It is unaware of a broker like any normal grpc service and can run without a broker. But we provide some facility on the client side for mapping that to a topic. That manager on the client side would make sure to only call the grpc service once and then when other clients ask for the same topic or watch it would distribute that stream to them. So it is a fanout service that runs on the client side. If we did do this we could use options (annotations) in the IDL to mark a service as being pubsub where the request message must contain a Topic topic=1 and the infrastructure will decode that and map results to that topic. Then if a new client subscribes to the same topic the infrastructure just re-uses the same subscription and maps it out. Could do reference counting as well like the watch api.
 
+Code to get options from a method descriptor (need to convert it to a different class of method descriptor)
+                final ProtoMethodDescriptorSupplier schemaDescriptor =  (ProtoMethodDescriptorSupplier)serverMethodDefinition.getMethodDescriptor().getSchemaDescriptor();
+                final DescriptorProtos.MethodOptions options = schemaDescriptor.getMethodDescriptor().getOptions()
+
+Or can put a Pubsub object in the request message called pubsub. If it is not null the the server sends the response stream to the PubSub.topic. The server just sends a completed to the requester. The server listens as normal for a completed and cleans up the service when finished. The service itself has to manage lifecyle of whatever it is producing. It should have some other method for stopPublishing(topic) where it just sends an onCompleted on the stream. The service then has no awareness of mqtt as such and could be used just straight (with only one client) or it could be used with any other broker. There would be no pubsub without some kind of broker. The broker could be embedded in the server itself. If you want pubsub without a broker then just write a normal service that maintains a list of clients etc i.e. it does not use this Pubsub mechanism at all.
+There could be a problem here with the subscription if it needs to be authenticated by the server. But there is no way to fix this. Once the server starts to publish to a well known topic then the only way to stop a client from subscribing to it is with mqtt policies because the client can just use raw paho to subscribe anyway. So the way this works is that is passed is only there for the call (initial setup of the subscription). Thereafter anyone who has the topic can subscribe.
+If the MqttChannel that makes the call gets disconnected then the server will stop publishing. To avoid this the MqttChannel should be configured without an LWT.
+TODO: All of this can be done on the client side by just changing the replyTo topic sent to the server. The MqttChannel should have subscribe method that takes a typed StreamObserver and keeps track of subscribers and drops the subscription when there are none left. Any other lifetime semantics should be implemented by the application. The purpose of this is just to give them the possibility of sharing the topic between multiple clients.
+
+Or maybe we don't provide this. Just provide grpc services on the device that happen to go through mqtt. If something on the client side wants to broadcast this then let the client write that. They can use whatever they want to do it, it doesn't have to be the mqtt broker. In a lot of cases, if the stream has a lot of traffic, then they will forward it to kafka anyway. In practice in most systems there are not many cases for multicast. That's why udp is not used frequently. And if multicast is needed it can naturally be bolted on top of unicast. Layering it like this may make for a simpler system conceptually as the source of anything is always a single stream initially. 
+
+Here is a description from https://fuchsia.dev/fuchsia-src/concepts/fidl/overview#messaging_models
+Single request, multiple response
+The multiple response case can be used in a "subscription" model. The client's message "primes" the server, for example, requesting notification whenever something happens.
+The client then goes about its business.
+Some time later, the server notices that the condition that the client is interested in has happened, and thus sends the client a message. From a client / server point of view, this message is a "reply", with the client receiving it asynchronously to its request.
+There's no reason why the server couldn't send another message when another event of interest occurs; this is the "multiple response" version of the model. Note that the second (and subsequent) responses are sent without the client sending any additional messages.
 
 
 
@@ -265,6 +282,32 @@ In AuthServer they do
     `String clientId = Constant.CLIENT_ID_CONTEXT_KEY.get();`
 
 This gets the context which is some kind of object stored in a threadLocal. We can easily do something similar this but it would be better to be able to reuse the gRPC Context class so any grpc service we write can also run in a classic grpc server. To understand this class put a breakpoint in Context.attach() and Run AuthServer and AuthClient. Up the call stack the system has a queue of runnables that it is running. Each one is a ContextRunnable. It's just a runnable that had some Context set in it as a .context member variable. Who knows where or when the runnable was created we don't care but we want to make sure that its context is put in thread local while it's running. So the run() of the runnable does Context.attach(). This puts the context into thread local. Then in a finally outside the run it makes sure to restore the previous context. Note that Context.attach() uses something called Storage but this is an instance of LazyStorage.storage whose createStorage() defaults to a Thread local. (they have some way of changing this but who knows if anyone even uses it). So we can use this. To create on there is a public static Context.ROOT. You create children from this using the with* methods. Then before doing a runnable make sure to set the context using .attach() (or use the Context.run(Runnable r) or Context.wrap() methods). Then in actual service implementation methods the service should be able to get e.g. an auth token from the Context.current() as in the example. Note that a context can also have a cancellation listene. so a method implementation could do Context.current() and register a listener on it and when the listener gets a cancel or deadline exceeded etc it could just stop and release resources or whatever. On the client side the deadline would be implemented some other way like waiting on a latch (or maybe using a context also? see the grpc impl of blocking stub with timeout or whatever). Anyway we would probably not support cancellation or timeouts initially.   
+
+Note that in the grpc java implemenation they also allow you to add an interceptor that does authentication for all calls e.g. 
+
+server = ServerBuilder.forPort(port)
+.addService(new GreeterImpl())
+.intercept(new JwtServerInterceptor())  // add the JwtServerInterceptor
+.build()
+.start();
+
+But we would not have to do this initially. The user can just do it in their implementation of each service. Within their implementation they can just manually make a call out to their 'interceptor'. It would be better if we do allow it though as it means that they can guarantee that every service will be authenticated by default.
+Also if we look at the ServerBuilder interface nearly all of it's methods (aside from things like intercept()) make no sense for the mqtt server. So we could leave out the builder pattern altogether or maybe just have a much simpler builder. We would just need intercept, setMqttConnection, setLwt or whatever. Maybe we should just have these as constructor parameters first and then later refactor them to a builder. 
+
+See this article for examples of interceptors on client and server side (also C:\gitpublic\interceptors\grpc\grpc-unary-rpc)
+
+In that example in GrpcServer.java they do:
+
+    this.server =
+        ServerBuilder.forPort(port)
+            .addService(
+                ServerInterceptors.intercept(
+                    productService,
+                    new GrpcServerResponseInterceptor(),
+                    new GrpcServerRequestInterceptor()))
+            .build();
+
+This actually works with the MqttServer. 
 
 ## Error handling
 Use this https://cloud.google.com/apis/design/errors

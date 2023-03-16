@@ -1,8 +1,10 @@
 package com.pilz.mqttgrpc;
 
 import com.google.protobuf.ByteString;
+import com.google.protobuf.DescriptorProtos;
 import com.google.protobuf.MessageLite;
 import io.grpc.*;
+import io.grpc.protobuf.ProtoMethodDescriptorSupplier;
 import io.grpc.protobuf.StatusProto;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
@@ -83,6 +85,12 @@ public class MqttServer {
         //TODO: Make a removeService
         registry.addService(service);
     }
+
+    public void addService(ServerServiceDefinition service) {
+        //TODO: Make a removeService
+        registry.addService(service);
+    }
+
 
     public void removeAllServices() {
         this.registry = new MqttInternalHandlerRegistry();
@@ -282,6 +290,7 @@ public class MqttServer {
                     return;
                 }
                 final ServerCallHandler<?, ?> serverCallHandler = serverMethodDefinition.getServerCallHandler();
+
                 serverCall = new MqttServerCall<>(client, serverMethodDefinition.getMethodDescriptor(),
                         header, callId);
 

@@ -13,14 +13,14 @@
 // limitations under the License.
 syntax = "proto3";
 
+import "google/protobuf/descriptor.proto";
+
 option java_multiple_files = true;
 option java_package = "io.grpc.examples.helloworld";
 option java_outer_classname = "HelloWorldProto";
 option objc_class_prefix = "HLW";
 
 package helloworld;
-
-
 
 service ExampleHelloService {
 
@@ -40,17 +40,27 @@ service ExampleHelloService {
   //Send a stream of HelloRequest messages and return a stream of HelloReply messages
   rpc BidiHello(stream HelloRequest) returns (stream HelloReply);
 
+  //Server streaming
+  //Send a single HelloRequest message and return a stream of HelloReply messages
+  rpc MultipleSubscribers(RequestWithReplyTo) returns (stream HelloReply);
+
 }
 
 
 // The request message containing the user's name.
 message HelloRequest {
-  string name = 1;
+  string name = 2;
 }
+
+message RequestWithReplyTo {
+  string reply_to_topic = 1;
+  string name = 2;
+}
+
 
 // The response message containing the greetings
 message HelloReply {
-  string message = 1;
+  string message = 2;
 }
 
 //Example rich error

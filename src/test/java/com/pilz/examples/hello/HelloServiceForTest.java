@@ -3,6 +3,7 @@ package com.pilz.examples.hello;
 import io.grpc.examples.helloworld.ExampleHelloServiceGrpc;
 import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
+import io.grpc.examples.helloworld.RequestWithReplyTo;
 import io.grpc.stub.StreamObserver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -97,4 +98,13 @@ public class HelloServiceForTest extends ExampleHelloServiceGrpc.ExampleHelloSer
         };
     }
 
+    @Override
+    public void multipleSubscribers(RequestWithReplyTo request, StreamObserver<HelloReply> responseObserver) {
+        int numReplies = Integer.parseInt(request.getName());
+        for(int i = 0; i < numReplies; i++){
+            HelloReply reply = HelloReply.newBuilder().setMessage("Hello " + i).build();
+            responseObserver.onNext(reply);
+        }
+        responseObserver.onCompleted();
+    }
 }

@@ -2,6 +2,7 @@ package com.pilz.mqttgrpc;
 
 import com.google.protobuf.MessageLite;
 import io.grpc.*;
+import io.grpc.stub.StreamObserver;
 import org.eclipse.paho.client.mqttv3.IMqttMessageListener;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
@@ -10,6 +11,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
+import java.lang.reflect.Method;
+import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.*;
 
@@ -44,6 +48,8 @@ public class MqttChannel extends Channel {
 
     private final Map<String, MqttClientCall> clientCallsById = new ConcurrentHashMap<>();
 
+
+    private static final Map<Class, Method> REPLYTO_METHOD_BY_CLASS = new ConcurrentHashMap<>();
 
     private static final int SINGLE_MESSAGE_STREAM = 0;
 
@@ -125,6 +131,13 @@ public class MqttChannel extends Channel {
     public Stats getStats(){
         return new Stats(clientCallsById.size());
     }
+
+    public <T> void subscribe(String topic, final StreamObserver<T> streamObserver) {
+        //TODO: Keep map of topic to observer list and send message back to each
+        //Implement unsubscribe and drop sub when there are no more observers
+        //Drop all subscriptions in map on close
+    }
+
 
     private class MqttClientCall<ReqT, RespT> extends ClientCall<ReqT, RespT> implements MessageProcessor.MessageHandler {
 
@@ -224,10 +237,61 @@ public class MqttChannel extends Channel {
             }
             msgBuilder.setSequence(sequence);
 
+            final String replyToEx = getReplyToFromRequestMessage(message);
+            if(replyToEx != null){
+                log.debug("replyTo topic = " + replyToEx);
+            }
+
+
             //TODO: If the send fails then should this send an error back to the listener?
             //or will the exception suffice?
             sendToBroker(methodDescriptor.getFullMethodName(), msgBuilder);
             responseListener.onReady();
+        }
+
+        private final String getReplyToFromRequestMessage(Object inputParameter){
+
+            Method method = getReplyToMethod(inputParameter);
+            if(method != null){
+                try {
+                    //For grpc have to call the hasReplyTo method first to check if it has the field
+                    //otherwise it won't give you null it will give you a default version of the field (empty string etc)
+                    String replyTo = (String)method.invoke(inputParameter);
+                    if(replyTo.isEmpty()){ //If a string field is not set protobuf will set it to empty (not null)
+                        return null;
+                    } else {
+                        return replyTo;
+                    }
+                } catch (Exception e) {
+                    log.error("Failed to invoke method", e);
+                }
+            }
+            return null;
+        }
+
+        private Method getReplyToMethod(Object inputParameter){
+            //Check cache first to save searching all the class methods
+            final Class<?> theClass = inputParameter.getClass();
+            if(REPLYTO_METHOD_BY_CLASS.containsKey(theClass)){
+                return REPLYTO_METHOD_BY_CLASS.get(theClass);
+            }
+            //Use java reflection to get the getReplyToTopic method of the inputParameter if it exists
+            //(grpc descriptors etc are useless as they don't have reflection. It's all generated code)
+            final Method[] methods = theClass.getMethods();
+            for(Method getReplyToMethod: methods){
+                if(getReplyToMethod.getName().equals("getReplyToTopic")){
+                    if(getReplyToMethod.getReturnType().equals(String.class)) {
+                        REPLYTO_METHOD_BY_CLASS.put(theClass, getReplyToMethod);
+                        return getReplyToMethod;
+                    }
+                }
+            }
+            REPLYTO_METHOD_BY_CLASS.put(theClass, null);
+            return null;
+//Code for discovery using method descriptor -
+//            final ProtoMethodDescriptorSupplier schemaDescriptor =  (ProtoMethodDescriptorSupplier)methodDescriptor.getSchemaDescriptor();
+//            final Descriptors.MethodDescriptor mdesc = schemaDescriptor.getMethodDescriptor();
+//            final Descriptors.Descriptor replyToDesc = mdesc.getInputType().findNestedTypeByName("ReplyTo");
         }
 
 
@@ -421,6 +485,7 @@ public class MqttChannel extends Channel {
             return status.withDescription(statusProto.getMessage());
         }
     }
+
 
     public static class Stats{
         private final int activeCalls;

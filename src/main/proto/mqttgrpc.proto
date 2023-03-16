@@ -66,9 +66,6 @@ message Header{
 
 
 
-
-
-
 //The connection status of a server. Sent to an mqtt LWT topic
 //When a service is connected it sends this message with connected = true
 //Note that many of these messages may be sent (one for each service in a server) but they are idempotent.

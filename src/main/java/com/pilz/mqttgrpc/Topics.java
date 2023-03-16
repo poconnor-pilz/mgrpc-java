@@ -43,6 +43,10 @@ public interface Topics {
         return make(server, OUT, SVC, fullMethodName, callId);
     }
 
+    static String out(String server, String ... segments){
+        return make(make(server, OUT), make(segments));
+    }
+
     static String systemStatus(String server){
         return make(server, OUT, SYS, STATUS);
     }

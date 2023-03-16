@@ -2,11 +2,13 @@ package com.pilz.examples.hello;
 
 import com.pilz.mqttgrpc.*;
 import com.pilz.utils.MqttUtils;
+import com.pilz.utils.ToList;
 import io.grpc.ManagedChannel;
 import io.grpc.Server;
 import io.grpc.examples.helloworld.ExampleHelloServiceGrpc;
 import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
+import io.grpc.examples.helloworld.RequestWithReplyTo;
 import io.grpc.inprocess.InProcessChannelBuilder;
 import io.grpc.inprocess.InProcessServerBuilder;
 import io.grpc.stub.StreamObserver;
@@ -17,6 +19,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -35,8 +38,6 @@ public class TestHello {
     private MqttServer server;
 
     private static final String DEVICE = "device1";
-
-    private static final String SERVICE_BASE_TOPIC = "helloworld.ExampleHelloService";
 
     private static final long REQUEST_TIMEOUT = 2000;
 
@@ -90,16 +91,35 @@ public class TestHello {
         checkForLeaks(0);
     }
 
+    @Test
+    public void testReplyTo() {
+        //
+        final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub blockingStub = ExampleHelloServiceGrpc.newBlockingStub(channel);
+        RequestWithReplyTo joe = RequestWithReplyTo.newBuilder()
+                .setReplyToTopic(Topics.out(DEVICE,"atesttopic"))
+                .setName("2").build();
+        final Iterator<HelloReply> helloReplyIterator = blockingStub.multipleSubscribers(joe);
+        List<HelloReply> responseList = ToList.toList(helloReplyIterator);
+        assertEquals(responseList.size(), 2);
+        assertEquals("Hello 0", responseList.get(0).getMessage());
+        assertEquals("Hello 1", responseList.get(1).getMessage());
+        checkForLeaks(0);
+
+        RequestWithReplyTo other = RequestWithReplyTo.newBuilder()
+                .setName("2").build();
+        blockingStub.multipleSubscribers(other);
+
+    }
 
 
     @Test
     public void testLotsOfReplies() throws Throwable{
 
-        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
+        final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub stub = ExampleHelloServiceGrpc
+                .newBlockingStub(channel)
+                .withDeadlineAfter(REQUEST_TIMEOUT, TimeUnit.MILLISECONDS);
         HelloRequest joe = HelloRequest.newBuilder().setName("2").build();
-        StreamWaiter<HelloReply> waiter = new StreamWaiter<>(REQUEST_TIMEOUT);
-        stub.lotsOfReplies(joe, waiter);
-        List<HelloReply> responseList = waiter.getList();
+        List<HelloReply> responseList = ToList.toList(stub.lotsOfReplies(joe));
         assertEquals(responseList.size(), 2);
         assertEquals("Hello 0", responseList.get(0).getMessage());
         assertEquals("Hello 1", responseList.get(1).getMessage());
@@ -107,7 +127,7 @@ public class TestHello {
     }
 
     @Test
-    public void testLotsOfParallelReplies() throws Throwable{
+    public void testParallelReplies() throws Throwable{
 
         final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
         HelloRequest joe = HelloRequest.newBuilder().setName("10").build();
