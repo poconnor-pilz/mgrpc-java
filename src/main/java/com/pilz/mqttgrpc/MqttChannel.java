@@ -1,6 +1,7 @@
 package com.pilz.mqttgrpc;
 
 import com.google.protobuf.MessageLite;
+import com.google.protobuf.Parser;
 import io.grpc.*;
 import io.grpc.stub.StreamObserver;
 import org.eclipse.paho.client.mqttv3.IMqttMessageListener;
@@ -12,9 +13,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 import java.lang.reflect.Method;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.*;
 
 public class MqttChannel extends Channel {
@@ -50,6 +49,8 @@ public class MqttChannel extends Channel {
 
 
     private static final Map<Class, Method> REPLYTO_METHOD_BY_CLASS = new ConcurrentHashMap<>();
+
+    private final Map<String, List<StreamObserver>> subscribersByTopic = new ConcurrentHashMap<>();
 
     private static final int SINGLE_MESSAGE_STREAM = 0;
 
@@ -129,13 +130,96 @@ public class MqttChannel extends Channel {
     }
 
     public Stats getStats(){
-        return new Stats(clientCallsById.size());
+        int subscribers = 0;
+        final Set<String> topics = subscribersByTopic.keySet();
+        for(String topic: topics){
+            subscribers += subscribersByTopic.get(topic).size();
+        }
+
+        return new Stats(clientCallsById.size(), subscribers);
     }
 
-    public <T> void subscribe(String topic, final StreamObserver<T> streamObserver) {
-        //TODO: Keep map of topic to observer list and send message back to each
-        //Implement unsubscribe and drop sub when there are no more observers
-        //Drop all subscriptions in map on close
+    public <T> void subscribeForStream(String streamTopic, Parser<T> parser, final StreamObserver<T> streamObserver) {
+
+        List<StreamObserver> subscribers = subscribersByTopic.get(streamTopic);
+        if(subscribers != null){
+            subscribers.add(streamObserver);
+            return;
+        }
+
+        final IMqttMessageListener messageListener = new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
+            final List<StreamObserver> observers = subscribersByTopic.get(topic);
+            if(observers == null){
+                //We should not receive any messages if there are no subscribers
+                log.warn("No subscribers for " + topic);
+                return;
+            }
+            final RpcMessage message = RpcMessage.parseFrom(mqttMessage.getPayload());
+            switch (message.getMessageCase()){
+                case VALUE:
+                    final T value = parser.parseFrom(message.getValue().getContents());
+                    for(StreamObserver observer: observers) {
+                        observer.onNext(value);
+                    }
+                    return;
+                case STATUS:
+                    //convert com.google.rpc.Status to io.grpc.Status
+                    Status status = toStatus(message.getStatus());
+                    if(status.getCode().value() == Status.OK.getCode().value()){
+                        for(StreamObserver observer: observers) {
+                            observer.onCompleted();
+                        }
+                    } else {
+                        final StatusRuntimeException sre = new StatusRuntimeException(status, null);
+                        for(StreamObserver observer: observers) {
+                            observer.onError(sre);
+                        }
+                    }
+                    subscribersByTopic.remove(topic);
+                    client.unsubscribe(topic);
+                    return;
+            }
+        });
+
+        try {
+            //This will throw an exception if it times out.
+            client.subscribe(streamTopic, 1, messageListener).waitForCompletion(SUBSCRIPTION_TIMEOUT_MILLIS);
+            if(subscribers == null){
+                subscribers = new ArrayList<>();
+                subscribersByTopic.put(streamTopic, subscribers);
+            }
+            subscribers.add(streamObserver);
+        } catch (MqttException e) {
+            throw new StatusRuntimeException(Status.UNAVAILABLE.fromThrowable(e));
+        }
+
+    }
+
+    public void unsubscribeForStream(String streamTopic, StreamObserver observer){
+        final List<StreamObserver> observers = subscribersByTopic.get(streamTopic);
+        if(observers != null){
+            if(!observers.remove(observer)){
+                log.warn("Observer not found");
+            }
+            if(observers.isEmpty()){
+                try {
+                    client.unsubscribe(streamTopic);
+                } catch (MqttException e) {
+                    log.error("Failed to unsubscribe for " + streamTopic, e);
+                }
+            }
+        }
+    }
+
+
+
+    /**
+     * Convert com.google.rpc.Status to io.grpc.Status
+     * Copied more or less from StatusProto.toStatus() as that is private
+     */
+    public static Status toStatus(com.google.rpc.Status statusProto) {
+        Status status = Status.fromCodeValue(statusProto.getCode());
+        return status.withDescription(statusProto.getMessage());
     }
 
 
@@ -219,14 +303,27 @@ public class MqttChannel extends Channel {
             if (sequence == 0) {
                 //This is the start of the call so make a Start message with a header
                 Header.Builder header = Header.newBuilder();
-                header.setReplyTo(replyTo);
                 if(effectiveDeadline != null){
                     header.setTimeoutMillis(effectiveDeadline.timeRemaining(TimeUnit.MILLISECONDS));
                 }
+
+                final String replyToEx = getReplyToFromRequestMessage(message);
+                if(replyToEx != null){
+                    //If the client specified a replyTo then set that in the message to the server and
+                    //close the call. The client should have already done a subscribeForStream to receive the responses
+                    //Note that deadlines will be ignored in this case (although will be passed to server)
+                    log.debug("replyTo topic = " + replyToEx);
+                    header.setReplyTo(replyToEx);
+                    close(Status.OK);
+                } else {
+                    header.setReplyTo(this.replyTo);
+                }
+
                 final Start start = Start.newBuilder()
                         .setHeader(header.build())
                         .setValue(value).build();
                 msgBuilder.setStart(start);
+
             } else {
                 msgBuilder.setValue(value);
             }
@@ -237,10 +334,6 @@ public class MqttChannel extends Channel {
             }
             msgBuilder.setSequence(sequence);
 
-            final String replyToEx = getReplyToFromRequestMessage(message);
-            if(replyToEx != null){
-                log.debug("replyTo topic = " + replyToEx);
-            }
 
 
             //TODO: If the send fails then should this send an error back to the listener?
@@ -479,23 +572,25 @@ public class MqttChannel extends Channel {
             }
         }
 
-        //Copied more or less from StatusProto.toStatus() as that is private
-        private Status toStatus(com.google.rpc.Status statusProto) {
-            Status status = Status.fromCodeValue(statusProto.getCode());
-            return status.withDescription(statusProto.getMessage());
-        }
+
     }
 
 
     public static class Stats{
         private final int activeCalls;
+        private final int subscribers;
 
-        public Stats(int activeCalls) {
+        public Stats(int activeCalls, int subscribers) {
             this.activeCalls = activeCalls;
+            this.subscribers = subscribers;
         }
 
         public int getActiveCalls(){
             return activeCalls;
+        }
+
+        public int getSubscribers(){
+            return subscribers;
         }
     }
 
