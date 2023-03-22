@@ -40,9 +40,6 @@ service ExampleHelloService {
   //Send a stream of HelloRequest messages and return a stream of HelloReply messages
   rpc BidiHello(stream HelloRequest) returns (stream HelloReply);
 
-  //Server streaming
-  //Send a single HelloRequest message and return a stream of HelloReply messages
-  rpc MultipleSubscribers(RequestWithReplyTo) returns (stream HelloReply);
 
 }
 
@@ -51,12 +48,6 @@ service ExampleHelloService {
 message HelloRequest {
   string name = 2;
 }
-
-message RequestWithReplyTo {
-  string reply_to_topic = 1;
-  string name = 2;
-}
-
 
 // The response message containing the greetings
 message HelloReply {

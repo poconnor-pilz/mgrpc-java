@@ -12,7 +12,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
-import java.lang.reflect.Method;
 import java.util.*;
 import java.util.concurrent.*;
 
@@ -21,7 +20,11 @@ public class MqttChannel extends Channel {
 
     private static Logger log = LoggerFactory.getLogger(MqttChannel.class);
     public static final long SUBSCRIPTION_TIMEOUT_MILLIS = 10 * 1000;
+
+    public static final CallOptions.Key<String> RESPONSE_TOPIC = CallOptions.Key.create("response-topic");
+
     private final static Metadata EMPTY_METADATA = new Metadata();
+
 
     private static volatile Executor executorSingleton;
     private static Executor getExecutorInstance(){
@@ -46,9 +49,6 @@ public class MqttChannel extends Channel {
     private boolean serverConnected;
 
     private final Map<String, MqttClientCall> clientCallsById = new ConcurrentHashMap<>();
-
-
-    private static final Map<Class, Method> REPLYTO_METHOD_BY_CLASS = new ConcurrentHashMap<>();
 
     private final Map<String, List<StreamObserver>> subscribersByTopic = new ConcurrentHashMap<>();
 
@@ -139,9 +139,23 @@ public class MqttChannel extends Channel {
         return new Stats(clientCallsById.size(), subscribers);
     }
 
-    public <T> void subscribeForStream(String streamTopic, Parser<T> parser, final StreamObserver<T> streamObserver) {
+    /**
+     * Subscribe for responses from a service. To use this the client should specify a RESPONSE_TOPIC when constructing
+     * a stub for the service, for example:
+     * MyService.newBlockingStub(channel).withOption(MqttChannel.RESPONSE_TOPIC, "mydevice/o/myresponsetopic");
+     * Before issuing the call the client should first subscribe for responses e.g.
+     * channel.subscribe("mydevice/o/myresponsetopic", HelloReply.parser(), myStreamObserver);
+     * The subscription will automatically be closed when the response stream is completed but the client
+     * can unsubscribe at any time using channel.unsubscribe("mydevice/o/myresponsetopic");
+     * @param responseTopic The topic to which to send responses. All responses will be sent to this topic and the
+     *                      stub will not receive any direct responses.
+     * @param parser The parser corresponding to the response type e.g. HelloReply.parser()
+     * @param streamObserver Each observer that it subscribed to a responseTopic will receive all responses.
+     * @param <T> The type of the response e.g. HelloReply
+     */
+    public <T> void subscribe(String responseTopic, Parser<T> parser, final StreamObserver<T> streamObserver) {
 
-        List<StreamObserver> subscribers = subscribersByTopic.get(streamTopic);
+        List<StreamObserver> subscribers = subscribersByTopic.get(responseTopic);
         if(subscribers != null){
             subscribers.add(streamObserver);
             return;
@@ -163,9 +177,8 @@ public class MqttChannel extends Channel {
                     }
                     return;
                 case STATUS:
-                    //convert com.google.rpc.Status to io.grpc.Status
-                    Status status = toStatus(message.getStatus());
-                    if(status.getCode().value() == Status.OK.getCode().value()){
+                    Status status = googleRpcStatusToGrpcStatus(message.getStatus());
+                    if(status.isOk()){
                         for(StreamObserver observer: observers) {
                             observer.onCompleted();
                         }
@@ -183,10 +196,10 @@ public class MqttChannel extends Channel {
 
         try {
             //This will throw an exception if it times out.
-            client.subscribe(streamTopic, 1, messageListener).waitForCompletion(SUBSCRIPTION_TIMEOUT_MILLIS);
+            client.subscribe(responseTopic, 1, messageListener).waitForCompletion(SUBSCRIPTION_TIMEOUT_MILLIS);
             if(subscribers == null){
                 subscribers = new ArrayList<>();
-                subscribersByTopic.put(streamTopic, subscribers);
+                subscribersByTopic.put(responseTopic, subscribers);
             }
             subscribers.add(streamObserver);
         } catch (MqttException e) {
@@ -195,17 +208,17 @@ public class MqttChannel extends Channel {
 
     }
 
-    public void unsubscribeForStream(String streamTopic, StreamObserver observer){
-        final List<StreamObserver> observers = subscribersByTopic.get(streamTopic);
+    public void unsubscribe(String responseTopic, StreamObserver observer){
+        final List<StreamObserver> observers = subscribersByTopic.get(responseTopic);
         if(observers != null){
             if(!observers.remove(observer)){
                 log.warn("Observer not found");
             }
             if(observers.isEmpty()){
                 try {
-                    client.unsubscribe(streamTopic);
+                    client.unsubscribe(responseTopic);
                 } catch (MqttException e) {
-                    log.error("Failed to unsubscribe for " + streamTopic, e);
+                    log.error("Failed to unsubscribe for " + responseTopic, e);
                 }
             }
         }
@@ -217,7 +230,7 @@ public class MqttChannel extends Channel {
      * Convert com.google.rpc.Status to io.grpc.Status
      * Copied more or less from StatusProto.toStatus() as that is private
      */
-    public static Status toStatus(com.google.rpc.Status statusProto) {
+    public static Status googleRpcStatusToGrpcStatus(com.google.rpc.Status statusProto) {
         Status status = Status.fromCodeValue(statusProto.getCode());
         return status.withDescription(statusProto.getMessage());
     }
@@ -306,14 +319,13 @@ public class MqttChannel extends Channel {
                 if(effectiveDeadline != null){
                     header.setTimeoutMillis(effectiveDeadline.timeRemaining(TimeUnit.MILLISECONDS));
                 }
-
-                final String replyToEx = getReplyToFromRequestMessage(message);
-                if(replyToEx != null){
-                    //If the client specified a replyTo then set that in the message to the server and
-                    //close the call. The client should have already done a subscribeForStream to receive the responses
-                    //Note that deadlines will be ignored in this case (although will be passed to server)
-                    log.debug("replyTo topic = " + replyToEx);
-                    header.setReplyTo(replyToEx);
+                final String responseTopic = this.callOptions.getOption(RESPONSE_TOPIC);
+                if(responseTopic != null && responseTopic.trim().length() != 0){
+                    //If the client specified a responseTopic then set that in the message to the server and
+                    //close the call. The client should have already done a subscribe to receive the responses
+                    //Note that deadlines will be ignored in this case (although they will be passed to the server)
+                    log.debug("replyTo topic = " + responseTopic);
+                    header.setReplyTo(responseTopic);
                     close(Status.OK);
                 } else {
                     header.setReplyTo(this.replyTo);
@@ -334,60 +346,11 @@ public class MqttChannel extends Channel {
             }
             msgBuilder.setSequence(sequence);
 
-
-
             //TODO: If the send fails then should this send an error back to the listener?
             //or will the exception suffice?
             sendToBroker(methodDescriptor.getFullMethodName(), msgBuilder);
             responseListener.onReady();
         }
-
-        private final String getReplyToFromRequestMessage(Object inputParameter){
-
-            Method method = getReplyToMethod(inputParameter);
-            if(method != null){
-                try {
-                    //For grpc have to call the hasReplyTo method first to check if it has the field
-                    //otherwise it won't give you null it will give you a default version of the field (empty string etc)
-                    String replyTo = (String)method.invoke(inputParameter);
-                    if(replyTo.isEmpty()){ //If a string field is not set protobuf will set it to empty (not null)
-                        return null;
-                    } else {
-                        return replyTo;
-                    }
-                } catch (Exception e) {
-                    log.error("Failed to invoke method", e);
-                }
-            }
-            return null;
-        }
-
-        private Method getReplyToMethod(Object inputParameter){
-            //Check cache first to save searching all the class methods
-            final Class<?> theClass = inputParameter.getClass();
-            if(REPLYTO_METHOD_BY_CLASS.containsKey(theClass)){
-                return REPLYTO_METHOD_BY_CLASS.get(theClass);
-            }
-            //Use java reflection to get the getReplyToTopic method of the inputParameter if it exists
-            //(grpc descriptors etc are useless as they don't have reflection. It's all generated code)
-            final Method[] methods = theClass.getMethods();
-            for(Method getReplyToMethod: methods){
-                if(getReplyToMethod.getName().equals("getReplyToTopic")){
-                    if(getReplyToMethod.getReturnType().equals(String.class)) {
-                        REPLYTO_METHOD_BY_CLASS.put(theClass, getReplyToMethod);
-                        return getReplyToMethod;
-                    }
-                }
-            }
-            REPLYTO_METHOD_BY_CLASS.put(theClass, null);
-            return null;
-//Code for discovery using method descriptor -
-//            final ProtoMethodDescriptorSupplier schemaDescriptor =  (ProtoMethodDescriptorSupplier)methodDescriptor.getSchemaDescriptor();
-//            final Descriptors.MethodDescriptor mdesc = schemaDescriptor.getMethodDescriptor();
-//            final Descriptors.Descriptor replyToDesc = mdesc.getInputType().findNestedTypeByName("ReplyTo");
-        }
-
-
 
         private final class ContextCancellationListener implements Context.CancellationListener {
             @Override
@@ -420,7 +383,7 @@ public class MqttChannel extends Channel {
             switch(message.getMessageCase()){
                 case STATUS:
                     log.debug("Received completed response");
-                    close(toStatus(message.getStatus()));
+                    close(googleRpcStatusToGrpcStatus(message.getStatus()));
                     return;
                 case VALUE:
                     log.debug("Received message response");
