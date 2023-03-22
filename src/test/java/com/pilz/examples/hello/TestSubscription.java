@@ -166,9 +166,25 @@ public class TestSubscription {
         assertEquals("Hello 1", obs3.replies.get(1).getMessage());
         assertEquals("Hello 2", obs3.replies.get(2).getMessage());
 
+        //obsTemp was unsubscribed and so should not receive any responses
+        assertEquals(obsTemp.replies.size(), 0);
+
         checkForLeaks(0);
 
+        //Test unsubscribe of all observers to a responseTopic
+        channel.subscribe(responseTopic1, HelloReply.parser(), obs1);
+        channel.subscribe(responseTopic1, HelloReply.parser(), obs2);
+        channel.subscribe(responseTopic2, HelloReply.parser(), obs3);
+
+        assertEquals(3, channel.getStats().getSubscribers());
+        channel.unsubscribe(responseTopic1);
+        assertEquals(1, channel.getStats().getSubscribers());
+        channel.unsubscribe(responseTopic2);
+        assertEquals(0, channel.getStats().getSubscribers());
+
     }
+
+
 
 
 

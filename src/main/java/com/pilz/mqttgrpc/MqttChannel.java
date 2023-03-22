@@ -208,6 +208,26 @@ public class MqttChannel extends Channel {
 
     }
 
+    /**
+     * Unsubscribe all StreamObservers from responseTopic
+     */
+    public void unsubscribe(String responseTopic){
+        final List<StreamObserver> observers = subscribersByTopic.get(responseTopic);
+        if(observers != null){
+            subscribersByTopic.remove(responseTopic);
+            try {
+                client.unsubscribe(responseTopic);
+            } catch (MqttException e) {
+                log.error("Failed to unsubscribe for " + responseTopic, e);
+            }
+        } else {
+            log.warn("No subscription found for responseTopic: " + responseTopic);
+        }
+    }
+
+    /**
+     * Unsubscribe a specific StreamObserver from responseTopic
+     */
     public void unsubscribe(String responseTopic, StreamObserver observer){
         final List<StreamObserver> observers = subscribersByTopic.get(responseTopic);
         if(observers != null){
