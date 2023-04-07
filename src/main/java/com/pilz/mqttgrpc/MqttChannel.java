@@ -1,5 +1,6 @@
 package com.pilz.mqttgrpc;
 
+import com.google.protobuf.ByteString;
 import com.google.protobuf.MessageLite;
 import com.google.protobuf.Parser;
 import io.grpc.*;
@@ -118,7 +119,7 @@ public class MqttChannel extends Channel {
 
 
     @Override
-    public <RequestT, ResponseT> ClientCall<RequestT, ResponseT> newCall(MethodDescriptor<RequestT, ResponseT> methodDescriptor, CallOptions callOptions) {
+    public <RequestT, ResponseT> ClientCall newCall(MethodDescriptor<RequestT, ResponseT> methodDescriptor, CallOptions callOptions) {
         MqttClientCall call = new MqttClientCall<>(methodDescriptor, callOptions, executor, queueSize);
         clientCallsById.put(call.getCallId(), call);
         return call;
@@ -285,10 +286,7 @@ public class MqttChannel extends Channel {
             this.methodDescriptor = methodDescriptor;
             this.callOptions = callOptions;
             this.context = Context.current().withCancellation();
-            //Use a random 10 byte id. It encodes to base32 evenly (16 chars - 5 bits per char). It is valid for topics.
-            //It is easier than base64UrlSafe to read in logs and match.
-            //The probability of collision for 10,000 concurrent calls is zero (for 100,000 it is about 4E-15)
-            this.callId = Id.randomBase32(10);
+            this.callId = Id.randomId();
             this.replyTo = Topics.replyTo(serverTopic, methodDescriptor.getFullMethodName(), callId);
             messageProcessor = new MessageProcessor(executor, queueSize, this);
         }
@@ -331,8 +329,17 @@ public class MqttChannel extends Channel {
             final RpcMessage.Builder msgBuilder = RpcMessage.newBuilder()
                     .setCallId(callId);
 
+            final Value.Builder valueBuilder = Value.newBuilder();
+
+            ByteString valueByteString;
+            if(message instanceof MessageLite){
+                valueByteString = ((MessageLite) message).toByteString();
+            } else {
+                //If we use GrpcProxy then the message will be a byte array
+                valueByteString = ByteString.copyFrom((byte[]) message);
+            }
             final Value value = Value.newBuilder()
-                    .setContents(((MessageLite) message).toByteString()).build();
+                    .setContents(valueByteString).build();
             if (sequence == 0) {
                 //This is the start of the call so make a Start message with a header
                 Header.Builder header = Header.newBuilder();

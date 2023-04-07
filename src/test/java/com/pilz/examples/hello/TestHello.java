@@ -44,8 +44,8 @@ public class TestHello {
 
         MqttUtils.startEmbeddedBroker();
 
-        serverMqtt = MqttUtils.makeClient(Topics.systemStatus(DEVICE), "tcp://localhost:1883");
-        clientMqtt = MqttUtils.makeClient(null, "tcp://localhost:1883");
+        serverMqtt = MqttUtils.makeClient(Topics.systemStatus(DEVICE));//, "tcp://localhost:1883");
+        clientMqtt = MqttUtils.makeClient(null);//, "tcp://localhost:1883");
     }
 
     @AfterAll

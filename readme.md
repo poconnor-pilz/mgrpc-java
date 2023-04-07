@@ -189,7 +189,7 @@ The client sends a request containing a requestId and a clientId (e.g. we2UL4O1S
 
 Then server sends a reply to: 
 
-    device1/o/svc/we2UL4O1SXyl5df7aY8bGA/helloservice/sayHello
+    device1/o/svc/yyvkoydg5aepqxdn/helloservice/sayHello
 
 With this scheme ('all' or clientId) it would also be possible to have a policy that restricts access to a service. i.e. You could grant read write access to the helloservice only with a topic policy like device1/+/svc/+/helloservice (although that would mean that the implementation of MqttGrpcClient would have to explicitly subscribe for each service separately instead of subscribing for device1/o/svc/#. Note that it could subscribe for each one separately on a just in time basis i.e. if a client tries to send a message to /helloservice then it would subscribe to device1/o/svc/clientId/helloservice on the fly. We won't do this initially, just subscribe to device1/o/svc/#)
 What would be better is that the client is granted publish access to

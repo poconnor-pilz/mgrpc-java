@@ -83,7 +83,9 @@ public class TestSubscription {
     @Test
     public void testSubscription() throws InterruptedException {
 
-        //Set up multiple subscribers to listen for responses on a service via pub sub
+        //Test the ability to have multiple subscribers listen for responses from
+        //a single service via pub sub
+        //See the java doc for MqttChannel.subscribe()
 
         class HelloObserver implements StreamObserver<HelloReply>{
 
@@ -100,7 +102,7 @@ public class TestSubscription {
             }
             @Override
             public void onError(Throwable throwable) {
-
+                log.error("", throwable);
             }
             @Override
             public void onCompleted() {
@@ -121,8 +123,9 @@ public class TestSubscription {
         channel.subscribe(responseTopic1, HelloReply.parser(), obs2);
         HelloObserver obsTemp = new HelloObserver(latch);
         channel.subscribe(responseTopic1, HelloReply.parser(), obsTemp);
-
         assertEquals(channel.getStats().getSubscribers(), 3);
+
+        //Unsubscribe one of the observers of responseTopic1 and verify that it is removed
         channel.unsubscribe(responseTopic1, obsTemp);
         assertEquals(channel.getStats().getSubscribers(), 2);
 
@@ -131,7 +134,6 @@ public class TestSubscription {
         assertEquals(channel.getStats().getSubscribers(), 3);
 
         //Send two requests each with a different responseTopic
-
         final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub blockingStub1 =
                 ExampleHelloServiceGrpc.newBlockingStub(channel)
                         .withOption(MqttChannel.RESPONSE_TOPIC, responseTopic1);
@@ -175,10 +177,12 @@ public class TestSubscription {
         channel.subscribe(responseTopic1, HelloReply.parser(), obs1);
         channel.subscribe(responseTopic1, HelloReply.parser(), obs2);
         channel.subscribe(responseTopic2, HelloReply.parser(), obs3);
-
         assertEquals(3, channel.getStats().getSubscribers());
+
         channel.unsubscribe(responseTopic1);
+        //All 2 of the subscribers to responseTopic1 should be removed
         assertEquals(1, channel.getStats().getSubscribers());
+
         channel.unsubscribe(responseTopic2);
         assertEquals(0, channel.getStats().getSubscribers());
 

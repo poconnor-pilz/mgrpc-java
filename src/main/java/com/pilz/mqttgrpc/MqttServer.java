@@ -23,6 +23,7 @@ public class MqttServer {
     private static final Logger log = LoggerFactory.getLogger(MqttServer.class);
     private MqttInternalHandlerRegistry registry = new MqttInternalHandlerRegistry();
 
+    private HandlerRegistry fallBackRegistry = null;
     private final static Metadata EMPTY_METADATA = new Metadata();
 
     private final static int CANCELLED_CODE = Status.CANCELLED.getCode().value();
@@ -89,6 +90,10 @@ public class MqttServer {
     public void addService(ServerServiceDefinition service) {
         //TODO: Make a removeService
         registry.addService(service);
+    }
+
+    public void setFallBackRegistry(HandlerRegistry fallBackRegistry){
+        this.fallBackRegistry = fallBackRegistry;
     }
 
 
@@ -283,8 +288,13 @@ public class MqttServer {
                 String fullMethodName = topic.substring(topic.lastIndexOf('/', topic.lastIndexOf('/') - 1) + 1);
                 //fullMethodName is e.g. "helloworld.ExampleHelloService/SayHello"
                 //TODO: Verify that the fullMethodName matches the methoddescriptor in the First
-                final ServerMethodDefinition<?, ?> serverMethodDefinition = registry.lookupMethod(fullMethodName);
+                ServerMethodDefinition<?, ?> serverMethodDefinition = registry.lookupMethod(fullMethodName);
                 if (serverMethodDefinition == null) {
+                    if (fallBackRegistry != null) {
+                        serverMethodDefinition = fallBackRegistry.lookupMethod(fullMethodName);
+                    }
+                }
+                if(serverMethodDefinition == null){
                     sendStatus(header.getReplyTo(), callId, 1,
                             Status.UNIMPLEMENTED.withDescription("No method registered for " + fullMethodName));
                     return;
@@ -436,9 +446,16 @@ public class MqttServer {
                 if (!methodDescriptor.getType().serverSendsOneMessage()) {
                     sequence++;
                 }
-                final ByteString msgBytes = ((MessageLite) message).toByteString();
+                ByteString valueByteString;
+                if(message instanceof MessageLite){
+                    valueByteString = ((MessageLite) message).toByteString();
+                } else {
+                    //If we use GrpcProxy then the message will be a byte array
+                    valueByteString = ByteString.copyFrom((byte[]) message);
+                }
+
                 Value value = Value.newBuilder()
-                        .setContents(msgBytes).build();
+                        .setContents(valueByteString).build();
                 RpcMessage rpcMessage = RpcMessage.newBuilder()
                         .setValue(value)
                         .setCallId(callId)
