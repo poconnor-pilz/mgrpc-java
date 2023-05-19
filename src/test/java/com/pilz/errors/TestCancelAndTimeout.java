@@ -43,22 +43,19 @@ public class TestCancelAndTimeout {
 
 
     @BeforeAll
-    public static void startBrokerAndClients() throws MqttException, IOException {
-
-        MqttUtils.startEmbeddedBroker();
+    public static void startClients() throws Exception, IOException {
         serverMqtt = MqttUtils.makeClient(Topics.systemStatus(DEVICE));
         clientMqtt = MqttUtils.makeClient(null);
     }
 
     @AfterAll
-    public static void stopClientsAndBroker() throws MqttException {
+    public static void stopClients() throws MqttException {
         serverMqtt.disconnect();
         serverMqtt.close();
         serverMqtt = null;
         clientMqtt.disconnect();
         clientMqtt.close();
         clientMqtt = null;
-        MqttUtils.stopEmbeddedBroker();
     }
 
 

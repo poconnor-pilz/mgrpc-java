@@ -19,10 +19,7 @@ import org.junit.jupiter.api.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
 import java.util.Iterator;
-import java.util.Locale;
-import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -43,22 +40,19 @@ public class TestErrors {
 
 
     @BeforeAll
-    public static void startBrokerAndClients() throws MqttException, IOException {
-
-        MqttUtils.startEmbeddedBroker();
+    public static void startClients() throws Exception {
         serverMqtt = MqttUtils.makeClient(Topics.systemStatus(DEVICE));
         clientMqtt = MqttUtils.makeClient(null);
     }
 
     @AfterAll
-    public static void stopClientsAndBroker() throws MqttException {
+    public static void stopClients() throws MqttException {
         serverMqtt.disconnect();
         serverMqtt.close();
         serverMqtt = null;
         clientMqtt.disconnect();
         clientMqtt.close();
         clientMqtt = null;
-        MqttUtils.stopEmbeddedBroker();
     }
 
 

@@ -40,7 +40,6 @@ dependencies {
     //Need this because grpc will generate code that has annotations from javax.annotation (@generated)
     implementation group: "javax.annotation", name: "javax.annotation-api", version: "1.3.2"
 
-    testImplementation 'io.moquette:moquette-broker:0.15'
     //For InProcess server
     testImplementation "io.grpc:grpc-core:${grpcVersion}"
 

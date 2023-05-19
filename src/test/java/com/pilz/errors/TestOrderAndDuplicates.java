@@ -19,7 +19,6 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.*;
@@ -40,22 +39,19 @@ public class TestOrderAndDuplicates {
 
 
     @BeforeAll
-    public static void startBrokerAndClients() throws MqttException, IOException {
-
-        MqttUtils.startEmbeddedBroker();
+    public static void startClients() throws Exception{
         serverMqtt = MqttUtils.makeClient(Topics.systemStatus(DEVICE));
         clientMqtt = MqttUtils.makeClient(null);
     }
 
     @AfterAll
-    public static void stopClientsAndBroker() throws MqttException {
+    public static void stopClients() throws MqttException {
         serverMqtt.disconnect();
         serverMqtt.close();
         serverMqtt = null;
         clientMqtt.disconnect();
         clientMqtt.close();
         clientMqtt = null;
-        MqttUtils.stopEmbeddedBroker();
     }
 
 

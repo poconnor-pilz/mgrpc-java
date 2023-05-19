@@ -13,7 +13,6 @@ import org.junit.jupiter.api.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
@@ -37,23 +36,19 @@ public class TestSubscription {
     private static final long REQUEST_TIMEOUT = 2000;
 
     @BeforeAll
-    public static void startBrokerAndClients() throws MqttException, IOException {
-
-        MqttUtils.startEmbeddedBroker();
-
-        serverMqtt = MqttUtils.makeClient(Topics.systemStatus(DEVICE), "tcp://localhost:1883");
-        clientMqtt = MqttUtils.makeClient(null, "tcp://localhost:1883");
+    public static void startClients() throws Exception {
+        serverMqtt = MqttUtils.makeClient(Topics.systemStatus(DEVICE));
+        clientMqtt = MqttUtils.makeClient(null);
     }
 
     @AfterAll
-    public static void stopClientsAndBroker() throws MqttException {
+    public static void stopClients() throws MqttException {
         serverMqtt.disconnect();
         serverMqtt.close();
         serverMqtt = null;
         clientMqtt.disconnect();
         clientMqtt.close();
         clientMqtt = null;
-        MqttUtils.stopEmbeddedBroker();
     }
 
     @BeforeEach
