@@ -1,5 +1,6 @@
 package com.pilz.mqttgrpc;
 
+import com.google.common.base.MoreObjects;
 import com.google.protobuf.ByteString;
 import com.google.protobuf.MessageLite;
 import com.google.protobuf.Parser;
@@ -257,6 +258,7 @@ public class MqttChannel extends Channel {
     }
 
 
+
     private class MqttClientCall<ReqT, RespT> extends ClientCall<ReqT, RespT> implements MessageProcessor.MessageHandler {
 
         final MethodDescriptor<ReqT, RespT> methodDescriptor;
@@ -273,6 +275,7 @@ public class MqttChannel extends Channel {
         /**List of recent sequence ids, Used for checking for duplicate messages*/
         private Recents recents = new Recents();
         Deadline effectiveDeadline = null;
+        Metadata metadata = null;
 
 
         private final ContextCancellationListener cancellationListener =
@@ -298,6 +301,35 @@ public class MqttChannel extends Channel {
         @Override
         public void start(Listener<RespT> responseListener, Metadata headers) {
             this.responseListener = responseListener;
+
+
+            //If the client specified authentication details then merge them into the metadata
+            final CallCredentials credentials = this.callOptions.getCredentials();
+            if(credentials != null){
+                MetadataMerger merger = new MetadataMerger(headers);
+                CallCredentials.RequestInfo requestInfo = new CallCredentials.RequestInfo() {
+                    public MethodDescriptor<?, ?> getMethodDescriptor() {
+                        return methodDescriptor;
+                    }
+                    public CallOptions getCallOptions() {
+                        return callOptions;
+                    }
+                    public SecurityLevel getSecurityLevel() {
+                        return SecurityLevel.NONE;
+                    }
+                    public String getAuthority() {
+                        return "";
+                    }
+                    public Attributes getTransportAttrs() {
+                        return null;
+                    }
+                };
+                Executor inlineExecutor = Runnable::run;
+                credentials.applyRequestMetadata(requestInfo, inlineExecutor, merger);
+                this.metadata = merger.getMetaData();
+            } else {
+                this.metadata = headers;
+            }
 
             if (context.isCancelled()) {
                 //Call is already cancelled
@@ -356,6 +388,16 @@ public class MqttChannel extends Channel {
                     close(Status.OK);
                 } else {
                     header.setReplyTo(this.replyTo);
+                }
+
+                //Add metadata to header
+                Set<String> keys = metadata.keys();
+                for (String key : keys) {
+                    final String mvalue = metadata.get(Metadata.Key.of(key, Metadata.ASCII_STRING_MARSHALLER));
+                    MetadataEntry entry = MetadataEntry.newBuilder()
+                            .setKey(key)
+                            .setValue(mvalue).build();
+                    header.addMetadata(entry);
                 }
 
                 final Start start = Start.newBuilder()

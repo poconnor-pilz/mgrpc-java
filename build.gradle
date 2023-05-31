@@ -49,7 +49,12 @@ dependencies {
     testImplementation group: 'com.google.protobuf', name: 'protobuf-java-util', version: '3.21.2'
 
     //For tests that use https server (as opposed to inprocess server)
-    testImplementation 'io.grpc:grpc-netty:1.51.0'
+    testImplementation group: "io.grpc", name: "grpc-netty", version: grpcVersion
+
+    //For TestAuth
+    testImplementation group: 'io.jsonwebtoken', name: 'jjwt', version: '0.9.1'
+    testImplementation "jakarta.xml.bind:jakarta.xml.bind-api:2.3.2"
+    testImplementation "org.glassfish.jaxb:jaxb-runtime:2.3.2"
 
 }
 

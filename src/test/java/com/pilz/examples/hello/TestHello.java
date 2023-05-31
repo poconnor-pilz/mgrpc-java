@@ -40,8 +40,8 @@ public class TestHello {
 
     @BeforeAll
     public static void startClients() throws Exception {
-        serverMqtt = MqttUtils.makeClient(Topics.systemStatus(DEVICE));//, "tcp://localhost:1883");
-        clientMqtt = MqttUtils.makeClient(null);//, "tcp://localhost:1883");
+        serverMqtt = MqttUtils.makeClient(Topics.systemStatus(DEVICE));
+        clientMqtt = MqttUtils.makeClient(null);
     }
 
     @AfterAll

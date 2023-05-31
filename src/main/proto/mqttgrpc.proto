@@ -52,12 +52,34 @@ message Value{
 
 }
 
+message MetadataEntry{
+  // To make it possible to transport metadata in http headers (and to work with existing grpc code),
+  // the following rules apply:
+  //
+  //    Only the following ASCII characters are allowed in keys:
+  //    digits: 0-9
+  //    uppercase letters: A-Z (normalized to lower)
+  //    lowercase letters: a-z
+  //    special characters: -_.
+  //
+  //    Only the following ASCII characters are allowed in values:
+  //    Space: 0x20, but must not be at the beginning or at the end of the value.
+  //    ASCII visible characters (0x21-0x7E).
+  //    (To encode binary values use base64)
+
+  string key = 1;
+  string value = 2;
+}
+
 message Header{
   //The topic to which to send all replies for this call.
   string replyTo = 1;
 
   //Timeout in milliseconds. If not 0 then the server call should timeout after this interval.
   uint64 timeoutMillis = 2;
+
+  //A list of metadata entries. Metadata can be used for things like security tokens etc.
+  repeated MetadataEntry metadata = 3;
 
   //This can be got from MethodDescriptor.toProto()
   //This will only be set for first message in a client stream

@@ -11,6 +11,8 @@ import io.grpc.examples.helloworld.ExampleHelloServiceGrpc;
 import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.stub.StreamObserver;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.SignatureAlgorithm;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
@@ -18,38 +20,29 @@ import org.slf4j.LoggerFactory;
 
 import java.util.concurrent.CountDownLatch;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class TestProxy {
 
     private static final Logger log = LoggerFactory.getLogger(TestProxy.class);
+
+    class ListenForHello extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
+        @Override
+        public void sayHello(HelloRequest request, StreamObserver<HelloReply> responseObserver) {
+            String clientId = AuthInterceptor.CLIENT_ID_CONTEXT_KEY.get();
+            Integer level = AuthInterceptor.LEVEL_CONTEXT_KEY.get();
+            final HelloReply reply = HelloReply.newBuilder().setMessage(clientId + level).build();
+            responseObserver.onNext(reply);
+            responseObserver.onCompleted();
+        }
+    }
 
 
     @Test
     public void testClientSideProxy() throws Exception{
 
 
-        ServerInterceptor interceptor = new ServerInterceptor() {
-            @Override
-            public <ReqT, RespT> ServerCall.Listener<ReqT> interceptCall(ServerCall<ReqT, RespT> call, Metadata headers, ServerCallHandler<ReqT, RespT> next) {
-                log.debug("Interceptor called");
-                return next.startCall(call, headers);
-            }
-        };
-
-        final CountDownLatch latch = new CountDownLatch(1);
-        class ListenForHello extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
-            @Override
-            public void sayHello(HelloRequest request, StreamObserver<HelloReply> responseObserver) {
-                final HelloReply reply = HelloReply.newBuilder().setMessage("hi").build();
-                responseObserver.onNext(reply);
-                responseObserver.onCompleted();
-                latch.countDown();
-            }
-        }
-
         //HttpChannel -> HttpServer -> GrpcProxy -> MqttChannel -> Broker -> MqttServer
-
         int port = 50051;
         String target = "localhost:" + port;
         final String DEVICE = "device1";
@@ -57,8 +50,7 @@ public class TestProxy {
         ManagedChannel httpChannel = ManagedChannelBuilder.forTarget(target)
                 .usePlaintext().build();
 
-        final String brokerUrl = "tcp://localhost:1883";
-        final MqttAsyncClient clientMqttConnection = MqttUtils.makeClient(null, brokerUrl);
+        final MqttAsyncClient clientMqttConnection = MqttUtils.makeClient(null);
         MqttChannel mqttChannel = new MqttChannel(clientMqttConnection, DEVICE);
         mqttChannel.init();
 
@@ -68,25 +60,44 @@ public class TestProxy {
                 .fallbackHandlerRegistry(new GrpcProxy.Registry(proxy))
                 .build().start();
 
-        final MqttAsyncClient serverMqttConnection = MqttUtils.makeClient(null, brokerUrl);
+        final ServerServiceDefinition serviceWithIntercept = ServerInterceptors.intercept(
+                new ListenForHello(),
+                new AuthInterceptor());
+
+        final MqttAsyncClient serverMqttConnection = MqttUtils.makeClient(null);
         MqttServer mqttServer = new MqttServer(serverMqttConnection, DEVICE);
-        mqttServer.addService(new ListenForHello());
+        mqttServer.addService(serviceWithIntercept);
         mqttServer.init();
 
-        final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub stub = ExampleHelloServiceGrpc.newBlockingStub(httpChannel);
+        //Make a jwt token and add it to the call credentials
+        final String clientId = "aTestClientID";
+        final Integer level = Integer.valueOf(9);
+        final String jwtString = Jwts.builder()
+                .setSubject(clientId) // client's identifier
+                .claim(AuthInterceptor.LEVEL, Integer.valueOf(9))
+                .signWith(SignatureAlgorithm.HS256, AuthInterceptor.JWT_SIGNING_KEY)
+                .compact();
+        BearerToken token = new BearerToken(jwtString);
+
+        final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub stub = ExampleHelloServiceGrpc
+                .newBlockingStub(httpChannel).withCallCredentials(token);
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
         final HelloReply helloReply = stub.sayHello(joe);
 
-        assertEquals("hi", helloReply.getMessage());
+        assertEquals(clientId + level, helloReply.getMessage());
 
-        latch.await();
+        //Verify that not setting authentication causes failure
+        final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub stub1 =
+                ExampleHelloServiceGrpc.newBlockingStub(httpChannel);
+        StatusRuntimeException ex = assertThrows(StatusRuntimeException.class, () -> stub1.sayHello(joe));
+        assertEquals(Status.UNAUTHENTICATED.getCode(), ex.getStatus().getCode());
+        assertTrue(ex.getMessage().contains("Authorization token is missing"));
+
 
         httpChannel.shutdown();
         httpServer.shutdown();
         mqttChannel.close();
         mqttServer.close();
-//        clientMqttConnection.close();
-//        serverMqttConnection.close();
     }
 
 
@@ -94,56 +105,63 @@ public class TestProxy {
     public void testServerSideProxy() throws Exception{
 
 
-        final CountDownLatch latch = new CountDownLatch(1);
-        class ListenForHello extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
-            @Override
-            public void sayHello(HelloRequest request, StreamObserver<HelloReply> responseObserver) {
-                final HelloReply reply = HelloReply.newBuilder().setMessage("hi").build();
-                responseObserver.onNext(reply);
-                responseObserver.onCompleted();
-                latch.countDown();
-            }
-        }
-
         //MqttChannel -> Broker -> MqttServer ->  GrpcProxy -> HttpChannel -> HttpServer
-
         int port = 50051;
         String target = "localhost:" + port;
         final String DEVICE = "device1";
 
-        final String brokerUrl = "tcp://localhost:1883";
-        final MqttAsyncClient clientMqttConnection = MqttUtils.makeClient(null, brokerUrl);
+        final MqttAsyncClient clientMqttConnection = MqttUtils.makeClient(null);
         MqttChannel mqttChannel = new MqttChannel(clientMqttConnection, DEVICE);
         mqttChannel.init();
 
+
+        final ServerServiceDefinition serviceWithIntercept = ServerInterceptors.intercept(
+                new ListenForHello(),
+                new AuthInterceptor());
+
+
         Server httpServer = ServerBuilder.forPort(port)
-                .addService(new ListenForHello())
+                .addService(serviceWithIntercept)
                 .build().start();
 
         ManagedChannel httpChannel = ManagedChannelBuilder.forTarget(target)
                 .usePlaintext().build();
         final GrpcProxy<byte[], byte[]> proxy = new GrpcProxy<>(httpChannel);
 
-
-        final MqttAsyncClient serverMqttConnection = MqttUtils.makeClient(null, brokerUrl);
+        final MqttAsyncClient serverMqttConnection = MqttUtils.makeClient(null);
         MqttServer mqttServer = new MqttServer(serverMqttConnection, DEVICE);
         mqttServer.setFallBackRegistry(new GrpcProxy.Registry(proxy));
         mqttServer.init();
 
-        final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub stub = ExampleHelloServiceGrpc.newBlockingStub(mqttChannel);
+        //Make a jwt token and add it to the call credentials
+        final String clientId = "aTestClientID";
+        final Integer level = Integer.valueOf(9);
+        final String jwtString = Jwts.builder()
+                .setSubject(clientId) // client's identifier
+                .claim(AuthInterceptor.LEVEL, Integer.valueOf(9))
+                .signWith(SignatureAlgorithm.HS256, AuthInterceptor.JWT_SIGNING_KEY)
+                .compact();
+        BearerToken token = new BearerToken(jwtString);
+
+        final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub stub = ExampleHelloServiceGrpc
+                .newBlockingStub(mqttChannel).withCallCredentials(token);
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
         final HelloReply helloReply = stub.sayHello(joe);
 
-        assertEquals("hi", helloReply.getMessage());
+        assertEquals(clientId + level, helloReply.getMessage());
 
-        latch.await();
+
+        //Verify that not setting authentication causes failure
+        final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub stub1 =
+                ExampleHelloServiceGrpc.newBlockingStub(mqttChannel);
+        StatusRuntimeException ex = assertThrows(StatusRuntimeException.class, () -> stub1.sayHello(joe));
+        assertEquals(Status.UNAUTHENTICATED.getCode(), ex.getStatus().getCode());
+        assertTrue(ex.getMessage().contains("Authorization token is missing"));
 
         httpChannel.shutdown();
         httpServer.shutdown();
         mqttChannel.close();
         mqttServer.close();
-//        clientMqttConnection.close();
-//        serverMqttConnection.close();
     }
 
 

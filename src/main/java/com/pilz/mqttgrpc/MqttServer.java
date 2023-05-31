@@ -12,6 +12,7 @@ import org.eclipse.paho.client.mqttv3.MqttMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.*;
 
@@ -374,13 +375,19 @@ public class MqttServer {
                 Context.Key<Integer> akey = Context.key("akey");
                 context = cancellableContext.withValue(akey, 99);
 
+                Metadata metadata = new Metadata();
+                final List<MetadataEntry> entries = header.getMetadataList();
+                for (MetadataEntry entry : entries) {
+                    final Metadata.Key<String> key = Metadata.Key.of(entry.getKey(), Metadata.ASCII_STRING_MARSHALLER);
+                    metadata.put(key, entry.getValue());
+                }
                 //Not that serverCallHandler.startCall() will call the implementation of e.g. sayHello() so
                 //all the context etc must be set up so that sayHello can add cancel listeners, get creds,
                 //possibly send an error on the responseStream etc.
                 //After the implementation of sayHello is called the rest of the interaction is done via
                 //the streams that sayHello returns and accepts
                 context.run(()->{
-                    this.listener = serverCallHandler.startCall(serverCall, EMPTY_METADATA);
+                    this.listener = serverCallHandler.startCall(serverCall, metadata);
                 });
             }
 

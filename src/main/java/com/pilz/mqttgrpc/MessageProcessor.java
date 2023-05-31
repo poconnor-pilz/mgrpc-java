@@ -81,7 +81,7 @@ public class MessageProcessor {
 
     public void queueMessage(MessageWithTopic messageWithTopic) {
         //It would be simpler here to dedicate a single thread to a call
-        //But this would mean that a call with low activity would hog that thread for it's duration
+        //But this would mean that a call with low activity would hog that thread for its duration
         //With java project loom this would not matter as threads are cheap.
         //So it might be worth doing that when loom becomes available.
 
@@ -149,7 +149,11 @@ public class MessageProcessor {
 
                 log.debug("Handling {} {} {}", new Object[]{message.getMessageCase(), message.getSequence(),
                         Id.shrt(message.getCallId())});
-                this.messageHandler.onBrokerMessage(messageWithTopic);
+                try {
+                    this.messageHandler.onBrokerMessage(messageWithTopic);
+                } catch (Exception ex){
+                    log.error("Exception processing message in thread: " + Thread.currentThread().getName(), ex);
+                }
             }
 
             //get the next message and process it.
