@@ -16,24 +16,28 @@ import org.slf4j.LoggerFactory;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-public class TestAuth {
+public class TestAuthAndMetadata {
 
-    private static final Logger log = LoggerFactory.getLogger(TestAuth.class);
+    private static final Logger log = LoggerFactory.getLogger(TestAuthAndMetadata.class);
 
 
 
     @Test
-    void testAuthInterceptor() throws Exception {
+    void testAuthAndMetadata() throws Exception {
 
-        //Use AuthInterceptor to verify that the user is authorized test that it populates the context
+        //Use ServerAuthInterceptor to verify that the user is authorized test that it populates the context
         //with clientId and level
+        //Also verify the that the HOSTNAME metadata value inserted by ClientMetadataInterceptor is correctly
+        //merged with the Auth metadata
+
         class ListenForHello extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
             @Override
             public void sayHello(HelloRequest request, StreamObserver<HelloReply> responseObserver) {
                 //Get the clientId and the level from the context. These will have been populated by the AuthInterceptor
-                String clientId = AuthInterceptor.CLIENT_ID_CONTEXT_KEY.get();
-                Integer level = AuthInterceptor.LEVEL_CONTEXT_KEY.get();
-                final HelloReply reply = HelloReply.newBuilder().setMessage(clientId + level).build();
+                String clientId = ServerAuthInterceptor.CLIENT_ID_CONTEXT_KEY.get();
+                Integer level = ServerAuthInterceptor.LEVEL_CONTEXT_KEY.get();
+                String hostName = ServerAuthInterceptor.HOSTNAME_CONTEXT_KEY.get();
+                final HelloReply reply = HelloReply.newBuilder().setMessage(clientId + level + hostName).build();
                 responseObserver.onNext(reply);
                 responseObserver.onCompleted();
             }
@@ -45,7 +49,7 @@ public class TestAuth {
 
         final ServerServiceDefinition serviceWithIntercept = ServerInterceptors.intercept(
                 new ListenForHello(),
-                new AuthInterceptor());
+                new ServerAuthInterceptor());
         server.addService(serviceWithIntercept);
         MqttChannel channel = new MqttChannel(MqttUtils.makeClient(null), DEVICE);
         channel.init();
@@ -56,17 +60,19 @@ public class TestAuth {
         final Integer level = Integer.valueOf(9);
         final String jwtString = Jwts.builder()
                 .setSubject(clientId) // client's identifier
-                .claim(AuthInterceptor.LEVEL, Integer.valueOf(9))
-                .signWith(SignatureAlgorithm.HS256, AuthInterceptor.JWT_SIGNING_KEY)
+                .claim(ServerAuthInterceptor.LEVEL, Integer.valueOf(9))
+                .signWith(SignatureAlgorithm.HS256, ServerAuthInterceptor.JWT_SIGNING_KEY)
                 .compact();
         BearerToken token = new BearerToken(jwtString);
 
         final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub stub =
-                ExampleHelloServiceGrpc.newBlockingStub(channel).withCallCredentials(token);
+                ExampleHelloServiceGrpc.newBlockingStub(channel)
+                        .withCallCredentials(token)
+                        .withInterceptors(new ClientMetadataInterceptor());
         final HelloRequest request = HelloRequest.newBuilder().setName("joe").build();
         HelloReply response = stub.sayHello(request);
-        //HelloListener should have received values for clientId and level as part of the call context.
-        assertEquals(clientId + level, response.getMessage());
+        //HelloListener should have received values for clientId and level and hostName as part of the call context.
+        assertEquals(clientId + level + ClientMetadataInterceptor.MYHOST, response.getMessage());
 
 
         //Test without setting authentication

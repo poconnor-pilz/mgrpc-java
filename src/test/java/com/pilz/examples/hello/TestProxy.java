@@ -1,10 +1,8 @@
 package com.pilz.examples.hello;
 
-import com.google.protobuf.MessageLite;
 import com.pilz.mqttgrpc.GrpcProxy;
 import com.pilz.mqttgrpc.MqttChannel;
 import com.pilz.mqttgrpc.MqttServer;
-import com.pilz.mqttgrpc.Topics;
 import com.pilz.utils.MqttUtils;
 import io.grpc.*;
 import io.grpc.examples.helloworld.ExampleHelloServiceGrpc;
@@ -18,8 +16,6 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.concurrent.CountDownLatch;
-
 import static org.junit.jupiter.api.Assertions.*;
 
 public class TestProxy {
@@ -29,8 +25,8 @@ public class TestProxy {
     class ListenForHello extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
         @Override
         public void sayHello(HelloRequest request, StreamObserver<HelloReply> responseObserver) {
-            String clientId = AuthInterceptor.CLIENT_ID_CONTEXT_KEY.get();
-            Integer level = AuthInterceptor.LEVEL_CONTEXT_KEY.get();
+            String clientId = ServerAuthInterceptor.CLIENT_ID_CONTEXT_KEY.get();
+            Integer level = ServerAuthInterceptor.LEVEL_CONTEXT_KEY.get();
             final HelloReply reply = HelloReply.newBuilder().setMessage(clientId + level).build();
             responseObserver.onNext(reply);
             responseObserver.onCompleted();
@@ -62,7 +58,7 @@ public class TestProxy {
 
         final ServerServiceDefinition serviceWithIntercept = ServerInterceptors.intercept(
                 new ListenForHello(),
-                new AuthInterceptor());
+                new ServerAuthInterceptor());
 
         final MqttAsyncClient serverMqttConnection = MqttUtils.makeClient(null);
         MqttServer mqttServer = new MqttServer(serverMqttConnection, DEVICE);
@@ -74,8 +70,8 @@ public class TestProxy {
         final Integer level = Integer.valueOf(9);
         final String jwtString = Jwts.builder()
                 .setSubject(clientId) // client's identifier
-                .claim(AuthInterceptor.LEVEL, Integer.valueOf(9))
-                .signWith(SignatureAlgorithm.HS256, AuthInterceptor.JWT_SIGNING_KEY)
+                .claim(ServerAuthInterceptor.LEVEL, Integer.valueOf(9))
+                .signWith(SignatureAlgorithm.HS256, ServerAuthInterceptor.JWT_SIGNING_KEY)
                 .compact();
         BearerToken token = new BearerToken(jwtString);
 
@@ -117,7 +113,7 @@ public class TestProxy {
 
         final ServerServiceDefinition serviceWithIntercept = ServerInterceptors.intercept(
                 new ListenForHello(),
-                new AuthInterceptor());
+                new ServerAuthInterceptor());
 
 
         Server httpServer = ServerBuilder.forPort(port)
@@ -138,8 +134,8 @@ public class TestProxy {
         final Integer level = Integer.valueOf(9);
         final String jwtString = Jwts.builder()
                 .setSubject(clientId) // client's identifier
-                .claim(AuthInterceptor.LEVEL, Integer.valueOf(9))
-                .signWith(SignatureAlgorithm.HS256, AuthInterceptor.JWT_SIGNING_KEY)
+                .claim(ServerAuthInterceptor.LEVEL, Integer.valueOf(9))
+                .signWith(SignatureAlgorithm.HS256, ServerAuthInterceptor.JWT_SIGNING_KEY)
                 .compact();
         BearerToken token = new BearerToken(jwtString);
 

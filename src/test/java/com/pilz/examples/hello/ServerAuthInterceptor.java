@@ -6,12 +6,13 @@ import io.jsonwebtoken.Jws;
 import io.jsonwebtoken.JwtParser;
 import io.jsonwebtoken.Jwts;
 
-public class AuthInterceptor implements ServerInterceptor {
+public class ServerAuthInterceptor implements ServerInterceptor {
 
     public static final String JWT_SIGNING_KEY = "L8hMXsaQOUhk5rg7XPAv4eL34anlCgkMz8CJ0i/8E/0=";
     public static final String LEVEL = "level";
     public static final Context.Key<Integer> LEVEL_CONTEXT_KEY = Context.key(LEVEL);
     public static final Context.Key<String> CLIENT_ID_CONTEXT_KEY = Context.key("clientId");
+    public static final Context.Key<String> HOSTNAME_CONTEXT_KEY = Context.key("hostName");
 
     @Override
     public <ReqT, RespT> ServerCall.Listener<ReqT> interceptCall(ServerCall<ReqT, RespT> serverCall,
@@ -24,6 +25,8 @@ public class AuthInterceptor implements ServerInterceptor {
         //So that the ListenForHello instance can get these values from the context
         //If the user is not authorized then just fail the call without passing it on to ListenForHello
         String value = metadata.get(BearerToken.AUTHORIZATION_METADATA_KEY);
+        //Hostname will have been inserted by ClientMetadataInterceptor
+        String hostName = metadata.get(ClientMetadataInterceptor.HOSTNAME_KEY);
         Status status;
         if (value == null) {
             status = Status.UNAUTHENTICATED.withDescription("Authorization token is missing");
@@ -38,7 +41,8 @@ public class AuthInterceptor implements ServerInterceptor {
                 final Integer level = claims.getBody().get(LEVEL, Integer.class);
                 Context ctx = Context.current().withValues(
                         CLIENT_ID_CONTEXT_KEY, clientId,
-                        LEVEL_CONTEXT_KEY, level);
+                        LEVEL_CONTEXT_KEY, level,
+                        HOSTNAME_CONTEXT_KEY, hostName);
                 //return next.startCall(serverCall, metadata);
                 return Contexts.interceptCall(ctx, serverCall, metadata, next);
             } catch (Exception e) {
