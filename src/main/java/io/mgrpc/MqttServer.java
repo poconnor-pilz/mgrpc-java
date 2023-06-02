@@ -65,6 +65,17 @@ public class MqttServer {
 
     private static final int SINGLE_MESSAGE_STREAM = 0;
 
+    /**
+     * @param client Mqtt client
+     * @param serverTopic The root topic of the server e.g. "tenant1/device1"
+     *                   The server will subscribe for requests on {serverTopic}/i/svc/#
+     *                   A request for a method should be sent to sent to {serverTopic}/i/svc/{service}/{method}
+     *                   Replies will be sent to whatever the client specifies in the message header's replyTo
+     *                   This will normally be:
+     *                   {serverTopic}/o/svc/{clientId}/{service}/{method}/{callId}
+     * @param queueSize  The size of the incoming message queue for each call
+     * @param executor   Executor which will process incoming message queues.
+     */
     public MqttServer(MqttAsyncClient client, String serverTopic, int queueSize, Executor executor) {
         this.client = client;
         this.serverTopic = serverTopic;
@@ -101,10 +112,10 @@ public class MqttServer {
     }
 
     public void init() throws MqttException {
-        String allServicesIn = Topics.allServicesIn(serverTopic);
-        log.debug("subscribe server at: " + allServicesIn);
+        String servicesInFilter = Topics.servicesIn(serverTopic) + "/#";
+        log.debug("subscribe server at: " + servicesInFilter);
 
-        client.subscribe(allServicesIn, 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
+        client.subscribe(servicesInFilter, 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
             //We use an MqttExceptionLogger here because if a we throw an exception in the subscribe handler
             //it will disconnect the mqtt client
             final RpcMessage message = RpcMessage.parseFrom(mqttMessage.getPayload());
@@ -148,7 +159,7 @@ public class MqttServer {
     public void close() {
         try {
             //TODO: make const timeout, cancel all calls? Empty map?
-            client.unsubscribe(Topics.allServicesIn(serverTopic)).waitForCompletion(5000);
+            client.unsubscribe(Topics.servicesIn(serverTopic) + "/#").waitForCompletion(5000);
         } catch (MqttException e) {
             log.error("Failed to unsub", e);
         }

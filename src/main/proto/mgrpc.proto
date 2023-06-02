@@ -62,12 +62,13 @@ message Header{
   //A list of metadata entries. Metadata can be used for things like security tokens etc.
   repeated MetadataEntry metadata = 3;
 
-  //This can be got from MethodDescriptor.toProto()
+  //This can be aquired from MethodDescriptor.toProto()
   //This will only be set for first message in a client stream
   //MethodDescriptorProto methodDescriptor = 2;
 }
 
 message MetadataEntry{
+
   // To make it possible to transport metadata in http headers (and to work with existing grpc code),
   // the following rules apply:
   //

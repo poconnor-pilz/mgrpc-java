@@ -10,6 +10,7 @@ import io.grpc.stub.ClientCallStreamObserver;
 import io.grpc.stub.ClientResponseObserver;
 import io.grpc.stub.ServerCallStreamObserver;
 import io.grpc.stub.StreamObserver;
+import io.mgrpc.Id;
 import io.mgrpc.MqttChannel;
 import io.mgrpc.MqttServer;
 import io.mgrpc.Topics;
@@ -67,7 +68,8 @@ public class TestCancelAndTimeout {
         //Set up the server
         server = new MqttServer(serverMqtt, DEVICE);
         server.init();
-        channel = new MqttChannel(clientMqtt, DEVICE);
+        final String clientId = Id.random();
+        channel = new MqttChannel(clientMqtt, clientId, DEVICE);
         channel.init();
     }
 
@@ -387,7 +389,8 @@ public class TestCancelAndTimeout {
         //and the input stream to the server should get an error.
         channel.close();
         //Make a channel with queue size 10
-        channel = new MqttChannel(serverMqtt, DEVICE, 10);
+        final String clientId = Id.random();
+        channel = new MqttChannel(serverMqtt, DEVICE, clientId, 10);
         channel.init();
 
         final CountDownLatch serverCancelledLatch = new CountDownLatch(1);

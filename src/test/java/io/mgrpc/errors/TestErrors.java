@@ -12,10 +12,7 @@ import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.protobuf.StatusProto;
 import io.grpc.stub.StreamObserver;
-import io.mgrpc.MqttChannel;
-import io.mgrpc.MqttServer;
-import io.mgrpc.NoopStreamObserver;
-import io.mgrpc.Topics;
+import io.mgrpc.*;
 import io.mgrpc.utils.MqttUtils;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
@@ -66,7 +63,8 @@ public class TestErrors {
         //Set up the server
         server = new MqttServer(serverMqtt, DEVICE);
         server.init();
-        channel = new MqttChannel(clientMqtt, DEVICE);
+        final String clientId = Id.random();
+        channel = new MqttChannel(clientMqtt, clientId, DEVICE);
         channel.init();
     }
 

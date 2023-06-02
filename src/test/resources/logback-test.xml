@@ -12,7 +12,7 @@
             <appender-ref ref="STDOUT" />
         </root>
 
-        <logger name="com.pilz" additivity="false" level="debug">
+        <logger name="io.mgrpc" additivity="false" level="debug">
             <appender-ref ref="STDOUT" />
         </logger>
 

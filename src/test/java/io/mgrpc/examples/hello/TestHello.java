@@ -61,7 +61,7 @@ public class TestHello {
         server = new MqttServer(serverMqtt, DEVICE);
         server.init();
         server.addService(new HelloServiceForTest());
-        channel = new MqttChannel(clientMqtt, DEVICE);
+        channel = new MqttChannel(clientMqtt, Id.random(), DEVICE);
         channel.init();
     }
 
@@ -82,6 +82,21 @@ public class TestHello {
         final HelloReply helloReply = blockingStub.sayHello(joe);
         assertEquals("Hello joe", helloReply.getMessage());
         checkForLeaks(0);
+    }
+
+    @Test
+    public void testSayHelloWithCustomReplyTopicPrefix() {
+
+        String replyTopicPrefix = Topics.out(DEVICE, "blah");
+        MqttChannel customChannel = new MqttChannel(clientMqtt, DEVICE, Id.random(), replyTopicPrefix,
+                MqttChannel.DEFAULT_QUEUE_SIZE, MqttChannel.getExecutorInstance());
+        customChannel.init();
+        final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub blockingStub = ExampleHelloServiceGrpc.newBlockingStub(customChannel);
+        HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
+        final HelloReply helloReply = blockingStub.sayHello(joe);
+        assertEquals("Hello joe", helloReply.getMessage());
+        checkForLeaks(0);
+        customChannel.close();
     }
 
 

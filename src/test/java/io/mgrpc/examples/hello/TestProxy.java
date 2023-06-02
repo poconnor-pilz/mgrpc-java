@@ -8,6 +8,7 @@ import io.grpc.stub.StreamObserver;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
 import io.mgrpc.GrpcProxy;
+import io.mgrpc.Id;
 import io.mgrpc.MqttChannel;
 import io.mgrpc.MqttServer;
 import io.mgrpc.utils.MqttUtils;
@@ -47,7 +48,8 @@ public class TestProxy {
                 .usePlaintext().build();
 
         final MqttAsyncClient clientMqttConnection = MqttUtils.makeClient(null);
-        MqttChannel mqttChannel = new MqttChannel(clientMqttConnection, DEVICE);
+        final String clientId = Id.random();
+        MqttChannel mqttChannel = new MqttChannel(clientMqttConnection, clientId, DEVICE);
         mqttChannel.init();
 
         GrpcProxy<byte[], byte[]> proxy = new GrpcProxy<>(mqttChannel);
@@ -66,10 +68,10 @@ public class TestProxy {
         mqttServer.init();
 
         //Make a jwt token and add it to the call credentials
-        final String clientId = "aTestClientID";
+        final String testclientId = "aTestClientID";
         final Integer level = Integer.valueOf(9);
         final String jwtString = Jwts.builder()
-                .setSubject(clientId) // client's identifier
+                .setSubject(testclientId) // client's identifier
                 .claim(ServerAuthInterceptor.LEVEL, Integer.valueOf(9))
                 .signWith(SignatureAlgorithm.HS256, ServerAuthInterceptor.JWT_SIGNING_KEY)
                 .compact();
@@ -80,7 +82,7 @@ public class TestProxy {
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
         final HelloReply helloReply = stub.sayHello(joe);
 
-        assertEquals(clientId + level, helloReply.getMessage());
+        assertEquals(testclientId + level, helloReply.getMessage());
 
         //Verify that not setting authentication causes failure
         final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub stub1 =
@@ -107,7 +109,8 @@ public class TestProxy {
         final String DEVICE = "device1";
 
         final MqttAsyncClient clientMqttConnection = MqttUtils.makeClient(null);
-        MqttChannel mqttChannel = new MqttChannel(clientMqttConnection, DEVICE);
+        final String clientId = Id.random();
+        MqttChannel mqttChannel = new MqttChannel(clientMqttConnection, clientId, DEVICE);
         mqttChannel.init();
 
 
@@ -130,10 +133,10 @@ public class TestProxy {
         mqttServer.init();
 
         //Make a jwt token and add it to the call credentials
-        final String clientId = "aTestClientID";
+        final String testclientId = "aTestClientID";
         final Integer level = Integer.valueOf(9);
         final String jwtString = Jwts.builder()
-                .setSubject(clientId) // client's identifier
+                .setSubject(testclientId) // client's identifier
                 .claim(ServerAuthInterceptor.LEVEL, Integer.valueOf(9))
                 .signWith(SignatureAlgorithm.HS256, ServerAuthInterceptor.JWT_SIGNING_KEY)
                 .compact();
@@ -144,7 +147,7 @@ public class TestProxy {
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
         final HelloReply helloReply = stub.sayHello(joe);
 
-        assertEquals(clientId + level, helloReply.getMessage());
+        assertEquals(testclientId + level, helloReply.getMessage());
 
 
         //Verify that not setting authentication causes failure

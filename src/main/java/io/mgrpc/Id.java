@@ -35,7 +35,7 @@ public class Id {
        It is easier than base64UrlSafe to read in logs and match.
        The probability of collision for 10,000 concurrent calls is zero (for 100,000 it is about 4E-15)
      */
-    public static String randomId(){
+    public static String random(){
         return randomBase32(10);
     }
 
@@ -234,7 +234,7 @@ public class Id {
 
 
     public static void main(String[] args){
-        log.debug(randomId());
+        log.debug(random());
         log.debug("5, 1000 " + collisionProbability(1000, Math.pow(2, 5*8)));
         log.debug("5, 10000 " + collisionProbability(10000, Math.pow(2, 5*8)));
         log.debug("7, 10000 " + collisionProbability(10000, Math.pow(2, 7*8)));

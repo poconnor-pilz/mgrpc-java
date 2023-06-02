@@ -4,6 +4,7 @@ import io.grpc.examples.helloworld.ExampleHelloServiceGrpc;
 import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.stub.StreamObserver;
+import io.mgrpc.Id;
 import io.mgrpc.MqttChannel;
 import io.mgrpc.MqttServer;
 import io.mgrpc.Topics;
@@ -60,7 +61,8 @@ public class TestSubscription {
         server = new MqttServer(serverMqtt, DEVICE);
         server.init();
         server.addService(new HelloServiceForTest());
-        channel = new MqttChannel(clientMqtt, DEVICE);
+        final String clientId = Id.random();
+        channel = new MqttChannel(clientMqtt, clientId, DEVICE);
         channel.init();
     }
 

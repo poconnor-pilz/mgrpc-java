@@ -153,6 +153,33 @@ There's no reason why the server couldn't send another message when another even
 
 
 ## Topic structure
+
+For the moment the topic structure is as follows
+
+{server}/i|o/svc/{clientId}/{service}/{method}/{callId}
+
+The client sends a request containing a requestId and a clientId (e.g. yyvkoydg5aepqxdn) to:
+
+    device1/i/svc/helloservice/sayHello
+
+Then server sends a reply to:
+
+    device1/o/svc/yyvkoydg5aepqxdn/helloservice/sayHello/2gtknddwjbokgvfe
+where,
+    clientId = yyvkoydg5aepqxdn
+    callId = 2gtknddwjbokgvfe
+
+
+In general if the client has permissions to publish to server/i/service/method then it should be able to get permissions to subscribe to
+server/o/{clientId}/#
+However the MqttChannel can also be parameterised with a replyTopicPrefix for flexibility. 
+In this case replies for that client will be sent to: 
+
+    {replyToPrefix}/{service}/{method}/{callId}
+
+
+--------------
+
 In mqtt filtering is based on topic. This is inflexible because you cannot # subscribe something that you want to publish to.
 '#' matches all following segments and can only be at the end of a filter. '+' matches one segment
 So if you don't know what the future segment structure of things are and you think you may need to have a subscription that filters for all messages going to a particular device (maybe to log all activity for t device) then you have to have a structure like

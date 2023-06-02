@@ -10,6 +10,7 @@ import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.stub.StreamObserver;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
+import io.mgrpc.Id;
 import io.mgrpc.MqttChannel;
 import io.mgrpc.MqttServer;
 import io.mgrpc.Topics;
@@ -55,15 +56,16 @@ public class TestAuthAndMetadata {
                 new ListenForHello(),
                 new ServerAuthInterceptor());
         server.addService(serviceWithIntercept);
-        MqttChannel channel = new MqttChannel(MqttUtils.makeClient(null), DEVICE);
+        final String clientId = Id.random();
+        MqttChannel channel = new MqttChannel(MqttUtils.makeClient(null), clientId, DEVICE);
         channel.init();
 
 
         //Make a jwt token and add it to the call credentials
-        final String clientId = "aTestClientID";
+        final String testClientId = "aTestClientID";
         final Integer level = Integer.valueOf(9);
         final String jwtString = Jwts.builder()
-                .setSubject(clientId) // client's identifier
+                .setSubject(testClientId) // client's identifier
                 .claim(ServerAuthInterceptor.LEVEL, Integer.valueOf(9))
                 .signWith(SignatureAlgorithm.HS256, ServerAuthInterceptor.JWT_SIGNING_KEY)
                 .compact();
@@ -76,7 +78,7 @@ public class TestAuthAndMetadata {
         final HelloRequest request = HelloRequest.newBuilder().setName("joe").build();
         HelloReply response = stub.sayHello(request);
         //HelloListener should have received values for clientId and level and hostName as part of the call context.
-        assertEquals(clientId + level + ClientMetadataInterceptor.MYHOST, response.getMessage());
+        assertEquals(testClientId + level + ClientMetadataInterceptor.MYHOST, response.getMessage());
 
 
         //Test without setting authentication

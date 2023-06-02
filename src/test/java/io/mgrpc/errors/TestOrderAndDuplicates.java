@@ -85,10 +85,11 @@ public class TestOrderAndDuplicates {
         server.addService(accumulator);
 
         String fullMethodName = "helloworld.ExampleHelloService/LotsOfGreetings";
-        String callId = Id.randomBase32(10);
+        String callId = Id.random();
+        String clientId = Id.random();
         String topic = Topics.methodIn(DEVICE, fullMethodName);
         log.debug(topic);
-        String replyTo = Topics.replyTo(DEVICE, fullMethodName, callId);
+        String replyTo = Topics.make(Topics.servicesOut(DEVICE, clientId), fullMethodName, callId);
         log.debug(replyTo);
         publishAndPause(clientMqtt, topic, makeStartRequest(callId, 1, replyTo));
         publishAndPause(clientMqtt, topic, makeValueRequest(callId, 5));
@@ -128,6 +129,8 @@ public class TestOrderAndDuplicates {
     @Test
     public void testOutOfOrderClientStreamWithDuplicates() throws Exception{
 
+        //Send out of order requests to a service topic
+        //Then verify that the MqttServer puts re-orders the requests correctly.
 
         final Accumulator accumulator = new Accumulator();
         MqttServer server = new MqttServer(serverMqtt, DEVICE);
@@ -135,9 +138,10 @@ public class TestOrderAndDuplicates {
         server.addService(accumulator);
 
         String fullMethodName = "helloworld.ExampleHelloService/LotsOfGreetings";
-        String callId = Id.randomBase32(10);
+        String callId = Id.random();
+        String clientId = Id.random();
         String topic = Topics.methodIn(DEVICE, fullMethodName);
-        String replyTo = Topics.replyTo(DEVICE, fullMethodName, callId);
+        String replyTo = Topics.make(Topics.servicesOut(DEVICE, clientId), fullMethodName, callId);
         publishAndPause(clientMqtt, topic, makeValueRequest(callId, 5));
         publishAndPause(clientMqtt, topic, makeValueRequest(callId, 5));
         publishAndPause(clientMqtt, topic, makeValueRequest(callId, 2));
@@ -165,10 +169,14 @@ public class TestOrderAndDuplicates {
     @Test
     public void testOutOfOrderServerStreamWithDuplicates() throws Exception {
 
-        String allServicesIn = Topics.allServicesIn(DEVICE);
-        log.debug("subscribe server at: " + allServicesIn);
+        //Make a mock server that sends back replies out of order when it gets a request
+        //Then verify that the MqttChannel will re-order the replies correctly
 
-        serverMqtt.subscribe(allServicesIn, 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
+        String servicesInFilter = Topics.servicesIn(DEVICE) + "/#";
+        log.debug("subscribe server at: " + servicesInFilter);
+
+
+        serverMqtt.subscribe(servicesInFilter, 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
             final RpcMessage message = RpcMessage.parseFrom(mqttMessage.getPayload());
             log.debug("Received {} with sequence {} message on : {}", new Object[]{message.getMessageCase(), message.getSequence(), topic});
             final String callId = message.getCallId();
@@ -183,7 +191,8 @@ public class TestOrderAndDuplicates {
             publishAndPause(serverMqtt, replyTo, makeValueResponse(callId, 4));
         })).waitForCompletion(20000);
 
-        MqttChannel channel = new MqttChannel(clientMqtt, DEVICE);
+        final String clientId = Id.random();
+        MqttChannel channel = new MqttChannel(clientMqtt, clientId, DEVICE);
         channel.init();
 
         final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub stub = ExampleHelloServiceGrpc.newBlockingStub(channel);
@@ -200,7 +209,7 @@ public class TestOrderAndDuplicates {
             seq = current;
         }
 
-        serverMqtt.unsubscribe(allServicesIn);
+        serverMqtt.unsubscribe(servicesInFilter);
         assertEquals(0, channel.getStats().getActiveCalls());
         channel.close();
 

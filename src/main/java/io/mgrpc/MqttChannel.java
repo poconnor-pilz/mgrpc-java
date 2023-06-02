@@ -31,7 +31,7 @@ public class MqttChannel extends Channel {
 
 
     private static volatile Executor executorSingleton;
-    private static Executor getExecutorInstance(){
+    public static Executor getExecutorInstance(){
         if(executorSingleton == null){
             synchronized (MqttChannel.class){
                 if(executorSingleton == null){
@@ -50,6 +50,8 @@ public class MqttChannel extends Channel {
      */
     private final String serverTopic;
 
+    private final String clientId;
+
     private boolean serverConnected;
 
     private final Map<String, MqttClientCall> clientCallsById = new ConcurrentHashMap<>();
@@ -59,22 +61,83 @@ public class MqttChannel extends Channel {
     private static final int SINGLE_MESSAGE_STREAM = 0;
 
     private final Executor executor;
-    private static final int DEFAULT_QUEUE_SIZE = 100;
+    public static final int DEFAULT_QUEUE_SIZE = 100;
     private final int queueSize;
 
-    public MqttChannel(MqttAsyncClient client, String serverTopic,  int queueSize, Executor executor) {
+    private final String replyTopicPrefix;
+
+    /**
+     * @param client Mqtt client
+     * @param serverTopic The root topic of the server to connect to e.g. "tenant1/device1"
+     *                    Requests will be sent to {serverTopic}/i/svc/{service}/{method}
+     * @param clientId The client id for the channel. Should be unique.
+     * @param replyTopicPrefix  The channel will subscribe for replies on
+     *                          {replyTopicPrefix}/#
+     *                          The channel will receive replies to a specific call on
+     *                          {replyTopicPrefix}/{service}/{method}/{callId}
+     * @param queueSize The size of the message queue for each call's replies
+     * @param executor Executor on which replies will be processed.
+     */
+    public MqttChannel(MqttAsyncClient client, String serverTopic, String clientId,
+                       String replyTopicPrefix, int queueSize, Executor executor) {
         this.client = client;
         this.serverTopic = serverTopic;
+        this.clientId = clientId;
         this.executor = executor;
         this.queueSize = queueSize;
+        if(replyTopicPrefix != null){
+            this.replyTopicPrefix = replyTopicPrefix;
+        } else {
+            this.replyTopicPrefix = Topics.servicesOut(serverTopic, clientId);
+        }
     }
 
-    public MqttChannel(MqttAsyncClient client, String serverTopic, int queueSize) {
-        this(client, serverTopic, queueSize, getExecutorInstance());
+    /**
+     * @param client Mqtt client
+     * @param serverTopic The root topic of the server to connect to e.g. "tenant1/device1"
+     *                    Requests will be sent to {serverTopic}/i/svc/{service}/{method}
+     *                    The channel will subscribe for replies on {serverTopic}/o/svc/{clientId}/#
+     *                    The channel will receive replies to a specific call on
+     *                    {serverTopic}/o/svc/{clientId}/{service}/{method}/{callId}
+     * @param clientId The client id for the channel. Should be unique.
+     * @param queueSize The size of the message queue for each call's replies
+     * @param executor Executor on which replies will be processed.
+     */
+    public MqttChannel(MqttAsyncClient client, String serverTopic, String clientId,
+                       int queueSize, Executor executor) {
+        this.client = client;
+        this.serverTopic = serverTopic;
+        this.clientId = clientId;
+        this.executor = executor;
+        this.queueSize = queueSize;
+        this.replyTopicPrefix = Topics.servicesOut(serverTopic, clientId);
     }
 
-    public MqttChannel(MqttAsyncClient client, String serverTopic) {
-        this(client, serverTopic, DEFAULT_QUEUE_SIZE, getExecutorInstance());
+    /**
+     * @param client Mqtt client
+     * @param serverTopic The root topic of the server to connect to e.g. "tenant1/device1"
+     *                    Requests will be sent to {serverTopic}/i/svc/{service}/{method}
+     *                    The channel will subscribe for replies on {serverTopic}/o/svc/{clientId}/#
+     *                    The channel will receive replies to a specific call on
+     *                    {serverTopic}/o/svc/{clientId}/{service}/{method}/{callId}
+     * @param clientId The client id for the channel. Should be unique.
+     * @param queueSize The size of the message queue for each call's replies
+     */
+    public MqttChannel(MqttAsyncClient client, String serverTopic, String clientId, int queueSize) {
+        this(client, serverTopic, clientId, queueSize, getExecutorInstance());
+    }
+
+    /**
+     * @param client Mqtt client
+     * @param serverTopic The root topic of the server to connect to e.g. "tenant1/device1"
+     *                    Requests will be sent to {serverTopic}/i/svc/{service}/{method}
+     *                    The channel will subscribe for replies on {serverTopic}/o/svc/{clientId}/#
+     *                    The channel will receive replies to a specific call on
+     *                    {serverTopic}/o/svc/{clientId}/{service}/{method}/{callId}
+     * @param clientId The client id for the channel. Should be unique.
+     */
+    public MqttChannel(MqttAsyncClient client, String clientId, String serverTopic) {
+        this(client, serverTopic, clientId, DEFAULT_QUEUE_SIZE, getExecutorInstance());
     }
 
 
@@ -88,8 +151,7 @@ public class MqttChannel extends Channel {
     public void init() throws StatusRuntimeException {
         //TODO: take the code from MqttGrpcClient and refactor it to work here.
 
-        final String replyTo = Topics.allServicesOut(serverTopic);
-        log.debug("Subscribing for responses on: " + replyTo);
+        log.debug("Subscribing for responses on: " + this.replyTopicPrefix + "/#");
 
         final IMqttMessageListener messageListener = new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
             final RpcMessage message = RpcMessage.parseFrom(mqttMessage.getPayload());
@@ -103,7 +165,7 @@ public class MqttChannel extends Channel {
 
         try {
             //This will throw an exception if it times out.
-            client.subscribe(replyTo, 1, messageListener).waitForCompletion(SUBSCRIPTION_TIMEOUT_MILLIS);
+            client.subscribe(this.replyTopicPrefix + "/#", 1, messageListener).waitForCompletion(SUBSCRIPTION_TIMEOUT_MILLIS);
         } catch (MqttException e) {
             throw new StatusRuntimeException(Status.UNAVAILABLE.fromThrowable(e));
         }
@@ -114,7 +176,7 @@ public class MqttChannel extends Channel {
     public void close() {
         try {
             //TODO: make const timeout, cancel all calls? Empty map?
-            client.unsubscribe(Topics.allServicesIn(serverTopic)).waitForCompletion(5000);
+            client.unsubscribe(this.replyTopicPrefix + "/#").waitForCompletion(5000);
         } catch (MqttException e) {
             log.error("Failed to unsub", e);
         }
@@ -291,8 +353,8 @@ public class MqttChannel extends Channel {
             this.methodDescriptor = methodDescriptor;
             this.callOptions = callOptions;
             this.context = Context.current().withCancellation();
-            this.callId = Id.randomId();
-            this.replyTo = Topics.replyTo(serverTopic, methodDescriptor.getFullMethodName(), callId);
+            this.callId = Id.random();
+            this.replyTo = Topics.make(replyTopicPrefix, methodDescriptor.getFullMethodName(), callId);
             messageProcessor = new MessageProcessor(executor, queueSize, this);
         }
 

@@ -13,35 +13,21 @@ public interface Topics {
 
 
 
-    static String methodIn(String server, String service, String method){
-        return make(server, IN , SVC, service, method);
-    }
-
     static String methodIn(String server, String fullMethodName){
         //fullMethodName will be e.g. "helloworld.ExampleHelloService/LotsOfReplies"
         return make(server, IN , SVC, fullMethodName);
     }
 
-    static String allMethodsIn(String server, String service){
-        return make(server, IN , SVC, service, "#");
+
+
+    static String servicesIn(String server){
+        return make(server, IN , SVC);
     }
 
-    static String allServicesIn(String server){
-        return make(server, IN , SVC, "#");
+    static String servicesOut(String server, String clientId){
+        return make(server, OUT , SVC, clientId);
     }
 
-    static String allServicesOut(String server){
-        return make(server, OUT , SVC, "#");
-    }
-
-    static String replyTo(String server, String service, String method, String callId){
-        return make(server, OUT, SVC, service, method, callId);
-    }
-
-    static String replyTo(String server, String fullMethodName, String callId){
-        //fullMethodName will be e.g. "helloworld.ExampleHelloService/LotsOfReplies"
-        return make(server, OUT, SVC, fullMethodName, callId);
-    }
 
     static String out(String server, String ... segments){
         return make(make(server, OUT), make(segments));
