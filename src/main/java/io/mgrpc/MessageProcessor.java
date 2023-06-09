@@ -21,6 +21,9 @@ import java.util.concurrent.PriorityBlockingQueue;
  */
 public class MessageProcessor {
 
+    private static final int UNINITIALISED_SEQUENCE = -1;
+    public static final int INTERRUPT_SEQUENCE = -2;
+
     private static Logger log = LoggerFactory.getLogger(MessageProcessor.class);
     //Messages are ordered by sequence
     private final BlockingQueue<MessageWithTopic> messageQueue = new PriorityBlockingQueue<>(1,
@@ -39,7 +42,7 @@ public class MessageProcessor {
 
     private boolean queueCapacityExceeded = false;
 
-    private int sequenceOfLastProcessedMessage = -1;
+    private int sequenceOfLastProcessedMessage = UNINITIALISED_SEQUENCE;
 
     public MessageProcessor(Executor executor, int queueSize, MessageHandler messageHandler) {
         this.queueSize = queueSize;
@@ -126,8 +129,10 @@ public class MessageProcessor {
             RpcMessage message = messageWithTopic.message;
             final int sequence = message.getSequence();
             if (sequence < 0) {
-                log.error("Message received with sequence less than zero");
-                return;
+                if(sequence != INTERRUPT_SEQUENCE) {
+                    log.error("Non-interrupt message received with sequence less than zero");
+                    return;
+                }
             }
 
             if (recents.contains(sequence)) {
@@ -143,9 +148,11 @@ public class MessageProcessor {
                     }
                     return;
                 }
-                sequenceOfLastProcessedMessage = sequence;
-                //only add to recents if it has not been put back on queue
-                recents.add(sequence);
+                if(sequence != INTERRUPT_SEQUENCE) {
+                    sequenceOfLastProcessedMessage = sequence;
+                    //only add to recents if it has not been put back on queue
+                    recents.add(sequence);
+                }
 
                 log.debug("Handling {} {} {}", new Object[]{message.getMessageCase(), message.getSequence(),
                         Id.shrt(message.getCallId())});
@@ -162,7 +169,11 @@ public class MessageProcessor {
     }
 
     private boolean outOfOrder(int sequence) {
-        if (sequenceOfLastProcessedMessage == -1) {
+        if(sequence == INTERRUPT_SEQUENCE){
+            //An interrupt message should be processed immediately
+            return false;
+        }
+        if (sequenceOfLastProcessedMessage == UNINITIALISED_SEQUENCE) {
             //The first message we receive for a call must have sequence 0 or 1
             if ((sequence != 0) && (sequence != 1)) {
                 return true;

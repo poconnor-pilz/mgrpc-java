@@ -88,21 +88,22 @@ message MetadataEntry{
 }
 
 
-
-//The connection status of a server. Sent to an mqtt LWT topic
-//When a service is connected it sends this message with connected = true
-//Note that many of these messages may be sent (one for each service in a server) but they are idempotent.
-//When a server is disconnected this message will automatically be sent as the topic for the connection status
-//will be the LWT for the server.
+//The server status topic will be
+//  server/o/sys/status
+//The server will send a connected=true message to this when it starts up or if it when a client sends it a message on
+//  server/i/sys/status/prompt
+//The server will send a connected=false message to out/sys/status when it shuts down normally or when it shuts down
+//abnormally via its LWT
+//The client status topic will be
+//  server/i/sys/status/client/{clientId}
+//so that clients can have restrictive policies. But the server will subscribe to
+//  server/i/sys/status/#
+//The client will send a connected=false message to in/sys/status/client/{clientId} when it shuts down normally
+//(or when it shuts down abnormally LWT or some kind of watchdog). The server will then release any resources it
+// has for {clientId}.
+// The Channel will have a waitForServer method which a client can use to determine if a sever is up.
+// This will method will subscribe to server/out/sys/status and send a prompt to server/in/sys/status/prompt
 message ConnectionStatus{
   bool connected = 1;
 }
 
-//A response containing the topic on which connection status will be sent
-//The client will send an empty message to the serviceBaseTopic/connectionStatus and receive this response
-//The client can then listen for ConnectionStatus messages at this topic.
-message ConnectionStatusResponse{
-  bool ok = 2;
-  string connectionStatusTopic = 1;
-  string errorMessage = 3;
-}

@@ -257,21 +257,21 @@ The clientId could also be part of the call context (see security stuff) that an
 
 If the clientId is used then there is no need for a uuid for callID because the call is unique on clientId and callId. So the callId could just be a short number (but we would have to hash on both callId and clientId)
 
-Status will be reported at:
 
-    server/o/sys/all/status
+## Status
 
-The server will be expected to send a 'connected' message to this when it starts up and a 'disconnected' message when it is gracefully shut down. This will also be the LWT topic to which the broker will send a 'disconnected' message when the server is ungracefully disconnected. When the client starts up it can send a message to server/o/sys/all/promptstatus which will cause the server to send status to /status.
-Note that this implies that the server has its own mqtt connection to the broker where it can set the LWT etc. This seems reasonable. If the MqttGrpcServer had to share an mqtt connection then it probably could not dictate the structure of the LWT topic like this. Then we might have to have the MqttGrpcServer implement some interface that would notify it of connects and disconnects etc.
+The server status topic will be
+    server/out/sys/status
+The server will send a connected=true message to this when it starts up or if it when a client sends it a message on
+    server/in/sys/status/prompt
+The server will send a connected=false message to out/sys/status when it shuts down normally or when it shuts down abnormally via its LWT
+The client status topic will be
+    server/in/sys/status/client/{clientId}
+so that clients can have restrictive policies. But the server will subscribe to
+    server/in/sys/status/#
+The client will send a connected=false message to in/sys/status/client/{clientId} when it shuts down normally or when it shuts down abnormally via its LWT. The server will then release any resources it has for {clientId}
 
-
-We will support more than one hello service on a device or wherever but it will need to have a different topic. Note that grpc seems to only support one instance of a particular
-service type on a server (i.e. at a particular domain name - but at least they can do domain names and subdomains whereas we just have one global
-broker so we want to have the facility to put things at a particular topic).
-See the spec here https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md
-Note also that "server" above could contain a few subtopics.
-Should we consider the azure structure of: devices/{device-id}/messages/devicebound/, or devices/{device-id}/messages/devicebound/{property-bag} when there are message properties. {property-bag} contains url-encoded key/value pairs of message properties
-
+The MqttChannel will have a waitForServer(int timeoutMillis) method. This will subscribe to server/out/sys/status and send a prompt to server/in/sys/status/prompt
 
 ## Security/Authentication
 

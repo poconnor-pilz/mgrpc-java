@@ -47,7 +47,7 @@ public class TestCancelAndTimeout {
 
     @BeforeAll
     public static void startClients() throws Exception, IOException {
-        serverMqtt = MqttUtils.makeClient(Topics.systemStatus(DEVICE));
+        serverMqtt = MqttUtils.makeClient(Topics.statusIn(DEVICE));
         clientMqtt = MqttUtils.makeClient(null);
     }
 

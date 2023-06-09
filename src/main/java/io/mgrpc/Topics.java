@@ -9,7 +9,8 @@ public interface Topics {
     String SVC = "svc";
     String SYS = "sys";
     String STATUS = "status";
-    String STATUSPROMPT = "statusprompt";
+    String PROMPT = "prompt";
+    String CLIENT = "client";
 
 
 
@@ -33,13 +34,13 @@ public interface Topics {
         return make(make(server, OUT), make(segments));
     }
 
-    static String systemStatus(String server){
-        return make(server, OUT, SYS, STATUS);
-    }
-    static String systemStatusPrompt(String server){
-        return make(server, OUT, SYS, STATUSPROMPT);
+    static String statusIn(String server){
+        return make(server, IN, SYS, STATUS);
     }
 
+    static String statusOut(String server){
+        return make(server, OUT, SYS, STATUS);
+    }
 
 
     /**

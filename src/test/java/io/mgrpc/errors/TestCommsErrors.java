@@ -1,7 +1,29 @@
 package io.mgrpc.errors;
 
+import io.grpc.*;
+import io.grpc.examples.helloworld.ExampleHelloServiceGrpc;
+import io.grpc.examples.helloworld.HelloReply;
+import io.grpc.examples.helloworld.HelloRequest;
+import io.grpc.stub.ServerCallStreamObserver;
+import io.grpc.stub.StreamObserver;
+import io.mgrpc.Id;
+import io.mgrpc.MqttChannel;
+import io.mgrpc.MqttServer;
+import io.mgrpc.Topics;
+import io.mgrpc.examples.hello.HelloServiceForTest;
+import io.mgrpc.utils.MqttUtils;
+import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class TestCommsErrors {
 
@@ -11,14 +33,126 @@ public class TestCommsErrors {
 
     private static final String SERVICE_NAME = "helloservice";
 
-/*
-    @BeforeAll
-    public static void startBroker() throws MqttException, IOException {
+    private static MqttAsyncClient serverMqtt;
+    private static MqttAsyncClient clientMqtt;
 
-        MqttUtils.startEmbeddedBroker();
+    @BeforeAll
+    public static void startClients() throws Exception {
+        serverMqtt = MqttUtils.makeClient();
+        clientMqtt = MqttUtils.makeClient(null);
+    }
+
+
+    class HelloService extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
+        @Override
+        public void lotsOfReplies(HelloRequest request, StreamObserver<HelloReply> responseObserver) {
+            while(true){
+                responseObserver.onNext(HelloReply.newBuilder().setMessage("hi").build());
+                try {
+                    Thread.sleep(10000);
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        }
+    }
+
+
+    @Test
+    public void testServerNeverConnected() throws Exception{
+
+        MqttChannel channel = new MqttChannel(clientMqtt, Id.random(), DEVICE);
+        channel.init();
+        ErrorObserver errorObserver = new ErrorObserver("obs");
+
+        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
+        HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
+        stub.lotsOfReplies(joe, errorObserver);
+
+        assertTrue(errorObserver.errorLatch.await(5, TimeUnit.SECONDS));
+        assertTrue(errorObserver.exception.getStatus().getCode().value() == Status.UNAVAILABLE.getCode().value());
 
     }
 
+    @Test
+    public void testServerConnectedButNotInitially() throws Exception{
+
+        MqttChannel channel = new MqttChannel(clientMqtt, Id.random(), DEVICE);
+        channel.init();
+        ErrorObserver errorObserver = new ErrorObserver("obs");
+
+        //Allow enough time for the initial ping to the server to fail
+        Thread.sleep(500);
+
+        //The server will send a connected status when it starts up
+        MqttServer server = new MqttServer(serverMqtt, DEVICE);
+        server.init();
+        server.addService(new HelloService());
+
+        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
+        HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
+        stub.lotsOfReplies(joe, errorObserver);
+
+        assertFalse(errorObserver.errorLatch.await(5, TimeUnit.SECONDS));
+
+    }
+
+
+    @Test
+    public void testServerDisconnectedMidstream() throws Exception{
+
+        //Note that in http grpc if the server is shutdown while streaming to a client
+        //then the client will not receive an error. This may be because the server may re-connect and continue
+        //In our case the channel will send an error and all client calls will be cleaned up
+        MqttChannel channel = new MqttChannel(clientMqtt, Id.random(), DEVICE);
+        channel.init();
+        MqttAsyncClient serverMqttWithLwt = MqttUtils.makeClient(Topics.statusOut(DEVICE));
+        MqttServer server = new MqttServer(serverMqttWithLwt, DEVICE);
+        server.init();
+        server.addService(new HelloService());
+
+        ErrorObserver errorObserver = new ErrorObserver("obs");
+
+        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
+        HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
+        stub.lotsOfReplies(joe, errorObserver);
+
+        Thread.sleep(500);
+        server.close();
+        assertTrue(errorObserver.errorLatch.await(5, TimeUnit.SECONDS));
+        assertTrue(errorObserver.exception.getStatus().getCode().value() == Status.UNAVAILABLE.getCode().value());
+
+    }
+
+
+    @Test
+    public void testServerLWTMidstream() throws Exception{
+
+        //Note that in http grpc if the server is shutdown while streaming to a client
+        //then the client will not receive an error. This may be because the server may re-connect and continue
+        //In our case the channel will send an error and all client calls will be cleaned up
+        MqttChannel channel = new MqttChannel(clientMqtt, Id.random(), DEVICE);
+        channel.init();
+        MqttServer server = new MqttServer(serverMqtt,  DEVICE);
+        server.init();
+        server.addService(new HelloService());
+
+        ErrorObserver errorObserver = new ErrorObserver("obs");
+
+        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
+        HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
+        stub.lotsOfReplies(joe, errorObserver);
+
+        Thread.sleep(500);
+        //This should cause an LWT message which will send on the disconnected status
+        serverMqtt.disconnectForcibly();
+        assertTrue(errorObserver.errorLatch.await(5, TimeUnit.SECONDS));
+        assertTrue(errorObserver.exception.getStatus().getCode().value() == Status.UNAVAILABLE.getCode().value());
+
+    }
+
+    
+/*
 
     @Test
     public void testNoInitialClientBrokerConnection() throws MqttException {

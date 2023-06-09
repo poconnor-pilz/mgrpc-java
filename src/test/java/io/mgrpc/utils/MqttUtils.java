@@ -1,5 +1,6 @@
 package io.mgrpc.utils;
 
+
 import io.mgrpc.ConnectionStatus;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
@@ -23,6 +24,11 @@ public class MqttUtils {
         return PROPS;
     }
 
+
+    public static MqttAsyncClient makeClient() throws Exception {
+        String brokerUrl = (String)getProperties().get("brokerUrl");
+        return makeClient(null, brokerUrl);
+    }
 
     public static MqttAsyncClient makeClient(String lwtTopic) throws Exception {
         String brokerUrl = (String)getProperties().get("brokerUrl");

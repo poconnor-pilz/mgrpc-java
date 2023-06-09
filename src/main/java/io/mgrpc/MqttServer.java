@@ -154,12 +154,28 @@ public class MqttServer {
             recentlyRemovedCallIds.values().removeIf(time -> time < tenMinutesAgo);
         }, 10, 10, TimeUnit.MINUTES);
 
+        //If a client prompts this server for a connection notification then send it
+        String promptTopic = Topics.make(Topics.statusIn(this.serverTopic), Topics.PROMPT);
+        client.subscribe(promptTopic, 1, new MqttExceptionLogger((String topic, MqttMessage msg)->{
+            notifyConnected(true);
+        })).waitForCompletion(20000);
+
+        notifyConnected(true);
+    }
+
+    public void notifyConnected(boolean connected) throws MqttException {
+        //Notify any clients that the server has been connected
+        final byte[] connectedMsg = ConnectionStatus.newBuilder().setConnected(connected).build().toByteArray();
+        client.publish(Topics.statusOut(this.serverTopic), new MqttMessage(connectedMsg));
     }
 
     public void close() {
         try {
             //TODO: make const timeout, cancel all calls? Empty map?
             client.unsubscribe(Topics.servicesIn(serverTopic) + "/#").waitForCompletion(5000);
+            final String promptTopic = Topics.make(Topics.statusIn(this.serverTopic), Topics.PROMPT);
+            client.unsubscribe(promptTopic).waitForCompletion(5000);
+            notifyConnected(false);
         } catch (MqttException e) {
             log.error("Failed to unsub", e);
         }

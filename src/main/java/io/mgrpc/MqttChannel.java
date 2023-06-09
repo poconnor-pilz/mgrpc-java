@@ -4,6 +4,7 @@ import com.google.protobuf.ByteString;
 import com.google.protobuf.MessageLite;
 import com.google.protobuf.Parser;
 import io.grpc.*;
+import io.grpc.protobuf.StatusProto;
 import io.grpc.stub.StreamObserver;
 import org.eclipse.paho.client.mqttv3.IMqttMessageListener;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
@@ -13,10 +14,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.*;
 
 public class MqttChannel extends Channel {
@@ -53,10 +51,14 @@ public class MqttChannel extends Channel {
     private final String clientId;
 
     private boolean serverConnected;
+    private boolean initialized = false;
+    private CountDownLatch serverConnectedLatch;
 
     private final Map<String, MqttClientCall> clientCallsById = new ConcurrentHashMap<>();
 
     private final Map<String, List<StreamObserver>> subscribersByTopic = new ConcurrentHashMap<>();
+
+
 
     private static final int SINGLE_MESSAGE_STREAM = 0;
 
@@ -153,7 +155,7 @@ public class MqttChannel extends Channel {
 
         log.debug("Subscribing for responses on: " + this.replyTopicPrefix + "/#");
 
-        final IMqttMessageListener messageListener = new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
+        final IMqttMessageListener replyListener = new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
             final RpcMessage message = RpcMessage.parseFrom(mqttMessage.getPayload());
             final MqttClientCall call = clientCallsById.get(message.getCallId());
             if (call == null) {
@@ -165,18 +167,66 @@ public class MqttChannel extends Channel {
 
         try {
             //This will throw an exception if it times out.
-            client.subscribe(this.replyTopicPrefix + "/#", 1, messageListener).waitForCompletion(SUBSCRIPTION_TIMEOUT_MILLIS);
+            client.subscribe(this.replyTopicPrefix + "/#", 1, replyListener).waitForCompletion(SUBSCRIPTION_TIMEOUT_MILLIS);
         } catch (MqttException e) {
             throw new StatusRuntimeException(Status.UNAVAILABLE.fromThrowable(e));
         }
-        serverConnected = true;
+
+        try {
+            client.subscribe(Topics.statusOut(serverTopic), 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
+                ConnectionStatus status = ConnectionStatus.parseFrom(mqttMessage.getPayload());
+                this.serverConnected = ConnectionStatus.parseFrom(mqttMessage.getPayload()).getConnected();
+                log.debug("Server connected status = " + this.serverConnected);
+                if(!this.serverConnected){
+                    //Clean up all existing calls because the server has been disconnected.
+                    this.onServerDisconnected();
+                }
+                this.serverConnectedLatch.countDown();
+            }));
+            pingServer();
+        } catch (MqttException e) {
+            throw new StatusRuntimeException(Status.UNAVAILABLE.fromThrowable(e));
+        }
+        initialized = true;
+    }
+
+    /**
+     * Send the server an empty message to the prompt topic to prompt it so send back its status
+     * This will be handled in the client.subscribe(Topics.statusOut(serverTopic) set up in this.init()
+     */
+    private void pingServer() {
+        this.serverConnectedLatch = new CountDownLatch(1);
+        //In case the server is already started, prompt it to send its connection status
+        //If it is not started it will send connection status when it does start.
+        String promptTopic = Topics.make(Topics.statusIn(this.serverTopic), Topics.PROMPT);
+        try {
+            client.publish(promptTopic, new MqttMessage());
+        } catch (MqttException e) {
+            throw new StatusRuntimeException(Status.UNAVAILABLE.fromThrowable(e));
+        }
+    }
+
+    private void onServerDisconnected(){
+        //Interrupt the client's call queue with an unavailable status, the call will be cleaned up when it is closed.
+        for(MqttClientCall call: clientCallsById.values()){
+            final Status status = Status.UNAVAILABLE.withDescription("Server disconnected");
+            final com.google.rpc.Status grpcStatus = StatusProto.fromStatusAndTrailers(status, null);
+            RpcMessage rpcMessage = RpcMessage.newBuilder()
+                    .setStatus(grpcStatus)
+                    .setCallId(call.callId)
+                    .setSequence(MessageProcessor.INTERRUPT_SEQUENCE)
+                    .build();
+            call.queueServerMessage(rpcMessage);
+        }
 
     }
+
 
     public void close() {
         try {
             //TODO: make const timeout, cancel all calls? Empty map?
             client.unsubscribe(this.replyTopicPrefix + "/#").waitForCompletion(5000);
+            client.unsubscribe(Topics.statusOut(serverTopic));
         } catch (MqttException e) {
             log.error("Failed to unsub", e);
         }
@@ -421,6 +471,21 @@ public class MqttChannel extends Channel {
         @Override
         public void sendMessage(ReqT message) {
 
+            if (!serverConnected) {
+                //The server should have an mqtt LWT that reliably sends a message when it is disconnected.
+                //Nevertheless send it a ping to make double sure that it is definitely not connected.
+                pingServer();
+                try {
+                    serverConnectedLatch.await(2, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    log.error("", e);
+                }
+                if(!serverConnected) {
+                    this.close(Status.UNAVAILABLE.withDescription("Server is not connected"));
+                }
+            }
+
+
             //Send message to the server
             final RpcMessage.Builder msgBuilder = RpcMessage.newBuilder()
                     .setCallId(callId);
@@ -642,8 +707,8 @@ public class MqttChannel extends Channel {
 
         private void sendToBroker(String fullMethodName, RpcMessage.Builder messageBuilder) throws StatusRuntimeException {
             //fullMethodName will be e.g. "helloworld.ExampleHelloService/LotsOfReplies"
-            if (!serverConnected) {
-                throw new StatusRuntimeException(Status.UNAVAILABLE.withDescription("Server unavailable or init() was not called"));
+            if (!initialized) {
+                throw new StatusRuntimeException(Status.UNAVAILABLE.withDescription("channel.init() was not called"));
             }
             try {
                 final String topic = Topics.methodIn(serverTopic, fullMethodName);

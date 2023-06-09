@@ -49,7 +49,7 @@ public class TestAuthAndMetadata {
         }
 
         final String DEVICE = "device1";
-        MqttServer server = new MqttServer(MqttUtils.makeClient(Topics.systemStatus(DEVICE)), DEVICE);
+        MqttServer server = new MqttServer(MqttUtils.makeClient(Topics.statusIn(DEVICE)), DEVICE);
         server.init();
 
         final ServerServiceDefinition serviceWithIntercept = ServerInterceptors.intercept(
