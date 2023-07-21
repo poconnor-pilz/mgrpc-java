@@ -59,8 +59,15 @@ message Header{
   //Timeout in milliseconds. If not 0 then the server call should timeout after this interval.
   uint64 timeoutMillis = 2;
 
+  //A unique id corresponding to the Channel on the client side. Used to identify ongoing calls that must be
+  //cleaned up when a client is disconnected or closed. See comments about ConnectionStatus below
+  string clientId = 3;
+
   //A list of metadata entries. Metadata can be used for things like security tokens etc.
-  repeated MetadataEntry metadata = 3;
+  //Note that when using security tokens it is important to secure access to topics on the broker
+  //so that only the server has access to topics that could include a message containing a token
+  //(to prevent other clients stealing the tokens and using them)
+  repeated MetadataEntry metadata = 4;
 
   //This can be aquired from MethodDescriptor.toProto()
   //This will only be set for first message in a client stream

@@ -40,7 +40,7 @@ public class TestHello {
 
     @BeforeAll
     public static void startClients() throws Exception {
-        serverMqtt = MqttUtils.makeClient(Topics.statusIn(DEVICE));
+        serverMqtt = MqttUtils.makeClient();
         clientMqtt = MqttUtils.makeClient(null);
     }
 
@@ -87,7 +87,7 @@ public class TestHello {
     @Test
     public void testSayHelloWithCustomReplyTopicPrefix() {
 
-        String replyTopicPrefix = Topics.out(DEVICE, "blah");
+        String replyTopicPrefix = ServerTopics.out(DEVICE, "blah");
         MqttChannel customChannel = new MqttChannel(clientMqtt, DEVICE, Id.random(), replyTopicPrefix,
                 MqttChannel.DEFAULT_QUEUE_SIZE, MqttChannel.getExecutorInstance());
         customChannel.init();

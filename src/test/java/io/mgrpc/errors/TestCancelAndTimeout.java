@@ -13,7 +13,7 @@ import io.grpc.stub.StreamObserver;
 import io.mgrpc.Id;
 import io.mgrpc.MqttChannel;
 import io.mgrpc.MqttServer;
-import io.mgrpc.Topics;
+import io.mgrpc.ServerTopics;
 import io.mgrpc.utils.MqttUtils;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
@@ -47,7 +47,7 @@ public class TestCancelAndTimeout {
 
     @BeforeAll
     public static void startClients() throws Exception, IOException {
-        serverMqtt = MqttUtils.makeClient(Topics.statusIn(DEVICE));
+        serverMqtt = MqttUtils.makeClient();
         clientMqtt = MqttUtils.makeClient(null);
     }
 

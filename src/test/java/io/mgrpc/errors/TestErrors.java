@@ -42,7 +42,7 @@ public class TestErrors {
 
     @BeforeAll
     public static void startClients() throws Exception {
-        serverMqtt = MqttUtils.makeClient(Topics.statusIn(DEVICE));
+        serverMqtt = MqttUtils.makeClient();
         clientMqtt = MqttUtils.makeClient(null);
     }
 

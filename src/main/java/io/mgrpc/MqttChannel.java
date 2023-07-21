@@ -46,7 +46,7 @@ public class MqttChannel extends Channel {
     /**
      * The topic prefix of the server e.g. devices/device1
      */
-    private final String serverTopic;
+    private final ServerTopics serverTopics;
 
     private final String clientId;
 
@@ -83,14 +83,14 @@ public class MqttChannel extends Channel {
     public MqttChannel(MqttAsyncClient client, String serverTopic, String clientId,
                        String replyTopicPrefix, int queueSize, Executor executor) {
         this.client = client;
-        this.serverTopic = serverTopic;
+        this.serverTopics = new ServerTopics(serverTopic);
         this.clientId = clientId;
         this.executor = executor;
         this.queueSize = queueSize;
         if(replyTopicPrefix != null){
             this.replyTopicPrefix = replyTopicPrefix;
         } else {
-            this.replyTopicPrefix = Topics.servicesOut(serverTopic, clientId);
+            this.replyTopicPrefix = serverTopics.servicesOutForClient(clientId);
         }
     }
 
@@ -108,11 +108,11 @@ public class MqttChannel extends Channel {
     public MqttChannel(MqttAsyncClient client, String serverTopic, String clientId,
                        int queueSize, Executor executor) {
         this.client = client;
-        this.serverTopic = serverTopic;
+        this.serverTopics = new ServerTopics(serverTopic);
         this.clientId = clientId;
         this.executor = executor;
         this.queueSize = queueSize;
-        this.replyTopicPrefix = Topics.servicesOut(serverTopic, clientId);
+        this.replyTopicPrefix = serverTopics.servicesOutForClient(clientId);
     }
 
     /**
@@ -173,7 +173,7 @@ public class MqttChannel extends Channel {
         }
 
         try {
-            client.subscribe(Topics.statusOut(serverTopic), 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
+            client.subscribe(serverTopics.status, 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
                 ConnectionStatus status = ConnectionStatus.parseFrom(mqttMessage.getPayload());
                 this.serverConnected = ConnectionStatus.parseFrom(mqttMessage.getPayload()).getConnected();
                 log.debug("Server connected status = " + this.serverConnected);
@@ -191,6 +191,15 @@ public class MqttChannel extends Channel {
     }
 
     /**
+     * Some tests will not use a real server that responds to pings.
+     * The channel will fail to send messages if it thinks that a server is not connected.
+     * This method will fool the channel into thinking that a real server is connected.
+     */
+    public void fakeServerConnectedForTests(){
+        this.serverConnected = true;
+    }
+
+    /**
      * Send the server an empty message to the prompt topic to prompt it so send back its status
      * This will be handled in the client.subscribe(Topics.statusOut(serverTopic) set up in this.init()
      */
@@ -198,9 +207,8 @@ public class MqttChannel extends Channel {
         this.serverConnectedLatch = new CountDownLatch(1);
         //In case the server is already started, prompt it to send its connection status
         //If it is not started it will send connection status when it does start.
-        String promptTopic = Topics.make(Topics.statusIn(this.serverTopic), Topics.PROMPT);
         try {
-            client.publish(promptTopic, new MqttMessage());
+            client.publish(serverTopics.statusPrompt, new MqttMessage());
         } catch (MqttException e) {
             throw new StatusRuntimeException(Status.UNAVAILABLE.fromThrowable(e));
         }
@@ -226,7 +234,7 @@ public class MqttChannel extends Channel {
         try {
             //TODO: make const timeout, cancel all calls? Empty map?
             client.unsubscribe(this.replyTopicPrefix + "/#").waitForCompletion(5000);
-            client.unsubscribe(Topics.statusOut(serverTopic));
+            client.unsubscribe(serverTopics.statusPrompt);
         } catch (MqttException e) {
             log.error("Failed to unsub", e);
         }
@@ -242,7 +250,7 @@ public class MqttChannel extends Channel {
 
     @Override
     public String authority() {
-        return serverTopic;
+        return serverTopics.root;
     }
 
     public Stats getStats(){
@@ -404,7 +412,7 @@ public class MqttChannel extends Channel {
             this.callOptions = callOptions;
             this.context = Context.current().withCancellation();
             this.callId = Id.random();
-            this.replyTo = Topics.make(replyTopicPrefix, methodDescriptor.getFullMethodName(), callId);
+            this.replyTo = ServerTopics.make(replyTopicPrefix, methodDescriptor.getFullMethodName(), callId);
             messageProcessor = new MessageProcessor(executor, queueSize, this);
         }
 
@@ -711,7 +719,7 @@ public class MqttChannel extends Channel {
                 throw new StatusRuntimeException(Status.UNAVAILABLE.withDescription("channel.init() was not called"));
             }
             try {
-                final String topic = Topics.methodIn(serverTopic, fullMethodName);
+                final String topic = serverTopics.methodIn(fullMethodName);
                 final RpcMessage message = messageBuilder.build();
                 log.debug("Sending {} {} {} on :{} ",
                         new Object[]{message.getMessageCase(), message.getSequence(), Id.shrt(message.getCallId()), topic});

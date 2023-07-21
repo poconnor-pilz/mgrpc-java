@@ -4,13 +4,11 @@ import io.grpc.*;
 import io.grpc.examples.helloworld.ExampleHelloServiceGrpc;
 import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
-import io.grpc.stub.ServerCallStreamObserver;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.Id;
 import io.mgrpc.MqttChannel;
 import io.mgrpc.MqttServer;
-import io.mgrpc.Topics;
-import io.mgrpc.examples.hello.HelloServiceForTest;
+import io.mgrpc.ServerTopics;
 import io.mgrpc.utils.MqttUtils;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.junit.jupiter.api.BeforeAll;
@@ -18,8 +16,6 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -106,7 +102,7 @@ public class TestCommsErrors {
         //In our case the channel will send an error and all client calls will be cleaned up
         MqttChannel channel = new MqttChannel(clientMqtt, Id.random(), DEVICE);
         channel.init();
-        MqttAsyncClient serverMqttWithLwt = MqttUtils.makeClient(Topics.statusOut(DEVICE));
+        MqttAsyncClient serverMqttWithLwt = MqttUtils.makeClient(new ServerTopics(DEVICE).status);
         MqttServer server = new MqttServer(serverMqttWithLwt, DEVICE);
         server.init();
         server.addService(new HelloService());

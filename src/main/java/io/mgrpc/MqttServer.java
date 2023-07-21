@@ -28,6 +28,7 @@ public class MqttServer {
     private final static int CANCELLED_CODE = Status.CANCELLED.getCode().value();
 
 
+
     private static volatile Executor executorSingleton;
 
     private static Executor getExecutorInstance() {
@@ -58,7 +59,7 @@ public class MqttServer {
      */
     final ConcurrentHashMap<String, Long> recentlyRemovedCallIds = new ConcurrentHashMap<>();
 
-    private final String serverTopic;
+    private final ServerTopics serverTopics;
     private final Executor executor;
     private static final int DEFAULT_QUEUE_SIZE = 100;
     private final int queueSize;
@@ -78,7 +79,7 @@ public class MqttServer {
      */
     public MqttServer(MqttAsyncClient client, String serverTopic, int queueSize, Executor executor) {
         this.client = client;
-        this.serverTopic = serverTopic;
+        this.serverTopics = new ServerTopics(serverTopic);
         this.executor = executor;
         this.queueSize = queueSize;
     }
@@ -112,10 +113,10 @@ public class MqttServer {
     }
 
     public void init() throws MqttException {
-        String servicesInFilter = Topics.servicesIn(serverTopic) + "/#";
-        log.debug("subscribe server at: " + servicesInFilter);
 
-        client.subscribe(servicesInFilter, 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
+        log.debug("subscribe server at: " + serverTopics.servicesIn);
+
+        client.subscribe(serverTopics.servicesIn, 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
             //We use an MqttExceptionLogger here because if a we throw an exception in the subscribe handler
             //it will disconnect the mqtt client
             final RpcMessage message = RpcMessage.parseFrom(mqttMessage.getPayload());
@@ -155,10 +156,21 @@ public class MqttServer {
         }, 10, 10, TimeUnit.MINUTES);
 
         //If a client prompts this server for a connection notification then send it
-        String promptTopic = Topics.make(Topics.statusIn(this.serverTopic), Topics.PROMPT);
-        client.subscribe(promptTopic, 1, new MqttExceptionLogger((String topic, MqttMessage msg)->{
+        client.subscribe(serverTopics.statusPrompt, 1, new MqttExceptionLogger((String topic, MqttMessage msg)->{
             notifyConnected(true);
         })).waitForCompletion(20000);
+
+        try {
+            client.subscribe(serverTopics.statusClients, 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
+                //If the client sends any message to this topic it means that it has disconnected
+                //The client will send the message to {serverTopic}/in/sys/status/client/{clientId}
+                //So we need to parse the clientId from the topic
+                String clientId = topic.substring(topic.lastIndexOf('/') + 1);
+                onClientDisconnected(clientId);
+            }));
+        } catch (MqttException e) {
+            throw new StatusRuntimeException(Status.UNAVAILABLE.fromThrowable(e));
+        }
 
         notifyConnected(true);
     }
@@ -166,20 +178,35 @@ public class MqttServer {
     public void notifyConnected(boolean connected) throws MqttException {
         //Notify any clients that the server has been connected
         final byte[] connectedMsg = ConnectionStatus.newBuilder().setConnected(connected).build().toByteArray();
-        client.publish(Topics.statusOut(this.serverTopic), new MqttMessage(connectedMsg));
+        client.publish(serverTopics.status, new MqttMessage(connectedMsg));
     }
 
+    private void onClientDisconnected(String clientId){
+        //Interrupt the call queue with an unavailable status, the call will be cleaned up when it is closed.
+//        for(MqttChannel.MqttClientCall call: clientCallsById.values()){
+//            final Status status = Status.UNAVAILABLE.withDescription("Server disconnected");
+//            final com.google.rpc.Status grpcStatusUnavailable = StatusProto.fromStatusAndTrailers(status, null);
+//            RpcMessage rpcMessage = RpcMessage.newBuilder()
+//                    .setStatus(grpcStatusUnavailable)
+//                    .setCallId(call.callId)
+//                    .setSequence(MessageProcessor.INTERRUPT_SEQUENCE)
+//                    .build();
+//            call.queueServerMessage(rpcMessage);
+//        }
+
+    }
     public void close() {
         try {
             //TODO: make const timeout, cancel all calls? Empty map?
-            client.unsubscribe(Topics.servicesIn(serverTopic) + "/#").waitForCompletion(5000);
-            final String promptTopic = Topics.make(Topics.statusIn(this.serverTopic), Topics.PROMPT);
-            client.unsubscribe(promptTopic).waitForCompletion(5000);
+            client.unsubscribe(serverTopics.servicesIn).waitForCompletion(5000);
+            client.unsubscribe(serverTopics.statusPrompt).waitForCompletion(5000);
+            client.unsubscribe(serverTopics.statusClients).waitForCompletion(5000);
             notifyConnected(false);
         } catch (MqttException e) {
             log.error("Failed to unsub", e);
         }
     }
+
 
     private void sendStatus(String replyTo, String callId, int sequence, Status status) {
         final com.google.rpc.Status grpcStatus = StatusProto.fromStatusAndTrailers(status, null);

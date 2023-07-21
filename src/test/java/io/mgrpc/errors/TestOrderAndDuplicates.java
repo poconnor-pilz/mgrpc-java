@@ -40,7 +40,7 @@ public class TestOrderAndDuplicates {
 
     @BeforeAll
     public static void startClients() throws Exception{
-        serverMqtt = MqttUtils.makeClient(Topics.statusIn(DEVICE));
+        serverMqtt = MqttUtils.makeClient();
         clientMqtt = MqttUtils.makeClient(null);
     }
 
@@ -87,9 +87,10 @@ public class TestOrderAndDuplicates {
         String fullMethodName = "helloworld.ExampleHelloService/LotsOfGreetings";
         String callId = Id.random();
         String clientId = Id.random();
-        String topic = Topics.methodIn(DEVICE, fullMethodName);
+        ServerTopics serverTopics = new ServerTopics(DEVICE);
+        String topic = serverTopics.methodIn(fullMethodName);
         log.debug(topic);
-        String replyTo = Topics.make(Topics.servicesOut(DEVICE, clientId), fullMethodName, callId);
+        String replyTo = ServerTopics.make(serverTopics.servicesOutForClient(clientId), fullMethodName, callId);
         log.debug(replyTo);
         publishAndPause(clientMqtt, topic, makeStartRequest(callId, 1, replyTo));
         publishAndPause(clientMqtt, topic, makeValueRequest(callId, 5));
@@ -140,8 +141,9 @@ public class TestOrderAndDuplicates {
         String fullMethodName = "helloworld.ExampleHelloService/LotsOfGreetings";
         String callId = Id.random();
         String clientId = Id.random();
-        String topic = Topics.methodIn(DEVICE, fullMethodName);
-        String replyTo = Topics.make(Topics.servicesOut(DEVICE, clientId), fullMethodName, callId);
+        ServerTopics serverTopics = new ServerTopics(DEVICE);
+        String topic = serverTopics.methodIn(fullMethodName);
+        String replyTo = ServerTopics.make(serverTopics.servicesOutForClient(clientId), fullMethodName, callId);
         publishAndPause(clientMqtt, topic, makeValueRequest(callId, 5));
         publishAndPause(clientMqtt, topic, makeValueRequest(callId, 5));
         publishAndPause(clientMqtt, topic, makeValueRequest(callId, 2));
@@ -172,7 +174,7 @@ public class TestOrderAndDuplicates {
         //Make a mock server that sends back replies out of order when it gets a request
         //Then verify that the MqttChannel will re-order the replies correctly
 
-        String servicesInFilter = Topics.servicesIn(DEVICE) + "/#";
+        String servicesInFilter = new ServerTopics(DEVICE).servicesIn;
         log.debug("subscribe server at: " + servicesInFilter);
 
 
@@ -194,6 +196,7 @@ public class TestOrderAndDuplicates {
         final String clientId = Id.random();
         MqttChannel channel = new MqttChannel(clientMqtt, clientId, DEVICE);
         channel.init();
+        channel.fakeServerConnectedForTests();
 
         final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub stub = ExampleHelloServiceGrpc.newBlockingStub(channel);
         HelloRequest request = HelloRequest.newBuilder().setName("test").build();

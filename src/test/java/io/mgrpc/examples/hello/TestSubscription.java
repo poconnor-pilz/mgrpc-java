@@ -7,7 +7,7 @@ import io.grpc.stub.StreamObserver;
 import io.mgrpc.Id;
 import io.mgrpc.MqttChannel;
 import io.mgrpc.MqttServer;
-import io.mgrpc.Topics;
+import io.mgrpc.ServerTopics;
 import io.mgrpc.utils.MqttUtils;
 import io.mgrpc.utils.ToList;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
@@ -40,7 +40,7 @@ public class TestSubscription {
 
     @BeforeAll
     public static void startClients() throws Exception {
-        serverMqtt = MqttUtils.makeClient(Topics.statusIn(DEVICE));
+        serverMqtt = MqttUtils.makeClient();
         clientMqtt = MqttUtils.makeClient(null);
     }
 
@@ -109,8 +109,8 @@ public class TestSubscription {
             }
         }
 
-        final String responseTopic1 = Topics.out(DEVICE,"atesttopic");
-        final String responseTopic2 = Topics.out(DEVICE,"atesttopic2");
+        final String responseTopic1 = ServerTopics.out(DEVICE,"atesttopic");
+        final String responseTopic2 = ServerTopics.out(DEVICE,"atesttopic2");
 
 
 

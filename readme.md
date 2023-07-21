@@ -173,7 +173,7 @@ where,
 In general if the client has permissions to publish to server/i/service/method then it should be able to get permissions to subscribe to
 server/o/{clientId}/#
 However the MqttChannel can also be parameterised with a replyTopicPrefix for flexibility. 
-In this case replies for that client will be sent to: 
+In this case all replies for that MqttChannel will be sent to: 
 
     {replyToPrefix}/{service}/{method}/{callId}
 
@@ -269,7 +269,7 @@ The client status topic will be
     server/in/sys/status/client/{clientId}
 so that clients can have restrictive policies. But the server will subscribe to
     server/in/sys/status/#
-The client will send a connected=false message to in/sys/status/client/{clientId} when it shuts down normally or when it shuts down abnormally via its LWT. The server will then release any resources it has for {clientId}
+The client will send an empty message to in/sys/status/client/{clientId} when it shuts down normally or when it shuts down abnormally via its LWT. The server will then release any resources it has for {clientId} and send a cancel message to any call handlers.
 
 The MqttChannel will have a waitForServer(int timeoutMillis) method. This will subscribe to server/out/sys/status and send a prompt to server/in/sys/status/prompt
 
@@ -348,6 +348,8 @@ See StatusProto.java#fromThrowable. This assumes that somewhere in the stack is 
 
 
 Mqtt connection error handling:
+
+***** See notes under Status heading above*****
 The mgClient should send an initial connection request to the service. If it gets a response then the service will send back its lwt topic and the mgClient can listen for it and then send errors to streams. If it gets no response within a timeout then it assumes that the service is not registered or the server is not running (although if we didn't use timeouts we could distinguish between these cases - but there are other ways to distinguish and anyway in most cases we will know that it is the server that is down because we will know that that server always has those services running - anyway we can provide another way later to get a list of services from a server and their status etc.)  The mgClient remains subscribed to this topic and listens for 'on'/'off' in the status message. In the intitial connection request the mgClient can send it's lwt to the server and the server can send errors to client streams. If this becomes very complicated then we could just time out client streams instead. i.e. if we don't receive a message in a client stream for some time then timeout the stream and fail. This could be much simpler and may match with practice i.e. In practice a client stream should be rapid. It's not for sending rare requests. For rare requests the client should just send single requests. If the server wants to 'watch' something on the client then it should call a service on the client. Along with this for our situtation the client should rarely lose contact with the broker as the client and broker run on the cloud. The device is very different in this regard.
 There is a difference between the client noticing that it itself has been disconnected from the mqtt broker and telling the server that it has been disconnected. We should maybe handle the start case? We will have to handle the start case on the server anyway so we could use similar code.
 The mqtt connection will need to notify a number of entities whenever it is disconnected/re-connected.

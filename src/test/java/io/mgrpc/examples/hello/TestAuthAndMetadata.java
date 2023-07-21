@@ -13,7 +13,7 @@ import io.jsonwebtoken.SignatureAlgorithm;
 import io.mgrpc.Id;
 import io.mgrpc.MqttChannel;
 import io.mgrpc.MqttServer;
-import io.mgrpc.Topics;
+import io.mgrpc.ServerTopics;
 import io.mgrpc.utils.MqttUtils;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
@@ -49,7 +49,7 @@ public class TestAuthAndMetadata {
         }
 
         final String DEVICE = "device1";
-        MqttServer server = new MqttServer(MqttUtils.makeClient(Topics.statusIn(DEVICE)), DEVICE);
+        MqttServer server = new MqttServer(MqttUtils.makeClient(), DEVICE);
         server.init();
 
         final ServerServiceDefinition serviceWithIntercept = ServerInterceptors.intercept(

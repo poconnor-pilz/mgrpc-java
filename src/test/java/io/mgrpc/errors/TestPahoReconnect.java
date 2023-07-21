@@ -1,6 +1,6 @@
 package io.mgrpc.errors;
 
-import io.mgrpc.Topics;
+import io.mgrpc.ServerTopics;
 import org.eclipse.paho.client.mqttv3.*;
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
 import org.slf4j.Logger;
@@ -20,8 +20,6 @@ public class TestPahoReconnect {
     //@Test
     public void tryReconnect() throws Exception{
 
-
-        String lwtTopic = Topics.statusIn(DEVICE);
 
         //TODO: Got rid of embedded broker. Change this to use a socket that we can break.
         //MqttUtils.startEmbeddedBroker();
