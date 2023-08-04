@@ -5,13 +5,17 @@ import io.mgrpc.ConnectionStatus;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import javax.net.SocketFactory;
 import java.io.InputStream;
 import java.util.Properties;
 
 
 public class MqttUtils {
 
+    private static Logger log = LoggerFactory.getLogger(MqttUtils.class);
 
 
     private static Properties PROPS = null;
@@ -37,7 +41,17 @@ public class MqttUtils {
 
     public static MqttAsyncClient makeClient(String lwtTopic, String brokerUrl) throws Exception {
 
+        return makeClient(lwtTopic, brokerUrl, null);
+    }
 
+    public static MqttAsyncClient makeClient(String lwtTopic, SocketFactory socketFactory) throws Exception {
+
+        String brokerUrl = (String)getProperties().get("brokerUrl");
+        return makeClient(lwtTopic, brokerUrl, socketFactory);
+    }
+
+
+    public static MqttAsyncClient makeClient(String lwtTopic, String brokerUrl, SocketFactory socketFactory) throws Exception {
         final MqttAsyncClient client;
         client = new MqttAsyncClient(
                 brokerUrl,
@@ -46,11 +60,19 @@ public class MqttUtils {
         MqttConnectOptions mqttConnectOptions = new MqttConnectOptions();
         mqttConnectOptions.setMaxInflight(1000);
 
+        if(socketFactory != null){
+            mqttConnectOptions.setSocketFactory(socketFactory);
+        }
+
         if(lwtTopic != null){
+            log.debug("Setting LWT to: " + lwtTopic);
             final byte[] lwtMessage = ConnectionStatus.newBuilder().setConnected(false).build().toByteArray();
-            mqttConnectOptions.setWill(lwtTopic, lwtMessage, 1, false);
+            mqttConnectOptions.setWill(lwtTopic, lwtMessage, 1, true);
         }
         client.connect(mqttConnectOptions).waitForCompletion();
         return client;
+
     }
+
+
 }

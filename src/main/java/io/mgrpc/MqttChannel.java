@@ -72,6 +72,27 @@ public class MqttChannel extends Channel {
      * @param client Mqtt client
      * @param serverTopic The root topic of the server to connect to e.g. "tenant1/device1"
      *                    Requests will be sent to {serverTopic}/i/svc/{service}/{method}
+     *                    The channel will subscribe for replies on {serverTopic}/o/svc/{clientId}/#
+     *                    The channel will receive replies to a specific call on
+     *                    {serverTopic}/o/svc/{clientId}/{service}/{method}/{callId}
+     * @param clientId The client id for the channel. Should be unique.
+     * @param queueSize The size of the message queue for each call's replies
+     * @param executor Executor on which replies will be processed.
+     */
+    public MqttChannel(MqttAsyncClient client, String serverTopic, String clientId,
+                       int queueSize, Executor executor) {
+        this.client = client;
+        this.serverTopics = new ServerTopics(serverTopic);
+        this.clientId = clientId;
+        this.executor = executor;
+        this.queueSize = queueSize;
+        this.replyTopicPrefix = serverTopics.servicesOutForClient(clientId);
+    }
+
+    /**
+     * @param client Mqtt client
+     * @param serverTopic The root topic of the server to connect to e.g. "tenant1/device1"
+     *                    Requests will be sent to {serverTopic}/i/svc/{service}/{method}
      * @param clientId The client id for the channel. Should be unique.
      * @param replyTopicPrefix  The channel will subscribe for replies on
      *                          {replyTopicPrefix}/#
@@ -94,26 +115,6 @@ public class MqttChannel extends Channel {
         }
     }
 
-    /**
-     * @param client Mqtt client
-     * @param serverTopic The root topic of the server to connect to e.g. "tenant1/device1"
-     *                    Requests will be sent to {serverTopic}/i/svc/{service}/{method}
-     *                    The channel will subscribe for replies on {serverTopic}/o/svc/{clientId}/#
-     *                    The channel will receive replies to a specific call on
-     *                    {serverTopic}/o/svc/{clientId}/{service}/{method}/{callId}
-     * @param clientId The client id for the channel. Should be unique.
-     * @param queueSize The size of the message queue for each call's replies
-     * @param executor Executor on which replies will be processed.
-     */
-    public MqttChannel(MqttAsyncClient client, String serverTopic, String clientId,
-                       int queueSize, Executor executor) {
-        this.client = client;
-        this.serverTopics = new ServerTopics(serverTopic);
-        this.clientId = clientId;
-        this.executor = executor;
-        this.queueSize = queueSize;
-        this.replyTopicPrefix = serverTopics.servicesOutForClient(clientId);
-    }
 
     /**
      * @param client Mqtt client
@@ -216,6 +217,8 @@ public class MqttChannel extends Channel {
 
     private void onServerDisconnected(){
         //Interrupt the client's call queue with an unavailable status, the call will be cleaned up when it is closed.
+        //We could just call close on the call directly but we want the call to finish processing whatever
+        //message it has first and if we put it on the queue it means we don't have to worry about thread safety.
         for(MqttClientCall call: clientCallsById.values()){
             final Status status = Status.UNAVAILABLE.withDescription("Server disconnected");
             final com.google.rpc.Status grpcStatus = StatusProto.fromStatusAndTrailers(status, null);
@@ -233,6 +236,14 @@ public class MqttChannel extends Channel {
     public void close() {
         try {
             //TODO: make const timeout, cancel all calls? Empty map?
+
+            //Notify that this client has been closed so that any server with ongoing calls can cancel them and
+            //release resources.
+            String statusTopic = ServerTopics.make(serverTopics.statusClients, this.clientId);
+            log.debug("Closing channel. Sending notification on " + statusTopic);
+            final byte[] connectedMsg = ConnectionStatus.newBuilder().setConnected(false).build().toByteArray();
+            client.publish(statusTopic , new MqttMessage(connectedMsg));
+
             client.unsubscribe(this.replyTopicPrefix + "/#").waitForCompletion(5000);
             client.unsubscribe(serverTopics.statusPrompt);
         } catch (MqttException e) {
@@ -512,6 +523,7 @@ public class MqttChannel extends Channel {
             if (sequence == 0) {
                 //This is the start of the call so make a Start message with a header
                 Header.Builder header = Header.newBuilder();
+                header.setClientId(clientId);
                 if(effectiveDeadline != null){
                     header.setTimeoutMillis(effectiveDeadline.timeRemaining(TimeUnit.MILLISECONDS));
                 }

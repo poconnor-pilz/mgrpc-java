@@ -46,7 +46,7 @@ public class Id {
     }
 
     /**
-     * Return the first 7 chars of id for short debug Strings
+     * Return the first 7 chars of id for short debug Strings (can't call this method "short" because it's a keyword)
      */
     public static String shrt(final String id){
         final int shortLen = 7;

@@ -114,9 +114,10 @@ public class MqttServer {
 
     public void init() throws MqttException {
 
-        log.debug("subscribe server at: " + serverTopics.servicesIn);
+        final String servicesInFilter = serverTopics.servicesIn + "/#";
+        log.debug("subscribe server at: " + servicesInFilter);
 
-        client.subscribe(serverTopics.servicesIn, 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
+        client.subscribe(servicesInFilter, 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
             //We use an MqttExceptionLogger here because if a we throw an exception in the subscribe handler
             //it will disconnect the mqtt client
             final RpcMessage message = RpcMessage.parseFrom(mqttMessage.getPayload());
@@ -132,7 +133,7 @@ public class MqttServer {
             //A message could arrive for a removed call in the case where the server was disconnected
             //but the client didn't detect this and is still sending messages for a previous call.
             //This could also occur when the call's queue has reached its limit but the client hasn't
-            //got the error message yet.
+            //received the error message yet.
             if (recentlyRemovedCallIds.contains(callId)) {
                 log.warn("Message received for removed call {}. Ignoring", Id.shrt(callId));
                 return;
@@ -161,10 +162,11 @@ public class MqttServer {
         })).waitForCompletion(20000);
 
         try {
-            client.subscribe(serverTopics.statusClients, 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
+            client.subscribe(serverTopics.statusClients + "/#", 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
                 //If the client sends any message to this topic it means that it has disconnected
                 //The client will send the message to {serverTopic}/in/sys/status/client/{clientId}
                 //So we need to parse the clientId from the topic
+                log.debug("Received client disconnected notification on " + topic);
                 String clientId = topic.substring(topic.lastIndexOf('/') + 1);
                 onClientDisconnected(clientId);
             }));
@@ -181,26 +183,32 @@ public class MqttServer {
         client.publish(serverTopics.status, new MqttMessage(connectedMsg));
     }
 
-    private void onClientDisconnected(String clientId){
-        //Interrupt the call queue with an unavailable status, the call will be cleaned up when it is closed.
-//        for(MqttChannel.MqttClientCall call: clientCallsById.values()){
-//            final Status status = Status.UNAVAILABLE.withDescription("Server disconnected");
-//            final com.google.rpc.Status grpcStatusUnavailable = StatusProto.fromStatusAndTrailers(status, null);
-//            RpcMessage rpcMessage = RpcMessage.newBuilder()
-//                    .setStatus(grpcStatusUnavailable)
-//                    .setCallId(call.callId)
-//                    .setSequence(MessageProcessor.INTERRUPT_SEQUENCE)
-//                    .build();
-//            call.queueServerMessage(rpcMessage);
-//        }
-
+    private void onClientDisconnected(String clientId) {
+        //When a client is disconnected we need to cancel all calls for it so that they get cleaned up.
+        for (String callId : this.handlersByCallId.keySet()) {
+            MgMessageHandler messageHandler = this.handlersByCallId.get(callId);
+            String foundClientId = messageHandler.getClientId();
+            if (foundClientId != null && foundClientId.equals(clientId)) {
+                final Status status = Status.CANCELLED.withDescription("Client disconnected");
+                final com.google.rpc.Status grpcStatus = StatusProto.fromStatusAndTrailers(status, null);
+                RpcMessage rpcMessage = RpcMessage.newBuilder()
+                        .setStatus(grpcStatus)
+                        .setCallId(callId)
+                        .setSequence(MessageProcessor.INTERRUPT_SEQUENCE)
+                        .build();
+                //Note that because this is a cancel it will get processed immediately by queueClientMessage
+                //so setting INTERRUPT_SEQUENCE above was strictly unnecessary.
+                messageHandler.queueClientMessage(new MessageProcessor.MessageWithTopic(rpcMessage));
+            }
+        }
     }
+
     public void close() {
         try {
             //TODO: make const timeout, cancel all calls? Empty map?
-            client.unsubscribe(serverTopics.servicesIn).waitForCompletion(5000);
+            client.unsubscribe(serverTopics.servicesIn + "/#").waitForCompletion(5000);
             client.unsubscribe(serverTopics.statusPrompt).waitForCompletion(5000);
-            client.unsubscribe(serverTopics.statusClients).waitForCompletion(5000);
+            client.unsubscribe(serverTopics.statusClients + "/#").waitForCompletion(5000);
             notifyConnected(false);
         } catch (MqttException e) {
             log.error("Failed to unsub", e);
@@ -255,6 +263,7 @@ public class MqttServer {
 
     private class MgMessageHandler implements MessageProcessor.MessageHandler {
         private final String callId;
+        private String clientId;
 
         private MqttServerCall serverCall;
 
@@ -270,6 +279,10 @@ public class MqttServer {
         private MgMessageHandler(String callId, Executor executor, int queueSize) {
             this.callId = callId;
             messageProcessor = new MessageProcessor(executor, queueSize, this);
+        }
+
+        public String getClientId(){
+            return clientId;
         }
 
         public void queueClientMessage(MessageProcessor.MessageWithTopic messageWithTopic) {
@@ -356,6 +369,10 @@ public class MqttServer {
 
                 serverCall = new MqttServerCall<>(client, serverMethodDefinition.getMethodDescriptor(),
                         header, callId);
+
+                //Extract the clientId from the header. It may be used later to find calls for a
+                //particular client that need to be cleaned up because the client has disconnected.
+                this.clientId = header.getClientId();
 
                 serverCall.start(serverCallHandler);
 

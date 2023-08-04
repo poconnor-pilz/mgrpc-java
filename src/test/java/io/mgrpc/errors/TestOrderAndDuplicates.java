@@ -174,7 +174,7 @@ public class TestOrderAndDuplicates {
         //Make a mock server that sends back replies out of order when it gets a request
         //Then verify that the MqttChannel will re-order the replies correctly
 
-        String servicesInFilter = new ServerTopics(DEVICE).servicesIn;
+        String servicesInFilter = new ServerTopics(DEVICE).servicesIn + "/#";
         log.debug("subscribe server at: " + servicesInFilter);
 
 

@@ -6,14 +6,11 @@ import io.grpc.StatusRuntimeException;
 import io.grpc.examples.helloworld.ExampleHelloServiceGrpc;
 import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
-import io.grpc.stub.ClientCallStreamObserver;
-import io.grpc.stub.ClientResponseObserver;
 import io.grpc.stub.ServerCallStreamObserver;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.Id;
 import io.mgrpc.MqttChannel;
 import io.mgrpc.MqttServer;
-import io.mgrpc.ServerTopics;
 import io.mgrpc.utils.MqttUtils;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
@@ -22,6 +19,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.lang.invoke.MethodHandles;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -32,7 +30,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class TestCancelAndTimeout {
 
 
-    private static final Logger log = LoggerFactory.getLogger(TestCancelAndTimeout.class);
+    private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
+
 
 
     private static MqttAsyncClient serverMqtt;
@@ -81,69 +80,6 @@ public class TestCancelAndTimeout {
     public void checkForLeaks(int numActiveCalls){
         assertEquals(numActiveCalls, channel.getStats().getActiveCalls());
         assertEquals(numActiveCalls, server.getStats().getActiveCalls());
-    }
-
-    class CancelableObserver implements ClientResponseObserver<HelloRequest, HelloReply> {
-        private ClientCallStreamObserver requestStream;
-        public final CountDownLatch latch = new CountDownLatch(1);
-        public StatusRuntimeException exception = null;
-
-
-        @Override
-        public void beforeStart(ClientCallStreamObserver reqStream) {
-            requestStream = reqStream;
-        }
-
-        public void cancel(String message) {
-            log.debug("CancelableObserver cancel()");
-            requestStream.cancel(message, null);
-        }
-
-        @Override
-        public void onNext(HelloReply value) {
-            log.debug("next");
-        }
-
-        @Override
-        public void onError(Throwable t) {
-            log.debug("CancelableObserver onError()", t);
-            this.exception = (StatusRuntimeException) t;
-            latch.countDown();
-        }
-
-        @Override
-        public void onCompleted() {
-            log.debug("CancelableObserver onCompleted()");
-        }
-
-    }
-
-    class ListenForCancel extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
-        public ErrorObserver errorObserver = new ErrorObserver("server");
-        public CountDownLatch contextListenerCancelled = new CountDownLatch(1);
-        final CountDownLatch serverCancelHandlerCalled = new CountDownLatch(1);
-
-        @Override
-        public StreamObserver<HelloRequest> bidiHello(StreamObserver<HelloReply> responseObserver) {
-
-            final Context current = Context.current();
-            current.addListener(new Context.CancellationListener() {
-                @Override
-                public void cancelled(Context context) {
-                    contextListenerCancelled.countDown();
-                    log.debug("Context CancellationListener called");
-                }
-            }, Executors.newSingleThreadExecutor());
-
-
-            ServerCallStreamObserver<HelloReply> serverObserver = (ServerCallStreamObserver<HelloReply>) responseObserver;
-            serverObserver.setOnCancelHandler(() -> {
-                log.debug("ServerCallStreamObserver cancel handler called");
-                serverCancelHandlerCalled.countDown();
-                log.debug("Latch toggled");
-            });
-            return this.errorObserver;
-        }
     }
 
 

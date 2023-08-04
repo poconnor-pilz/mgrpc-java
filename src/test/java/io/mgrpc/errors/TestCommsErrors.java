@@ -10,16 +10,19 @@ import io.mgrpc.MqttChannel;
 import io.mgrpc.MqttServer;
 import io.mgrpc.ServerTopics;
 import io.mgrpc.utils.MqttUtils;
+import org.eclipse.paho.client.mqttv3.IMqttMessageListener;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
+import org.eclipse.paho.client.mqttv3.MqttMessage;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.net.SocketFactory;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class TestCommsErrors {
 
@@ -57,6 +60,8 @@ public class TestCommsErrors {
     @Test
     public void testServerNeverConnected() throws Exception{
 
+        //Verify that if a server is not connected then a call will fail with an UNAVAILABLE error
+
         MqttChannel channel = new MqttChannel(clientMqtt, Id.random(), DEVICE);
         channel.init();
         ErrorObserver errorObserver = new ErrorObserver("obs");
@@ -72,6 +77,9 @@ public class TestCommsErrors {
 
     @Test
     public void testServerConnectedButNotInitially() throws Exception{
+
+        //Verify that a call succeeds even if the server is connected sometime after the channel
+        //but before the call is made
 
         MqttChannel channel = new MqttChannel(clientMqtt, Id.random(), DEVICE);
         channel.init();
@@ -95,7 +103,12 @@ public class TestCommsErrors {
 
 
     @Test
-    public void testServerDisconnectedMidstream() throws Exception{
+    public void testServerClosedMidstream() throws Exception{
+
+        //Close a server while it is streaming responses
+        //The broker should send an LWT message. The channel should react to this by sending an UNVAILABLE error
+        //to the ongoing call on the client side.
+
 
         //Note that in http grpc if the server is shutdown while streaming to a client
         //then the client will not receive an error. This may be because the server may re-connect and continue
@@ -124,12 +137,19 @@ public class TestCommsErrors {
     @Test
     public void testServerLWTMidstream() throws Exception{
 
+        //Disconnect a server while it is streaming responses
+        //The broker should send an LWT message. The channel should react to this by sending an UNVAILABLE error
+        //to the ongoing call on the client side.
+
         //Note that in http grpc if the server is shutdown while streaming to a client
         //then the client will not receive an error. This may be because the server may re-connect and continue
         //In our case the channel will send an error and all client calls will be cleaned up
         MqttChannel channel = new MqttChannel(clientMqtt, Id.random(), DEVICE);
         channel.init();
-        MqttServer server = new MqttServer(serverMqtt,  DEVICE);
+        final String statusTopic = new ServerTopics(DEVICE).status;
+        CloseableSocketFactory sf = new CloseableSocketFactory();
+        MqttAsyncClient serverMqttWithLwt = MqttUtils.makeClient(statusTopic, sf);
+        MqttServer server = new MqttServer(serverMqttWithLwt, DEVICE);
         server.init();
         server.addService(new HelloService());
 
@@ -140,113 +160,102 @@ public class TestCommsErrors {
         stub.lotsOfReplies(joe, errorObserver);
 
         Thread.sleep(500);
+        assertEquals(1, channel.getStats().getActiveCalls());
         //This should cause an LWT message which will send on the disconnected status
-        serverMqtt.disconnectForcibly();
+        sf.disableAndCloseAll();
         assertTrue(errorObserver.errorLatch.await(5, TimeUnit.SECONDS));
+        //Calls should be cleaned up because the server is out of contact.
+        assertEquals(0, channel.getStats().getActiveCalls());
         assertTrue(errorObserver.exception.getStatus().getCode().value() == Status.UNAVAILABLE.getCode().value());
 
     }
 
-    
-/*
-
     @Test
-    public void testNoInitialClientBrokerConnection() throws MqttException {
+    void testChannelClosedMidStream() throws Exception {
+        //Verify that when the channel is close then the server receives a cancel
+        //the server cancel handler will be called and the service will receive an
+        //onError with io.grpc.StatusRuntimeException: CANCELLED: client cancelled
+        //(The above two are done by the grpc in the code for StreamingServerCallListener.onCancel())
+        //The client CancelableObserver will receive onError() with
+        //io.grpc.StatusRuntimeException: CANCELLED: tryit
 
-        //Verify that if the client has no broker connection then it gets an UNAVAILABLE
-        //error when it tries to make a call to a service
+        final ListenForCancel listenForCancel = new ListenForCancel();
+        MqttServer server = new MqttServer(serverMqtt, DEVICE);
+        server.init();
+        server.addService(listenForCancel);
 
+        MqttChannel channel = new MqttChannel(clientMqtt, Id.random(), DEVICE);
+        channel.init();
 
-        //Setup the client stub
-        //Make a MqttGrpcClient with an mqtt client that's not connected and verify that using a service with it
-        //will cause UNAVAILABLE exceptions
-        MqttGrpcClient mgClient = new MqttGrpcClient(new MqttAsyncClient("tcp://localhost:1884", Base64Uuid.id()), DEVICE);
-        StatusException ex = assertThrows(StatusException.class, () -> mgClient.init());
-        assertEquals(Status.Code.UNAVAILABLE, ex.getStatus().getCode());
-        HelloStub stub = new HelloStub(mgClient, SERVICE_NAME);
-
-        //Even though the init failed try to use the client anyway and verify that we get expected failures
+        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
-        StreamWaiter<HelloReply> waiter = new StreamWaiter<>();
-        stub.sayHello(joe, waiter);
 
-        StatusRuntimeException sre = assertThrows(StatusRuntimeException.class,
-                () -> waiter.getSingle());
+        final StreamObserver<HelloRequest> inStream = stub.bidiHello(new ErrorObserver("test"));
+        inStream.onNext(joe);
 
-        assertEquals(Status.Code.UNAVAILABLE, sre.getStatus().getCode());
+        //Wait for at least one message to go through before canceling to make sure the call is fully started.
+        listenForCancel.errorObserver.waitForNext(5, TimeUnit.SECONDS);
+        assertEquals(server.getStats().getActiveCalls(), 1);
 
-        //Run the same test for StreamIterator
-        StreamIterator<HelloReply> iter = new StreamIterator<>();
-        stub.sayHello(joe, iter);
-        sre = assertThrows(StatusRuntimeException.class,
-                () -> iter.next());
-        assertEquals(Status.Code.UNAVAILABLE, sre.getStatus().getCode());
+        //Close the channel. The server cancel handler should get called
+        channel.close();
+
+        //Verify that the Context.CancellationListener gets called
+        //assertTrue(listenForCancel.contextListenerCancelled.await(5, TimeUnit.SECONDS));
+
+        //The client stream returned by the server should receive a onError() CANCELLED
+        assertEquals(listenForCancel.errorObserver.waitForStatus(10, TimeUnit.SECONDS).getCode(), Status.CANCELLED.getCode());
+
+        //The call should be cleaned up on the server.
+        assertEquals(server.getStats().getActiveCalls(), 0);
 
     }
 
     @Test
-    public void testNoInitialServerBrokerConnection() throws MqttException {
+    void testChannelLWTMidStream() throws Exception {
+        //Verify that when the channel is close then the server receives a cancel
+        //the server cancel handler will be called and the service will receive an
+        //onError with io.grpc.StatusRuntimeException: CANCELLED: client cancelled
+        //(The above two are done by the grpc in the code for StreamingServerCallListener.onCancel())
+        //The client CancelableObserver will receive onError() with
+        //io.grpc.StatusRuntimeException: CANCELLED: tryit
 
-        //Try initialising the client with a valid mqtt connection and verify it fails because the
-        //server is not started
-        final MqttAsyncClient clientMqtt = MqttUtils.makeClient(null);
-        MqttGrpcClient mgClient = new MqttGrpcClient(clientMqtt, DEVICE);
-        StatusException ex = assertThrows(StatusException.class, () -> mgClient.init());
-        assertEquals(Status.Code.UNAVAILABLE, ex.getStatus().getCode());
-        assertEquals("Server unavailable", ex.getStatus().getDescription());
-        mgClient.close();
-    }
+        final ListenForCancel listenForCancel = new ListenForCancel();
+        MqttServer server = new MqttServer(serverMqtt, DEVICE);
+        server.init();
+        server.addService(listenForCancel);
 
-    @Test
-    public void testServerClosedDuringActivity() throws MqttException, StatusException {
+        CloseableSocketFactory sf = new CloseableSocketFactory();
+        String clientId = Id.random();
+        String clientStatusTopic = new ServerTopics(DEVICE).statusClients + "/" + clientId;
+        MqttAsyncClient clientMqttWithLwt = MqttUtils.makeClient(clientStatusTopic, sf);
+        MqttChannel channel = new MqttChannel(clientMqtt, clientId, DEVICE);
+        channel.init();
 
-        //Verify that if the server is closed after there has been a successful interaction
-        //between client and server then the server will get an UNAVAILABLE message
-        //if it tries to make another call.
-
-        //Start the server
-        final MqttAsyncClient serverMqtt = MqttUtils.makeClient(Topics.systemStatus(DEVICE));
-        MqttGrpcServer mgServer = new MqttGrpcServer(serverMqtt, DEVICE);
-        mgServer.init();
-        final HelloService service = new HelloService();
-        HelloSkeleton skeleton = new HelloSkeleton(service);
-        mgServer.subscribeService(SERVICE_NAME, skeleton);
-
-
-        final MqttAsyncClient clientMqtt = MqttUtils.makeClient(null);
-        MqttGrpcClient mgClient = new MqttGrpcClient(clientMqtt, DEVICE);
-        mgClient.init();
-        HelloStub stub = new HelloStub(mgClient, SERVICE_NAME);
-        //send a message and make sure we get a response
+        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
-        StreamWaiter<HelloReply> waiter = new StreamWaiter<>();
-        stub.sayHello(joe, waiter);
-        HelloReply reply = waiter.getSingle();
-        assertEquals("Hello joe", reply.getMessage());
 
-        //Close should be called on a server when the system shuts down
-        //close() will then send a message to the LWT topic so that clients can release any resources
-        //that they have and so that any open streams get an error.
-        //
-        mgServer.close();
+        final StreamObserver<HelloRequest> inStream = stub.bidiHello(new ErrorObserver("test"));
+        inStream.onNext(joe);
 
-        StreamWaiter waiter2 = new StreamWaiter<>(5000);
-        stub.sayHello(joe, waiter2);
+        //Wait for at least one message to go through before canceling to make sure the call is fully started.
+        listenForCancel.errorObserver.waitForNext(5, TimeUnit.SECONDS);
+        assertEquals(server.getStats().getActiveCalls(), 1);
 
-        StatusRuntimeException sre = assertThrows(StatusRuntimeException.class,
-                () -> waiter2.getSingle());
+        //Break the client connection. The broker should send the LWT and the server cancel handler should get called
+        sf.disableAndCloseAll();
 
-        assertEquals(Status.Code.UNAVAILABLE, sre.getStatus().getCode());
+        //Verify that the Context.CancellationListener gets called
+        //assertTrue(listenForCancel.contextListenerCancelled.await(5, TimeUnit.SECONDS));
 
-        //Run the same test for StreamIterator
-        StreamIterator<HelloReply> iter = new StreamIterator<>();
-        stub.sayHello(joe, iter);
-        sre = assertThrows(StatusRuntimeException.class,
-                () -> iter.next());
-        assertEquals(sre.getStatus().getCode(), Status.Code.UNAVAILABLE);
+        //The client stream returned by the server should receive a onError() CANCELLED
+        assertEquals(listenForCancel.errorObserver.waitForStatus(10, TimeUnit.SECONDS).getCode(), Status.CANCELLED.getCode());
+
+        //The call should be cleaned up on the server.
+        assertEquals(server.getStats().getActiveCalls(), 0);
 
     }
-*/
+
 
 
 }

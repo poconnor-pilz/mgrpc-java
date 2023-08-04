@@ -18,9 +18,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Random;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
+import static java.lang.Thread.sleep;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 
@@ -40,7 +44,7 @@ public class TestHello {
 
     @BeforeAll
     public static void startClients() throws Exception {
-        serverMqtt = MqttUtils.makeClient();
+         serverMqtt = MqttUtils.makeClient();
         clientMqtt = MqttUtils.makeClient(null);
     }
 
@@ -83,6 +87,8 @@ public class TestHello {
         assertEquals("Hello joe", helloReply.getMessage());
         checkForLeaks(0);
     }
+
+
 
     @Test
     public void testSayHelloWithCustomReplyTopicPrefix() {
@@ -128,7 +134,7 @@ public class TestHello {
                 public void onNext(HelloReply value) {
                     log.debug(index + " - " + value.getMessage());
                     try {
-                        Thread.sleep(100);
+                        sleep(100);
                     } catch (InterruptedException e) {
                         throw new RuntimeException(e);
                     }
