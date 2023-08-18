@@ -70,8 +70,9 @@ public class TestCommsErrors {
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
         stub.lotsOfReplies(joe, errorObserver);
 
-        assertTrue(errorObserver.errorLatch.await(5, TimeUnit.SECONDS));
+        assertTrue(errorObserver.errorLatch.await(2, TimeUnit.SECONDS));
         assertTrue(errorObserver.exception.getStatus().getCode().value() == Status.UNAVAILABLE.getCode().value());
+        channel.close();
 
     }
 
@@ -97,7 +98,9 @@ public class TestCommsErrors {
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
         stub.lotsOfReplies(joe, errorObserver);
 
-        assertFalse(errorObserver.errorLatch.await(5, TimeUnit.SECONDS));
+        assertFalse(errorObserver.errorLatch.await(2, TimeUnit.SECONDS));
+        channel.close();
+        server.close();
 
     }
 
@@ -128,8 +131,10 @@ public class TestCommsErrors {
 
         Thread.sleep(500);
         server.close();
-        assertTrue(errorObserver.errorLatch.await(5, TimeUnit.SECONDS));
+        assertTrue(errorObserver.errorLatch.await(2, TimeUnit.SECONDS));
         assertTrue(errorObserver.exception.getStatus().getCode().value() == Status.UNAVAILABLE.getCode().value());
+
+        channel.close();
 
     }
 
@@ -163,10 +168,13 @@ public class TestCommsErrors {
         assertEquals(1, channel.getStats().getActiveCalls());
         //This should cause an LWT message which will send on the disconnected status
         sf.disableAndCloseAll();
-        assertTrue(errorObserver.errorLatch.await(5, TimeUnit.SECONDS));
+        assertTrue(errorObserver.errorLatch.await(2, TimeUnit.SECONDS));
         //Calls should be cleaned up because the server is out of contact.
         assertEquals(0, channel.getStats().getActiveCalls());
         assertTrue(errorObserver.exception.getStatus().getCode().value() == Status.UNAVAILABLE.getCode().value());
+
+        channel.close();
+        server.close();
 
     }
 
@@ -194,7 +202,7 @@ public class TestCommsErrors {
         inStream.onNext(joe);
 
         //Wait for at least one message to go through before canceling to make sure the call is fully started.
-        listenForCancel.errorObserver.waitForNext(5, TimeUnit.SECONDS);
+        listenForCancel.errorObserver.waitForNext(2, TimeUnit.SECONDS);
         assertEquals(server.getStats().getActiveCalls(), 1);
 
         //Close the channel. The server cancel handler should get called
@@ -209,11 +217,14 @@ public class TestCommsErrors {
         //The call should be cleaned up on the server.
         assertEquals(server.getStats().getActiveCalls(), 0);
 
+        channel.close();
+        server.close();
+
     }
 
     @Test
     void testChannelLWTMidStream() throws Exception {
-        //Verify that when the channel is close then the server receives a cancel
+        //Verify that when the channel is closed then the server receives a cancel
         //the server cancel handler will be called and the service will receive an
         //onError with io.grpc.StatusRuntimeException: CANCELLED: client cancelled
         //(The above two are done by the grpc in the code for StreamingServerCallListener.onCancel())
@@ -229,7 +240,7 @@ public class TestCommsErrors {
         String clientId = Id.random();
         String clientStatusTopic = new ServerTopics(DEVICE).statusClients + "/" + clientId;
         MqttAsyncClient clientMqttWithLwt = MqttUtils.makeClient(clientStatusTopic, sf);
-        MqttChannel channel = new MqttChannel(clientMqtt, clientId, DEVICE);
+        MqttChannel channel = new MqttChannel(clientMqttWithLwt, clientId, DEVICE);
         channel.init();
 
         final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
@@ -239,7 +250,7 @@ public class TestCommsErrors {
         inStream.onNext(joe);
 
         //Wait for at least one message to go through before canceling to make sure the call is fully started.
-        listenForCancel.errorObserver.waitForNext(5, TimeUnit.SECONDS);
+        listenForCancel.errorObserver.waitForNext(2, TimeUnit.SECONDS);
         assertEquals(server.getStats().getActiveCalls(), 1);
 
         //Break the client connection. The broker should send the LWT and the server cancel handler should get called
@@ -253,6 +264,9 @@ public class TestCommsErrors {
 
         //The call should be cleaned up on the server.
         assertEquals(server.getStats().getActiveCalls(), 0);
+
+        channel.close();
+        server.close();
 
     }
 

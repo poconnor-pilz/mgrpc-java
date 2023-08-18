@@ -611,7 +611,7 @@ public class MqttChannel extends Channel {
                         if (message.getSequence() == SINGLE_MESSAGE_STREAM) {
                             //There is only a single message in this stream and it will not be followed by
                             //a completed message so close the stream.
-                            close(Status.OK);
+                            close(Status.OK.withDescription(""));
                         }
                     });
                     return;
@@ -644,7 +644,7 @@ public class MqttChannel extends Channel {
 
         public void close(Status status) {
             closed = true;
-            log.debug("Closing call with status " + status.getDescription());
+            log.debug("Closing call {} with status: {} {}", new Object[]{Id.shrt(this.callId), status.getCode(),  status.getDescription()});
             context.removeListener(cancellationListener);
             cancelTimeouts();
             clientExec(() -> responseListener.onClose(status, EMPTY_METADATA));

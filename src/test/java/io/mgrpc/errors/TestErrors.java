@@ -4,8 +4,7 @@ import com.google.protobuf.Any;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.rpc.Code;
 import com.google.rpc.ErrorInfo;
-import io.grpc.Status;
-import io.grpc.StatusRuntimeException;
+import io.grpc.*;
 import io.grpc.examples.helloworld.ExampleHelloServiceGrpc;
 import io.grpc.examples.helloworld.HelloCustomError;
 import io.grpc.examples.helloworld.HelloReply;
@@ -20,6 +19,7 @@ import org.junit.jupiter.api.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.util.Iterator;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -74,6 +74,12 @@ public class TestErrors {
     }
 
     public void checkForLeaks(int numActiveCalls) {
+        try {
+            //Give the channel and server time to process messages and release resources
+            Thread.sleep(50);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
         assertEquals(numActiveCalls, channel.getStats().getActiveCalls());
         assertEquals(numActiveCalls, server.getStats().getActiveCalls());
     }
@@ -293,8 +299,24 @@ public class TestErrors {
         checkForLeaks(0);
     }
 
+    @Test
+    public void testHelloWithNoValue() throws Exception {
 
-
+        class OnlySendsCompleted extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
+            @Override
+            public void sayHello(HelloRequest request, StreamObserver<HelloReply> singleResponse){
+                //Send completed without first sending onNext()
+                //No service should do this but it *can* do it so we need to test for this case
+                singleResponse.onCompleted();
+            }
+        }
+        server.addService(new OnlySendsCompleted());
+        final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub blockingStub = ExampleHelloServiceGrpc.newBlockingStub(channel);
+        HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
+        StatusRuntimeException ex = assertThrows(StatusRuntimeException.class, () -> blockingStub.sayHello(joe));
+        assertEquals(Status.INTERNAL.getCode(), ex.getStatus().getCode());
+        assertTrue(ex.getMessage().contains("No value received for unary call"));
+    }
 
 
 }

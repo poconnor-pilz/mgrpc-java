@@ -75,6 +75,12 @@ public class TestHello {
     }
 
     public void checkForLeaks(int numActiveCalls){
+        try {
+            //Give the channel and server time to process messages and release resources
+            Thread.sleep(50);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
         assertEquals(numActiveCalls, channel.getStats().getActiveCalls());
         assertEquals(numActiveCalls, server.getStats().getActiveCalls());
     }

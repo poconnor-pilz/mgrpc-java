@@ -518,10 +518,7 @@ public class MqttServer {
             @Override
             public void sendMessage(RespT message) {
                 //Send the response up to the client
-                //Only increment sequence if there is potentially more than one message in the stream.
-                if (!methodDescriptor.getType().serverSendsOneMessage()) {
-                    sequence++;
-                }
+
                 ByteString valueByteString;
                 if(message instanceof MessageLite){
                     valueByteString = ((MessageLite) message).toByteString();
@@ -530,12 +527,24 @@ public class MqttServer {
                     valueByteString = ByteString.copyFrom((byte[]) message);
                 }
 
+                sequence++;
+                int seq;
+                if (methodDescriptor.getType().serverSendsOneMessage()) {
+                    //If there is only one message in the stream set seq to SINGLE_MESSAGE_STREAM
+                    //The client will recognise this and close the call immediately after receiving the single message
+                    //This speeds up the client response because it does not have to wait for a second completed message
+                    //and it saves bandwidth/costs because the server does not have to send a second mqtt message.
+                    seq = SINGLE_MESSAGE_STREAM;
+                } else {
+                    seq = sequence;
+                }
+
                 Value value = Value.newBuilder()
                         .setContents(valueByteString).build();
                 RpcMessage rpcMessage = RpcMessage.newBuilder()
                         .setValue(value)
                         .setCallId(callId)
-                        .setSequence(sequence).build();
+                        .setSequence(seq).build();
                 publish(header.getReplyTo(), rpcMessage);
             }
 
@@ -547,8 +556,21 @@ public class MqttServer {
 
             @Override
             public void close(Status status, Metadata trailers) {
-                sequence++;
-                sendStatus(header.getReplyTo(), callId, sequence, status);
+                //close will be called when the service implementation calls onCompleted (among other things)
+                //The service implementation will call onCompleted (and hence close()) even if it is a unary call
+                //If the call is unary (serverSendsOneMessage) then  in this case we do not want to send an extra
+                //unnecessary mqtt message to indicate completion provided that the server did already
+                //send a value message (i.e. the service implementation did not just call onCompleted() without
+                //first calling onNext() for some reason) and provided that this close is not being called as a result
+                //of the client calling onError. This is ok because the client channel will have
+                //closed the call automatically because the first message the server sent will have
+                //sequence==SINGLE_MESSAGE_STREAM which the client will check for.
+                if(methodDescriptor.getType().serverSendsOneMessage() && status.isOk() && sequence > 0 ) {
+                    ;//It's clearer to have empty statement here than express the if conditions negatively
+                } else {
+                    sequence++;
+                    sendStatus(header.getReplyTo(), callId, sequence, status);
+                }
                 cancelTimeouts();
                 MgMessageHandler.this.remove();
             }

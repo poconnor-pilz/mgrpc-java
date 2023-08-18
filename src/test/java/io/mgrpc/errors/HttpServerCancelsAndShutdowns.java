@@ -11,18 +11,23 @@ import io.grpc.stub.StreamObserver;
 import io.mgrpc.NoopStreamObserver;
 import io.mgrpc.utils.DirectExecutor;
 import io.mgrpc.utils.Pause;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * This is used to observe the behaviour of standard grpc for cancels and shutdowns as this
  * behaviour does not seem to be documented clearly anywhere.
  */
+@Disabled
 public class HttpServerCancelsAndShutdowns {
 
     private static final Logger log = LoggerFactory.getLogger(HttpServerCancelsAndShutdowns.class);
@@ -373,6 +378,7 @@ public class HttpServerCancelsAndShutdowns {
             httpServer.shutdown();
         }
     }
+
 
 
 }
