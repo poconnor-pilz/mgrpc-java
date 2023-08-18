@@ -5,6 +5,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.net.SocketFactory;
 import java.io.IOException;
+import java.lang.invoke.MethodHandles;
 import java.net.InetAddress;
 import java.net.Socket;
 import java.net.SocketException;
@@ -14,7 +15,7 @@ import java.util.List;
 
 public class CloseableSocketFactory extends SocketFactory {
 
-    private static Logger log = LoggerFactory.getLogger(CloseableSocketFactory.class);
+    private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
     public List<Socket> sockets = new ArrayList<>();
 

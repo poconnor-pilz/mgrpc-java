@@ -16,12 +16,10 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
+import java.lang.invoke.MethodHandles;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * This is used to observe the behaviour of standard grpc for cancels and shutdowns as this
@@ -30,7 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 @Disabled
 public class HttpServerCancelsAndShutdowns {
 
-    private static final Logger log = LoggerFactory.getLogger(HttpServerCancelsAndShutdowns.class);
+    private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
     class CancelableObserver implements ClientResponseObserver<HelloRequest, HelloReply> {
         private ClientCallStreamObserver requestStream;

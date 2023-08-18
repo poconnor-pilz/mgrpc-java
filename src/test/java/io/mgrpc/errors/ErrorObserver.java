@@ -6,12 +6,13 @@ import io.grpc.stub.StreamObserver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.lang.invoke.MethodHandles;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 class ErrorObserver implements StreamObserver {
 
-    private static final Logger log = LoggerFactory.getLogger(ErrorObserver.class);
+    private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
     public final CountDownLatch errorLatch = new CountDownLatch(1);
     public final CountDownLatch nextLatch = new CountDownLatch(1);

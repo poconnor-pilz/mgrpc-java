@@ -14,13 +14,17 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
-import java.util.*;
+import java.lang.invoke.MethodHandles;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.*;
 
 public class MqttChannel extends Channel {
 
 
-    private static Logger log = LoggerFactory.getLogger(MqttChannel.class);
+    private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
     public static final long SUBSCRIPTION_TIMEOUT_MILLIS = 10 * 1000;
 
     public static final CallOptions.Key<String> RESPONSE_TOPIC = CallOptions.Key.create("response-topic");

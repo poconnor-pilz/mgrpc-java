@@ -17,11 +17,13 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.lang.invoke.MethodHandles;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 public class TestProxy {
 
-    private static final Logger log = LoggerFactory.getLogger(TestProxy.class);
+    private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
     class ListenForHello extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
         @Override

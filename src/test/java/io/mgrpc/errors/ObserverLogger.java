@@ -4,9 +4,11 @@ import io.grpc.stub.StreamObserver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.lang.invoke.MethodHandles;
+
 class ObserverLogger implements StreamObserver {
 
-    private static final Logger log = LoggerFactory.getLogger(ObserverLogger.class);
+    private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
     private final String name;
 
     ObserverLogger(String name) {

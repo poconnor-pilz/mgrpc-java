@@ -3,6 +3,7 @@ package io.mgrpc;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.lang.invoke.MethodHandles;
 import java.util.Comparator;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Executor;
@@ -24,7 +25,7 @@ public class MessageProcessor {
     private static final int UNINITIALISED_SEQUENCE = -1;
     public static final int INTERRUPT_SEQUENCE = -2;
 
-    private static Logger log = LoggerFactory.getLogger(MessageProcessor.class);
+    private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
     //Messages are ordered by sequence
     private final BlockingQueue<MessageWithTopic> messageQueue = new PriorityBlockingQueue<>(1,
             Comparator.comparingInt(o -> o.message.getSequence()));

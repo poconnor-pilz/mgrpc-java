@@ -4,14 +4,18 @@ import com.google.protobuf.Any;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.rpc.Code;
 import com.google.rpc.ErrorInfo;
-import io.grpc.*;
+import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
 import io.grpc.examples.helloworld.ExampleHelloServiceGrpc;
 import io.grpc.examples.helloworld.HelloCustomError;
 import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.protobuf.StatusProto;
 import io.grpc.stub.StreamObserver;
-import io.mgrpc.*;
+import io.mgrpc.Id;
+import io.mgrpc.MqttChannel;
+import io.mgrpc.MqttServer;
+import io.mgrpc.NoopStreamObserver;
 import io.mgrpc.utils.MqttUtils;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
@@ -19,7 +23,7 @@ import org.junit.jupiter.api.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
+import java.lang.invoke.MethodHandles;
 import java.util.Iterator;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -28,7 +32,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 public class TestErrors {
 
-    private static final Logger log = LoggerFactory.getLogger(TestErrors.class);
+    private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
     private static MqttAsyncClient serverMqtt;
     private static MqttAsyncClient clientMqtt;

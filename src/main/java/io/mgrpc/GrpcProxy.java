@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.invoke.MethodHandles;
 import java.util.concurrent.TimeUnit;
 
 /** A grpc-level proxy.
@@ -15,7 +16,7 @@ import java.util.concurrent.TimeUnit;
  */
 public class GrpcProxy<ReqT, RespT> implements ServerCallHandler<ReqT, RespT> {
 
-    private static final Logger logger = LoggerFactory.getLogger(GrpcProxy.class);
+    private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
 
     private final Channel channel;

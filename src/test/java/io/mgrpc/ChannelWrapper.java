@@ -5,13 +5,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
+import java.lang.invoke.MethodHandles;
 
 /**
  * Class to help with debugging the grpc flow.
  */
 public class ChannelWrapper extends Channel {
 
-    private static Logger log = LoggerFactory.getLogger(ChannelWrapper.class);
+    private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
     public ChannelWrapper(Channel inner) {
         this.inner = inner;

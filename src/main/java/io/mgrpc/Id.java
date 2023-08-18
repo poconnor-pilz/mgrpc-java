@@ -6,6 +6,7 @@ import org.slf4j.LoggerFactory;
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.lang.invoke.MethodHandles;
 import java.nio.ByteBuffer;
 import java.security.SecureRandom;
 import java.util.Base64;
@@ -14,7 +15,7 @@ import java.util.UUID;
 
 public class Id {
 
-    private static final Logger log = LoggerFactory.getLogger(Id.class);
+    private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
     private static final String ALPHABET = "abcdefghijklmnopqrstuvwxyz2345678";
 

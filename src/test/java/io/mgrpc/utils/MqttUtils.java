@@ -10,13 +10,13 @@ import org.slf4j.LoggerFactory;
 
 import javax.net.SocketFactory;
 import java.io.InputStream;
+import java.lang.invoke.MethodHandles;
 import java.util.Properties;
 
 
 public class MqttUtils {
 
-    private static Logger log = LoggerFactory.getLogger(MqttUtils.class);
-
+    private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
     private static Properties PROPS = null;
     private static Properties getProperties() throws Exception{

@@ -7,11 +7,12 @@ import io.grpc.stub.StreamObserver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
 
 public class HelloServiceForTest extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
 
-    private static Logger log = LoggerFactory.getLogger(HelloServiceForTest.class);
+    private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
     /**
      * @param request a single request

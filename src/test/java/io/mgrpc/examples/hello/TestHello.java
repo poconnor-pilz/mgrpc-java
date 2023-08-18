@@ -17,10 +17,8 @@ import org.junit.jupiter.api.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.lang.invoke.MethodHandles;
 import java.util.List;
-import java.util.Map;
-import java.util.Random;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -30,7 +28,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class TestHello {
 
-    private static Logger log = LoggerFactory.getLogger(TestHello.class);
+    private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
     private static MqttAsyncClient serverMqtt;
     private static MqttAsyncClient clientMqtt;

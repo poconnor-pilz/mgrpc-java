@@ -13,17 +13,18 @@ import io.jsonwebtoken.SignatureAlgorithm;
 import io.mgrpc.Id;
 import io.mgrpc.MqttChannel;
 import io.mgrpc.MqttServer;
-import io.mgrpc.ServerTopics;
 import io.mgrpc.utils.MqttUtils;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.lang.invoke.MethodHandles;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 public class TestAuthAndMetadata {
 
-    private static final Logger log = LoggerFactory.getLogger(TestAuthAndMetadata.class);
+    private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
 
 

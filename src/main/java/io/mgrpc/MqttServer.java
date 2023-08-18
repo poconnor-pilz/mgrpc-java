@@ -10,6 +10,7 @@ import org.eclipse.paho.client.mqttv3.MqttMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.lang.invoke.MethodHandles;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.*;
@@ -19,7 +20,7 @@ import static io.mgrpc.RpcMessage.MessageCase.START;
 
 public class MqttServer {
 
-    private static final Logger log = LoggerFactory.getLogger(MqttServer.class);
+    private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
     private MqttInternalHandlerRegistry registry = new MqttInternalHandlerRegistry();
 
     private HandlerRegistry fallBackRegistry = null;

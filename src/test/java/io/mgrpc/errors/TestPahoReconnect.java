@@ -1,11 +1,11 @@
 package io.mgrpc.errors;
 
-import io.mgrpc.ServerTopics;
 import org.eclipse.paho.client.mqttv3.*;
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.lang.invoke.MethodHandles;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class TestPahoReconnect {
 
-    private static Logger log = LoggerFactory.getLogger(TestPahoReconnect.class);
+    private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
     private static final String DEVICE = "device1";
 

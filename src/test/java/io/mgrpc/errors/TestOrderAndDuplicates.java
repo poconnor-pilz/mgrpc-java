@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -29,7 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 public class TestOrderAndDuplicates {
 
 
-    private static final Logger log = LoggerFactory.getLogger(TestOrderAndDuplicates.class);
+    private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
     private static MqttAsyncClient serverMqtt;
     private static MqttAsyncClient clientMqtt;

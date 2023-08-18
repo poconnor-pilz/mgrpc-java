@@ -5,10 +5,12 @@ import org.eclipse.paho.client.mqttv3.MqttMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.lang.invoke.MethodHandles;
+
 
 public class MqttExceptionLogger implements IMqttMessageListener {
 
-    private static Logger log = LoggerFactory.getLogger(MqttExceptionLogger.class);
+    private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
     private final IMqttMessageListener inner;
 
     public MqttExceptionLogger(IMqttMessageListener inner) {

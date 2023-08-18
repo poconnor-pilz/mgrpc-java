@@ -1,6 +1,6 @@
 package io.mgrpc.errors;
 
-import io.grpc.*;
+import io.grpc.Status;
 import io.grpc.examples.helloworld.ExampleHelloServiceGrpc;
 import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
@@ -10,23 +10,20 @@ import io.mgrpc.MqttChannel;
 import io.mgrpc.MqttServer;
 import io.mgrpc.ServerTopics;
 import io.mgrpc.utils.MqttUtils;
-import org.eclipse.paho.client.mqttv3.IMqttMessageListener;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
-import org.eclipse.paho.client.mqttv3.MqttMessage;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.net.SocketFactory;
-import java.util.concurrent.CountDownLatch;
+import java.lang.invoke.MethodHandles;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 public class TestCommsErrors {
 
-    private static Logger log = LoggerFactory.getLogger(TestCommsErrors.class);
+    private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
     private static final String DEVICE = "device1";
 
