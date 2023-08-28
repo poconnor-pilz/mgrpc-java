@@ -91,7 +91,7 @@ public class TestOrderAndDuplicates {
         ServerTopics serverTopics = new ServerTopics(DEVICE);
         String topic = serverTopics.methodIn(fullMethodName);
         log.debug(topic);
-        String replyTo = ServerTopics.make(serverTopics.servicesOutForClient(clientId), fullMethodName, callId);
+        String replyTo = ServerTopics.replyTopic(serverTopics.servicesOutForClient(clientId), fullMethodName, callId);
         log.debug(replyTo);
         publishAndPause(clientMqtt, topic, makeStartRequest(callId, 1, replyTo));
         publishAndPause(clientMqtt, topic, makeValueRequest(callId, 5));
@@ -144,7 +144,7 @@ public class TestOrderAndDuplicates {
         String clientId = Id.random();
         ServerTopics serverTopics = new ServerTopics(DEVICE);
         String topic = serverTopics.methodIn(fullMethodName);
-        String replyTo = ServerTopics.make(serverTopics.servicesOutForClient(clientId), fullMethodName, callId);
+        String replyTo = ServerTopics.replyTopic(serverTopics.servicesOutForClient(clientId), fullMethodName, callId);
         publishAndPause(clientMqtt, topic, makeValueRequest(callId, 5));
         publishAndPause(clientMqtt, topic, makeValueRequest(callId, 5));
         publishAndPause(clientMqtt, topic, makeValueRequest(callId, 2));

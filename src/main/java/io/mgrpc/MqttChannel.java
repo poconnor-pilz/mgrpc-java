@@ -72,26 +72,6 @@ public class MqttChannel extends Channel {
 
     private final String replyTopicPrefix;
 
-    /**
-     * @param client Mqtt client
-     * @param serverTopic The root topic of the server to connect to e.g. "tenant1/device1"
-     *                    Requests will be sent to {serverTopic}/i/svc/{service}/{method}
-     *                    The channel will subscribe for replies on {serverTopic}/o/svc/{clientId}/#
-     *                    The channel will receive replies to a specific call on
-     *                    {serverTopic}/o/svc/{clientId}/{service}/{method}/{callId}
-     * @param clientId The client id for the channel. Should be unique.
-     * @param queueSize The size of the message queue for each call's replies
-     * @param executor Executor on which replies will be processed.
-     */
-    public MqttChannel(MqttAsyncClient client, String serverTopic, String clientId,
-                       int queueSize, Executor executor) {
-        this.client = client;
-        this.serverTopics = new ServerTopics(serverTopic);
-        this.clientId = clientId;
-        this.executor = executor;
-        this.queueSize = queueSize;
-        this.replyTopicPrefix = serverTopics.servicesOutForClient(clientId);
-    }
 
     /**
      * @param client Mqtt client
@@ -117,6 +97,22 @@ public class MqttChannel extends Channel {
         } else {
             this.replyTopicPrefix = serverTopics.servicesOutForClient(clientId);
         }
+    }
+
+    /**
+     * @param client Mqtt client
+     * @param serverTopic The root topic of the server to connect to e.g. "tenant1/device1"
+     *                    Requests will be sent to {serverTopic}/i/svc/{service}/{method}
+     *                    The channel will subscribe for replies on {serverTopic}/o/svc/{clientId}/#
+     *                    The channel will receive replies to a specific call on
+     *                    {serverTopic}/o/svc/{clientId}/{service}/{method}/{callId}
+     * @param clientId The client id for the channel. Should be unique.
+     * @param queueSize The size of the message queue for each call's replies
+     * @param executor Executor on which replies will be processed.
+     */
+    public MqttChannel(MqttAsyncClient client, String serverTopic, String clientId,
+                       int queueSize, Executor executor) {
+        this(client, serverTopic, clientId, null, queueSize, executor);
     }
 
 
