@@ -7,12 +7,10 @@ import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.stub.StreamObserver;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
-import io.mgrpc.GrpcProxy;
-import io.mgrpc.Id;
-import io.mgrpc.MqttChannel;
-import io.mgrpc.MqttServer;
+import io.mgrpc.*;
 import io.mgrpc.utils.MqttUtils;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,6 +34,10 @@ public class TestProxy {
         }
     }
 
+    @BeforeAll
+    public static void startEmbeddedBroker() throws Exception {
+        EmbeddedBroker.start();
+    }
 
     @Test
     public void testClientSideProxy() throws Exception{
@@ -44,14 +46,15 @@ public class TestProxy {
         //HttpChannel -> HttpServer -> GrpcProxy -> MqttChannel -> Broker -> MqttServer
         int port = 50051;
         String target = "localhost:" + port;
-        final String DEVICE = "device1";
+        //Make server name short but random to prevent stray status messages from previous tests affecting this test
+        final String SERVER = Id.shrt(Id.random());
 
         ManagedChannel httpChannel = ManagedChannelBuilder.forTarget(target)
                 .usePlaintext().build();
 
         final MqttAsyncClient clientMqttConnection = MqttUtils.makeClient(null);
         final String clientId = Id.random();
-        MqttChannel mqttChannel = new MqttChannel(clientMqttConnection, clientId, DEVICE);
+        MqttChannel mqttChannel = new MqttChannel(clientMqttConnection, clientId, SERVER);
         mqttChannel.init();
 
         GrpcProxy<byte[], byte[]> proxy = new GrpcProxy<>(mqttChannel);
@@ -65,7 +68,7 @@ public class TestProxy {
                 new ServerAuthInterceptor());
 
         final MqttAsyncClient serverMqttConnection = MqttUtils.makeClient(null);
-        MqttServer mqttServer = new MqttServer(serverMqttConnection, DEVICE);
+        MqttServer mqttServer = new MqttServer(serverMqttConnection, SERVER);
         mqttServer.addService(serviceWithIntercept);
         mqttServer.init();
 
@@ -108,11 +111,12 @@ public class TestProxy {
         //MqttChannel -> Broker -> MqttServer ->  GrpcProxy -> HttpChannel -> HttpServer
         int port = 50051;
         String target = "localhost:" + port;
-        final String DEVICE = "device1";
+        //Make server name short but random to prevent stray status messages from previous tests affecting this test
+        final String SERVER = Id.shrt(Id.random());
 
         final MqttAsyncClient clientMqttConnection = MqttUtils.makeClient(null);
         final String clientId = Id.random();
-        MqttChannel mqttChannel = new MqttChannel(clientMqttConnection, clientId, DEVICE);
+        MqttChannel mqttChannel = new MqttChannel(clientMqttConnection, clientId, SERVER);
         mqttChannel.init();
 
 
@@ -130,7 +134,7 @@ public class TestProxy {
         final GrpcProxy<byte[], byte[]> proxy = new GrpcProxy<>(httpChannel);
 
         final MqttAsyncClient serverMqttConnection = MqttUtils.makeClient(null);
-        MqttServer mqttServer = new MqttServer(serverMqttConnection, DEVICE);
+        MqttServer mqttServer = new MqttServer(serverMqttConnection, SERVER);
         mqttServer.setFallBackRegistry(new GrpcProxy.Registry(proxy));
         mqttServer.init();
 

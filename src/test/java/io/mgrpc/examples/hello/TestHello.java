@@ -36,12 +36,14 @@ public class TestHello {
     private MqttChannel channel;
     private MqttServer server;
 
-    private static final String DEVICE = "device1";
+    //Make server name short but random to prevent stray status messages from previous tests affecting this test
+    private static final String SERVER = Id.shrt(Id.random());
 
     private static final long REQUEST_TIMEOUT = 2000;
 
     @BeforeAll
     public static void startClients() throws Exception {
+        EmbeddedBroker.start();
          serverMqtt = MqttUtils.makeClient();
         clientMqtt = MqttUtils.makeClient(null);
     }
@@ -60,10 +62,10 @@ public class TestHello {
     void setup() throws Exception{
 
         //Set up the serverb
-        server = new MqttServer(serverMqtt, DEVICE);
+        server = new MqttServer(serverMqtt, SERVER);
         server.init();
         server.addService(new HelloServiceForTest());
-        channel = new MqttChannel(clientMqtt, Id.random(), DEVICE);
+        channel = new MqttChannel(clientMqtt, Id.random(), SERVER);
         channel.init();
     }
 
@@ -97,8 +99,8 @@ public class TestHello {
     @Test
     public void testSayHelloWithCustomReplyTopicPrefix() {
 
-        String replyTopicPrefix = ServerTopics.out(DEVICE, "blah");
-        MqttChannel customChannel = new MqttChannel(clientMqtt, DEVICE, Id.random(), replyTopicPrefix,
+        String replyTopicPrefix = ServerTopics.out(SERVER, "blah");
+        MqttChannel customChannel = new MqttChannel(clientMqtt, SERVER, Id.random(), replyTopicPrefix,
                 MqttChannel.DEFAULT_QUEUE_SIZE, MqttChannel.getExecutorInstance());
         customChannel.init();
         final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub blockingStub = ExampleHelloServiceGrpc.newBlockingStub(customChannel);
@@ -158,6 +160,7 @@ public class TestHello {
     @Test
     public void testLotsOfGreetings(){
 
+        log.debug("testLotsOfGreetings");
         final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
         HelloRequest jane = HelloRequest.newBuilder().setName("jane").build();

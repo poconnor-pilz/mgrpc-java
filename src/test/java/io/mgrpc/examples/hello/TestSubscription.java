@@ -4,10 +4,7 @@ import io.grpc.examples.helloworld.ExampleHelloServiceGrpc;
 import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.stub.StreamObserver;
-import io.mgrpc.Id;
-import io.mgrpc.MqttChannel;
-import io.mgrpc.MqttServer;
-import io.mgrpc.ServerTopics;
+import io.mgrpc.*;
 import io.mgrpc.utils.MqttUtils;
 import io.mgrpc.utils.ToList;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
@@ -34,12 +31,13 @@ public class TestSubscription {
     private MqttChannel channel;
     private MqttServer server;
 
-    private static final String DEVICE = "device1";
+    //Make server name short but random to prevent stray status messages from previous tests affecting this test
+    private static final String SERVER = Id.shrt(Id.random());
 
-    private static final long REQUEST_TIMEOUT = 2000;
 
     @BeforeAll
     public static void startClients() throws Exception {
+        EmbeddedBroker.start();
         serverMqtt = MqttUtils.makeClient();
         clientMqtt = MqttUtils.makeClient(null);
     }
@@ -58,11 +56,11 @@ public class TestSubscription {
     void setup() throws Exception{
 
         //Set up the serverb
-        server = new MqttServer(serverMqtt, DEVICE);
+        server = new MqttServer(serverMqtt, SERVER);
         server.init();
         server.addService(new HelloServiceForTest());
         final String clientId = Id.random();
-        channel = new MqttChannel(clientMqtt, clientId, DEVICE);
+        channel = new MqttChannel(clientMqtt, clientId, SERVER);
         channel.init();
     }
 
@@ -115,8 +113,8 @@ public class TestSubscription {
             }
         }
 
-        final String responseTopic1 = ServerTopics.out(DEVICE,"atesttopic");
-        final String responseTopic2 = ServerTopics.out(DEVICE,"atesttopic2");
+        final String responseTopic1 = ServerTopics.out(SERVER,"atesttopic");
+        final String responseTopic2 = ServerTopics.out(SERVER,"atesttopic2");
 
 
 

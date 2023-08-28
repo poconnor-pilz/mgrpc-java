@@ -152,7 +152,6 @@ public class MqttChannel extends Channel {
      * @throws StatusException
      */
     public void init() throws StatusRuntimeException {
-        //TODO: take the code from MqttGrpcClient and refactor it to work here.
 
         log.debug("Subscribing for responses on: " + this.replyTopicPrefix + "/#");
 

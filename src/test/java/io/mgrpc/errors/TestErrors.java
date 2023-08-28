@@ -12,10 +12,7 @@ import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.protobuf.StatusProto;
 import io.grpc.stub.StreamObserver;
-import io.mgrpc.Id;
-import io.mgrpc.MqttChannel;
-import io.mgrpc.MqttServer;
-import io.mgrpc.NoopStreamObserver;
+import io.mgrpc.*;
 import io.mgrpc.utils.MqttUtils;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
@@ -41,11 +38,13 @@ public class TestErrors {
     private MqttServer server;
 
 
-    private static final String DEVICE = "device";
+    //Make server name short but random to prevent stray status messages from previous tests affecting this test
+    private static final String SERVER = Id.shrt(Id.random());
 
 
     @BeforeAll
     public static void startClients() throws Exception {
+        EmbeddedBroker.start();
         serverMqtt = MqttUtils.makeClient();
         clientMqtt = MqttUtils.makeClient(null);
     }
@@ -65,10 +64,10 @@ public class TestErrors {
     void setup() throws Exception {
 
         //Set up the server
-        server = new MqttServer(serverMqtt, DEVICE);
+        server = new MqttServer(serverMqtt, SERVER);
         server.init();
         final String clientId = Id.random();
-        channel = new MqttChannel(clientMqtt, clientId, DEVICE);
+        channel = new MqttChannel(clientMqtt, clientId, SERVER);
         channel.init();
     }
 

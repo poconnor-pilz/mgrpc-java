@@ -159,6 +159,7 @@ public class MqttServer {
 
         //If a client prompts this server for a connection notification then send it
         client.subscribe(serverTopics.statusPrompt, 1, new MqttExceptionLogger((String topic, MqttMessage msg)->{
+            log.debug("Sending notification of connection status = true");
             notifyConnected(true);
         })).waitForCompletion(20000);
 

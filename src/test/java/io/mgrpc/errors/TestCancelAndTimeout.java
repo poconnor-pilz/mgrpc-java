@@ -8,6 +8,7 @@ import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.stub.ServerCallStreamObserver;
 import io.grpc.stub.StreamObserver;
+import io.mgrpc.EmbeddedBroker;
 import io.mgrpc.Id;
 import io.mgrpc.MqttChannel;
 import io.mgrpc.MqttServer;
@@ -41,11 +42,13 @@ public class TestCancelAndTimeout {
     private MqttServer server;
 
 
-    private static final String DEVICE = "device";
+    //Make server name short but random to prevent stray status messages from previous tests affecting this test
+    private static final String SERVER = Id.shrt(Id.random());
 
 
     @BeforeAll
     public static void startClients() throws Exception, IOException {
+        EmbeddedBroker.start();
         serverMqtt = MqttUtils.makeClient();
         clientMqtt = MqttUtils.makeClient(null);
     }
@@ -65,10 +68,10 @@ public class TestCancelAndTimeout {
     void setup() throws Exception {
 
         //Set up the server
-        server = new MqttServer(serverMqtt, DEVICE);
+        server = new MqttServer(serverMqtt, SERVER);
         server.init();
         final String clientId = Id.random();
-        channel = new MqttChannel(clientMqtt, clientId, DEVICE);
+        channel = new MqttChannel(clientMqtt, clientId, SERVER);
         channel.init();
     }
 
@@ -268,7 +271,7 @@ public class TestCancelAndTimeout {
 
         server.close();
         //Make a server with queue size 10
-        server = new MqttServer(serverMqtt, DEVICE, 10);
+        server = new MqttServer(serverMqtt, SERVER, 10);
         server.init();
 
         final CountDownLatch serviceLatch = new CountDownLatch(1);
@@ -332,7 +335,7 @@ public class TestCancelAndTimeout {
         channel.close();
         //Make a channel with queue size 10
         final String clientId = Id.random();
-        channel = new MqttChannel(serverMqtt, DEVICE, clientId, 10);
+        channel = new MqttChannel(serverMqtt, SERVER, clientId, 10);
         channel.init();
 
         final CountDownLatch serverCancelledLatch = new CountDownLatch(1);

@@ -1,5 +1,6 @@
 package io.mgrpc.errors;
 
+import io.mgrpc.EmbeddedBroker;
 import org.eclipse.paho.client.mqttv3.*;
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
 import org.slf4j.Logger;
@@ -21,9 +22,7 @@ public class TestPahoReconnect {
     public void tryReconnect() throws Exception{
 
 
-        //TODO: Got rid of embedded broker. Change this to use a socket that we can break.
-        //MqttUtils.startEmbeddedBroker();
-
+        EmbeddedBroker.start();
         final MqttAsyncClient client;
         client = new MqttAsyncClient(
                     "tcp://localhost:1884",

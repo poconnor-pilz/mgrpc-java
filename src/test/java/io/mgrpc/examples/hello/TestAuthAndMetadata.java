@@ -10,6 +10,7 @@ import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.stub.StreamObserver;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
+import io.mgrpc.EmbeddedBroker;
 import io.mgrpc.Id;
 import io.mgrpc.MqttChannel;
 import io.mgrpc.MqttServer;
@@ -31,6 +32,8 @@ public class TestAuthAndMetadata {
     @Test
     void testAuthAndMetadata() throws Exception {
 
+        EmbeddedBroker.start();
+
         //Use ServerAuthInterceptor to verify that the user is authorized test that it populates the context
         //with clientId and level
         //Also verify the that the HOSTNAME metadata value inserted by ClientMetadataInterceptor is correctly
@@ -49,8 +52,9 @@ public class TestAuthAndMetadata {
             }
         }
 
-        final String DEVICE = "device1";
-        MqttServer server = new MqttServer(MqttUtils.makeClient(), DEVICE);
+        //Make server name short but random to prevent stray status messages from previous tests affecting this test
+        final String SERVER = Id.shrt(Id.random());
+        MqttServer server = new MqttServer(MqttUtils.makeClient(), SERVER);
         server.init();
 
         final ServerServiceDefinition serviceWithIntercept = ServerInterceptors.intercept(
@@ -58,7 +62,7 @@ public class TestAuthAndMetadata {
                 new ServerAuthInterceptor());
         server.addService(serviceWithIntercept);
         final String clientId = Id.random();
-        MqttChannel channel = new MqttChannel(MqttUtils.makeClient(null), clientId, DEVICE);
+        MqttChannel channel = new MqttChannel(MqttUtils.makeClient(null), clientId, SERVER);
         channel.init();
 
 
