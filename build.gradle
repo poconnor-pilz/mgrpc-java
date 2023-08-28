@@ -57,6 +57,11 @@ dependencies {
     testImplementation "jakarta.xml.bind:jakarta.xml.bind-api:2.3.2"
     testImplementation "org.glassfish.jaxb:jaxb-runtime:2.3.2"
 
+
+    //For testing with embedded artemis broker with mqtt
+    testImplementation group:"org.apache.activemq", name: "artemis-server", version: "2.29.0"
+    testImplementation group:"org.apache.activemq", name: "artemis-mqtt-protocol", version: "2.29.0"
+
 }
 
 //Tell gradle and intellij about where the generated proto java files are

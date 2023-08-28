@@ -1,0 +1,38 @@
+<!--Configuration file for embedded apache activemq artemis broker used for tests-->
+
+<configuration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns="urn:activemq"
+               xsi:schemaLocation="urn:activemq /schema/artemis-server.xsd">
+    <core xmlns="urn:activemq:core">
+
+        <persistence-enabled>false</persistence-enabled>
+        <security-enabled>false</security-enabled>
+        <acceptors>
+<!--            <acceptor name="in-vm">vm://0</acceptor>-->
+            <!--            Start MQTT acceptor on port 1887-->
+            <acceptor name="mqtt">tcp://0.0.0.0:1887?protocols=MQTT</acceptor>
+        </acceptors>
+
+
+        <address-settings>
+            <!--default for catch all-->
+            <address-setting match="#">
+                <dead-letter-address>DLQ</dead-letter-address>
+                <expiry-address>ExpiryQueue</expiry-address>
+            </address-setting>
+        </address-settings>
+        <addresses>
+            <address name="DLQ">
+                <anycast>
+                    <queue name="DLQ"/>
+                </anycast>
+            </address>
+            <address name="ExpiryQueue">
+                <anycast>
+                    <queue name="ExpiryQueue"/>
+                </anycast>
+            </address>
+
+        </addresses>
+
+    </core>
+</configuration>
