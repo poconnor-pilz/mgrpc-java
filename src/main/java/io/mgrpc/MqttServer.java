@@ -351,8 +351,8 @@ public class MqttServer {
                     return;
                 }
 
-                //This is the first message for the call so lookup the method and construct an MqttServerCall
-                String fullMethodName = topic.substring(topic.lastIndexOf('/', topic.lastIndexOf('/') - 1) + 1);
+
+                String fullMethodName = serverTopics.fullMethodNameFromTopic(topic);
                 //fullMethodName is e.g. "helloworld.ExampleHelloService/SayHello"
                 //TODO: Verify that the fullMethodName matches the methoddescriptor in the First
                 ServerMethodDefinition<?, ?> serverMethodDefinition = registry.lookupMethod(fullMethodName);
@@ -431,7 +431,7 @@ public class MqttServer {
             }
 
             public void start(ServerCallHandler<?, ?> serverCallHandler){
-
+                log.debug("Starting call to " + this.methodDescriptor.getFullMethodName());
                 if (header.getTimeoutMillis() > 0) {
                     Deadline deadline = Deadline.after(header.getTimeoutMillis(), TimeUnit.MILLISECONDS);
                     this.deadlineCancellationFuture = DeadlineTimer.start(deadline, (String deadlineMessage) -> {

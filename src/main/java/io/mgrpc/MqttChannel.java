@@ -427,7 +427,7 @@ public class MqttChannel extends Channel {
             this.callOptions = callOptions;
             this.context = Context.current().withCancellation();
             this.callId = Id.random();
-            this.replyTo = ServerTopics.make(replyTopicPrefix, methodDescriptor.getFullMethodName(), callId);
+            this.replyTo = ServerTopics.replyTopic(replyTopicPrefix, methodDescriptor.getFullMethodName(), callId);
             messageProcessor = new MessageProcessor(executor, queueSize, this);
         }
 

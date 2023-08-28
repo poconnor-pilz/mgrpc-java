@@ -50,13 +50,46 @@ public class ServerTopics {
 
 
     /**
+     * Given a fullMethodName return the topic on which to send messages for that method.
      * @param fullMethodName e.g. "helloworld.ExampleHelloService/LotsOfReplies"
-     * @return The topic on which to send input messages for a method.
-     * Has the form {root}/i/svc/{fullMethodName}
+     * @return The topic on which to send input messages for a method. Will replace dots with slashes
+     * because some brokers (e.g. artemis) will do this anyway so it is better to be consistent.
+     * Has the form {root}/i/svc/helloworld/ExampleHelloService/LotsOfReplies
      */
     public String methodIn(String fullMethodName){
         //fullMethodName will be e.g. "helloworld.ExampleHelloService/LotsOfReplies"
-        return make(root, IN , SVC, fullMethodName);
+        //Replace dots with slashes in fullMethodName because some brokers (e.g. artemis) will replace
+        //dots with slashes anyway when handling mqtt. So it's better to do this up front here and
+        //then on the server side put the dots back in before calling the method.
+        final String fullMethodNameWithSlashes = fullMethodName.replace('.', '/');
+        return make(servicesIn, fullMethodNameWithSlashes);
+    }
+
+    /**
+     * Return the inverse of {@link #methodIn(String)}
+     * @param topic e.g. {root}/i/svc/helloworld/ExampleHelloService/LotsOfReplies
+     * @return helloworld.ExampleHelloService/LotsOfReplies
+     */
+    public String fullMethodNameFromTopic(String topic){
+        final String fullMethodNameWithSlashes = topic.substring(servicesIn.length() + 1);
+        final int lastSlashPos = fullMethodNameWithSlashes.lastIndexOf("/");
+        if(lastSlashPos == -1){
+            //This should never happen
+            throw new RuntimeException("A grpc topic should always have at least on slash");
+        }
+        return fullMethodNameWithSlashes.substring(0, lastSlashPos).replace('/', '.') + "/"
+                + fullMethodNameWithSlashes.substring(lastSlashPos + 1);
+    }
+
+    /**
+     * Return the replyTopic for a method call. Dots in fullMethodName will be replaced with slashes.
+     * @param replyTopicPrefix e.g. "myServer/o/svc/dlfxl55d7hsn6lwl" (where "dlfxl55d7hsn6lwl" is clientId)
+     * @param fullMethodName e.g. "helloworld.ExampleHelloService/LotsOfReplies"
+     * @param callId e.g. "ppjupponvo5vtpzt"
+     * @return e.g "myServer/helloworld/ExampleHelloService/LotsOfReplies/ppjupponvo5vtpzt"
+     */
+    public static String replyTopic(String replyTopicPrefix, String fullMethodName, String callId){
+        return make(replyTopicPrefix, fullMethodName.replace('.', '/'), callId);
     }
 
     /**
