@@ -355,7 +355,6 @@ public class MqttServer {
 
                 String fullMethodName = serverTopics.fullMethodNameFromTopic(topic);
                 //fullMethodName is e.g. "helloworld.ExampleHelloService/SayHello"
-                //TODO: Verify that the fullMethodName matches the methoddescriptor in the First
                 ServerMethodDefinition<?, ?> serverMethodDefinition = registry.lookupMethod(fullMethodName);
                 if (serverMethodDefinition == null) {
                     if (fallBackRegistry != null) {
@@ -494,8 +493,13 @@ public class MqttServer {
                         return;
                 }
 
-                //TODO: What if this does not match the request type, the parse will not fail - use the methoddescriptor
                 Object objValue;
+                //Note that methodDescriptor.parseRequest will not fail no matter what is in the protocol buffer
+                //There is no type information in protocol buffers. https://protobuf.dev/programming-guides/encoding/
+                //So there is no way to tell the difference between the wrong type and a different version of the type.
+                //The object is constructed with default non-null values (see for example the
+                //default constructor in the generated code for HelloRequest). Then if the parse code finds a value
+                //at the expected index in the buffer it will set it in the object. Otherwise it does nothing.
                 objValue = methodDescriptor.parseRequest(value.getContents().newInput());
 
                 //Make sure the listener is run in context so that the listener/observer code can get e.g.

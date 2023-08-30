@@ -563,8 +563,6 @@ public class MqttChannel extends Channel {
             }
             msgBuilder.setSequence(sequence);
 
-            //TODO: If the send fails then should this send an error back to the listener?
-            //or will the exception suffice?
             sendToBroker(methodDescriptor.getFullMethodName(), msgBuilder);
             responseListener.onReady();
         }
@@ -718,8 +716,6 @@ public class MqttChannel extends Channel {
                     .setCallId(callId)
                     .setSequence(sequence)
                     .setStatus(ok);
-            //TODO: If the send fails then should this send an error back to the listener?
-            //or will the exception suffice?
             sendToBroker(methodDescriptor.getFullMethodName(), msgBuilder);
         }
 
