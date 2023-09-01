@@ -5,9 +5,9 @@ import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
+import io.mgrpc.utils.MqttMessagingClient;
 import io.mgrpc.utils.MqttUtils;
 import io.mgrpc.utils.ToList;
-import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
 import org.junit.jupiter.api.*;
 import org.slf4j.Logger;
@@ -25,11 +25,11 @@ public class TestSubscription {
 
     private static Logger log = LoggerFactory.getLogger(TestSubscription.class);
 
-    private static MqttAsyncClient serverMqtt;
-    private static MqttAsyncClient clientMqtt;
+    private static MqttMessagingClient serverMqtt;
+    private static MqttMessagingClient clientMqtt;
 
-    private MqttChannel channel;
-    private MqttServer server;
+    private MsgChannel channel;
+    private MsgServer server;
 
     //Make server name short but random to prevent stray status messages from previous tests affecting this test
     private static final String SERVER = Id.shrt(Id.random());
@@ -56,11 +56,11 @@ public class TestSubscription {
     void setup() throws Exception{
 
         //Set up the serverb
-        server = new MqttServer(serverMqtt, SERVER);
+        server = new MsgServer(serverMqtt, SERVER);
         server.init();
         server.addService(new HelloServiceForTest());
         final String clientId = Id.random();
-        channel = new MqttChannel(clientMqtt, clientId, SERVER);
+        channel = new MsgChannel(clientMqtt, clientId, SERVER);
         channel.init();
     }
 
@@ -113,8 +113,8 @@ public class TestSubscription {
             }
         }
 
-        final String responseTopic1 = ServerTopics.out(SERVER,"atesttopic");
-        final String responseTopic2 = ServerTopics.out(SERVER,"atesttopic2");
+        final String responseTopic1 = ServerTopics.out(clientMqtt.topicSeparator(), SERVER,"atesttopic");
+        final String responseTopic2 = ServerTopics.out(clientMqtt.topicSeparator(), SERVER,"atesttopic2");
 
 
 
@@ -139,7 +139,7 @@ public class TestSubscription {
         //Send two requests each with a different responseTopic
         final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub blockingStub1 =
                 ExampleHelloServiceGrpc.newBlockingStub(channel)
-                        .withOption(MqttChannel.RESPONSE_TOPIC, responseTopic1);
+                        .withOption(MsgChannel.RESPONSE_TOPIC, responseTopic1);
 
         HelloRequest request1 = HelloRequest.newBuilder().setName("2").build();
         final Iterator<HelloReply> helloReplyIterator = blockingStub1.lotsOfReplies(request1);
@@ -149,7 +149,7 @@ public class TestSubscription {
 
         final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub blockingStub2 =
                 ExampleHelloServiceGrpc.newBlockingStub(channel)
-                        .withOption(MqttChannel.RESPONSE_TOPIC, responseTopic2);
+                        .withOption(MsgChannel.RESPONSE_TOPIC, responseTopic2);
         HelloRequest request2 = HelloRequest.newBuilder().setName("3").build();
         blockingStub2.lotsOfReplies(request2);
 

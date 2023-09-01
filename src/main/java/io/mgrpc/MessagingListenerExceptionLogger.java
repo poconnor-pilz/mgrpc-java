@@ -1,32 +1,30 @@
 package io.mgrpc;
 
-import org.eclipse.paho.client.mqttv3.IMqttMessageListener;
-import org.eclipse.paho.client.mqttv3.MqttMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.lang.invoke.MethodHandles;
 
 
-public class MqttExceptionLogger implements IMqttMessageListener {
+public class MessagingListenerExceptionLogger implements MessagingListener {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
-    private final IMqttMessageListener inner;
+    private final MessagingListener inner;
 
-    public MqttExceptionLogger(IMqttMessageListener inner) {
+    public MessagingListenerExceptionLogger(MessagingListener inner) {
         this.inner = inner;
     }
 
     @Override
-    public void messageArrived(String topic, MqttMessage message) throws Exception {
+    public void messageArrived(String topic, byte[] buffer) {
 
         //If an exception is thrown in messageArrived of IMqttMessageListener
         //the calling code will close the mqtt connection.
         //Instead just trap the exception here and log it
         try {
-            inner.messageArrived(topic, message);
+            inner.messageArrived(topic, buffer);
         } catch (Throwable t) {
-            log.error("Exception occurred in IMqttMessageListener", t);
+            log.error("Exception occurred in MessageListener", t);
         }
     }
 }

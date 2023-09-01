@@ -16,11 +16,11 @@ import java.util.concurrent.PriorityBlockingQueue;
  * such that only one instance of onMessage for a particular call is ongoing at a time.
  * i.e. MessageHandler.onMessage does not have to be thread safe but the same thread is not always
  * used to call it (so it can't use thread locals)
- * This is used to cater for brokers that differ from the mqtt spec and do not guarantee ordering or duplicates e.g.
+ * This is used to cater for messging systems that do not guarantee ordering or duplicates e.g.
  * https://docs.aws.amazon.com/iot/latest/developerguide/mqtt.html#mqtt-differences
  *
  */
-public class MessageProcessor {
+public class MsgProcessor {
 
     private static final int UNINITIALISED_SEQUENCE = -1;
     public static final int INTERRUPT_SEQUENCE = -2;
@@ -45,7 +45,7 @@ public class MessageProcessor {
 
     private int sequenceOfLastProcessedMessage = UNINITIALISED_SEQUENCE;
 
-    public MessageProcessor(Executor executor, int queueSize, MessageHandler messageHandler) {
+    public MsgProcessor(Executor executor, int queueSize, MessageHandler messageHandler) {
         this.queueSize = queueSize;
         this.executor = executor;
         this.messageHandler = messageHandler;

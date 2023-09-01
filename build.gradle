@@ -35,10 +35,6 @@ dependencies {
     //For errors using com.google.rpc.Status
     implementation group: 'io.grpc', name: 'grpc-protobuf', version: grpcVersion
 
-
-    //https://mvnrepository.com/artifact/org.eclipse.paho/org.eclipse.paho.client.mqttv3
-    implementation group: 'org.eclipse.paho', name: 'org.eclipse.paho.client.mqttv3', version: '1.2.5'
-
     //Need this because grpc will generate code that has annotations from javax.annotation (@generated)
     if (JavaVersion.current().isJava9Compatible()) {
         // Workaround for @javax.annotation.Generated
@@ -56,6 +52,11 @@ dependencies {
 
     //For tests that use https server (as opposed to inprocess server)
     testImplementation group: "io.grpc", name: "grpc-netty", version: grpcVersion
+
+    //For tests that use mqtt
+    testImplementation group: 'org.eclipse.paho', name: 'org.eclipse.paho.client.mqttv3', version: '1.2.5'
+
+
 
     //For TestAuth
     testImplementation group: 'io.jsonwebtoken', name: 'jjwt', version: '0.9.1'

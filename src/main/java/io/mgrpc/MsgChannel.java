@@ -1,15 +1,12 @@
 package io.mgrpc;
 
 import com.google.protobuf.ByteString;
+import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.protobuf.MessageLite;
 import com.google.protobuf.Parser;
 import io.grpc.*;
 import io.grpc.protobuf.StatusProto;
 import io.grpc.stub.StreamObserver;
-import org.eclipse.paho.client.mqttv3.IMqttMessageListener;
-import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
-import org.eclipse.paho.client.mqttv3.MqttException;
-import org.eclipse.paho.client.mqttv3.MqttMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -21,7 +18,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.*;
 
-public class MqttChannel extends Channel {
+public class MsgChannel extends Channel {
 
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
@@ -33,10 +30,11 @@ public class MqttChannel extends Channel {
 
 
     private static volatile Executor executorSingleton;
-    public static Executor getExecutorInstance(){
-        if(executorSingleton == null){
-            synchronized (MqttChannel.class){
-                if(executorSingleton == null){
+
+    public static Executor getExecutorInstance() {
+        if (executorSingleton == null) {
+            synchronized (MsgChannel.class) {
+                if (executorSingleton == null) {
                     //TODO: What kind of thread pool should we use here. It should probably be limited to a fixed maximum
                     executorSingleton = Executors.newCachedThreadPool();
                 }
@@ -46,7 +44,7 @@ public class MqttChannel extends Channel {
     }
 
 
-    private final MqttAsyncClient client;
+    private final MessagingClient client;
     /**
      * The topic prefix of the server e.g. devices/device1
      */
@@ -58,10 +56,9 @@ public class MqttChannel extends Channel {
     private boolean initialized = false;
     private CountDownLatch serverConnectedLatch;
 
-    private final Map<String, MqttClientCall> clientCallsById = new ConcurrentHashMap<>();
+    private final Map<String, MsgClientCall> clientCallsById = new ConcurrentHashMap<>();
 
     private final Map<String, List<StreamObserver>> subscribersByTopic = new ConcurrentHashMap<>();
-
 
 
     private static final int SINGLE_MESSAGE_STREAM = 0;
@@ -74,25 +71,24 @@ public class MqttChannel extends Channel {
 
 
     /**
-     * @param client Mqtt client
-     * @param serverTopic The root topic of the server to connect to e.g. "tenant1/device1"
-     *                    Requests will be sent to {serverTopic}/i/svc/{service}/{method}
-     * @param clientId The client id for the channel. Should be unique.
-     * @param replyTopicPrefix  The channel will subscribe for replies on
-     *                          {replyTopicPrefix}/#
-     *                          The channel will receive replies to a specific call on
-     *                          {replyTopicPrefix}/{service}/{method}/{callId}
-     * @param queueSize The size of the message queue for each call's replies
-     * @param executor Executor on which replies will be processed.
+     * @param client           PubsubClient
+     * @param serverTopic      The root topic of the server to connect to e.g. "tenant1/device1"
+     *                         Requests will be sent to {serverTopic}/i/svc/{service}/{method}
+     * @param clientId         The client id for the channel. Should be unique.
+     * @param replyTopicPrefix The channel will subscribe for replies on subtopics of {replyTopicPrefix}
+     *                         The channel will receive replies to a specific call on
+     *                         {replyTopicPrefix}/{service}/{method}/{callId}
+     * @param queueSize        The size of the message queue for each call's replies
+     * @param executor         Executor on which replies will be processed.
      */
-    public MqttChannel(MqttAsyncClient client, String serverTopic, String clientId,
-                       String replyTopicPrefix, int queueSize, Executor executor) {
+    public MsgChannel(MessagingClient client, String serverTopic, String clientId,
+                      String replyTopicPrefix, int queueSize, Executor executor) {
         this.client = client;
-        this.serverTopics = new ServerTopics(serverTopic);
+        this.serverTopics = new ServerTopics(serverTopic, client.topicSeparator());
         this.clientId = clientId;
         this.executor = executor;
         this.queueSize = queueSize;
-        if(replyTopicPrefix != null){
+        if (replyTopicPrefix != null) {
             this.replyTopicPrefix = replyTopicPrefix;
         } else {
             this.replyTopicPrefix = serverTopics.servicesOutForClient(clientId);
@@ -100,64 +96,67 @@ public class MqttChannel extends Channel {
     }
 
     /**
-     * @param client Mqtt client
+     * @param client      PubsubClient
      * @param serverTopic The root topic of the server to connect to e.g. "tenant1/device1"
      *                    Requests will be sent to {serverTopic}/i/svc/{service}/{method}
      *                    The channel will subscribe for replies on {serverTopic}/o/svc/{clientId}/#
      *                    The channel will receive replies to a specific call on
      *                    {serverTopic}/o/svc/{clientId}/{service}/{method}/{callId}
-     * @param clientId The client id for the channel. Should be unique.
-     * @param queueSize The size of the message queue for each call's replies
-     * @param executor Executor on which replies will be processed.
+     * @param clientId    The client id for the channel. Should be unique.
+     * @param queueSize   The size of the message queue for each call's replies
+     * @param executor    Executor on which replies will be processed.
      */
-    public MqttChannel(MqttAsyncClient client, String serverTopic, String clientId,
-                       int queueSize, Executor executor) {
+    public MsgChannel(MessagingClient client, String serverTopic, String clientId,
+                      int queueSize, Executor executor) {
         this(client, serverTopic, clientId, null, queueSize, executor);
     }
 
 
     /**
-     * @param client Mqtt client
+     * @param client      PubsubClient
      * @param serverTopic The root topic of the server to connect to e.g. "tenant1/device1"
      *                    Requests will be sent to {serverTopic}/i/svc/{service}/{method}
-     *                    The channel will subscribe for replies on {serverTopic}/o/svc/{clientId}/#
+     *                    The channel will subscribe for replies on subtopics of {serverTopic}/o/svc/{clientId}
      *                    The channel will receive replies to a specific call on
      *                    {serverTopic}/o/svc/{clientId}/{service}/{method}/{callId}
-     * @param clientId The client id for the channel. Should be unique.
-     * @param queueSize The size of the message queue for each call's replies
+     * @param clientId    The client id for the channel. Should be unique.
+     * @param queueSize   The size of the message queue for each call's replies
      */
-    public MqttChannel(MqttAsyncClient client, String serverTopic, String clientId, int queueSize) {
+    public MsgChannel(MessagingClient client, String serverTopic, String clientId, int queueSize) {
         this(client, serverTopic, clientId, queueSize, getExecutorInstance());
     }
 
     /**
-     * @param client Mqtt client
+     * @param client      Mqtt client
      * @param serverTopic The root topic of the server to connect to e.g. "tenant1/device1"
      *                    Requests will be sent to {serverTopic}/i/svc/{service}/{method}
-     *                    The channel will subscribe for replies on {serverTopic}/o/svc/{clientId}/#
+     *                    The channel will subscribe for replies on subtopics of {serverTopic}/o/svc/{clientId}
      *                    The channel will receive replies to a specific call on
      *                    {serverTopic}/o/svc/{clientId}/{service}/{method}/{callId}
-     * @param clientId The client id for the channel. Should be unique.
+     * @param clientId    The client id for the channel. Should be unique.
      */
-    public MqttChannel(MqttAsyncClient client, String clientId, String serverTopic) {
+    public MsgChannel(MessagingClient client, String clientId, String serverTopic) {
         this(client, serverTopic, clientId, DEFAULT_QUEUE_SIZE, getExecutorInstance());
     }
 
 
     /**
-     * This will cause the MqttGrpcClient to listen for server lwt messages so that it can then
-     * send an error to any response observers when the server is disconnected.
-     * A client must call init() before using any other methods on the MqttGrpcClient.
+     * A client must call init() before using any other methods on the channel.
      *
      * @throws StatusException
      */
-    public void init() throws StatusRuntimeException {
+    public void init() throws MessagingException {
 
-        log.debug("Subscribing for responses on: " + this.replyTopicPrefix + "/#");
 
-        final IMqttMessageListener replyListener = new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
-            final RpcMessage message = RpcMessage.parseFrom(mqttMessage.getPayload());
-            final MqttClientCall call = clientCallsById.get(message.getCallId());
+        final MessagingListener replyListener = new MessagingListenerExceptionLogger((String topic, byte[] buffer) -> {
+            final RpcMessage message;
+            try {
+                message = RpcMessage.parseFrom(buffer);
+            } catch (InvalidProtocolBufferException e) {
+                log.error("Failed to parse RpcMessage", e);
+                return;
+            }
+            final MsgClientCall call = clientCallsById.get(message.getCallId());
             if (call == null) {
                 log.error("Could not find call with callId: " + Id.shrt(message.getCallId()) + " for message " + message.getSequence());
                 return;
@@ -165,28 +164,25 @@ public class MqttChannel extends Channel {
             call.queueServerMessage(message);
         });
 
-        try {
-            //This will throw an exception if it times out.
-            client.subscribe(this.replyTopicPrefix + "/#", 1, replyListener).waitForCompletion(SUBSCRIPTION_TIMEOUT_MILLIS);
-        } catch (MqttException e) {
-            throw new StatusRuntimeException(Status.UNAVAILABLE.fromThrowable(e));
-        }
+        //This will throw an exception if it times out.
+        log.debug("Subscribing for responses on: " + this.replyTopicPrefix);
+        client.subscribeAll(this.replyTopicPrefix, replyListener);
 
-        try {
-            client.subscribe(serverTopics.status, 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
-                ConnectionStatus status = ConnectionStatus.parseFrom(mqttMessage.getPayload());
-                this.serverConnected = ConnectionStatus.parseFrom(mqttMessage.getPayload()).getConnected();
-                log.debug("Server connected status = " + this.serverConnected);
-                if(!this.serverConnected){
-                    //Clean up all existing calls because the server has been disconnected.
-                    this.onServerDisconnected();
-                }
-                this.serverConnectedLatch.countDown();
-            }));
-            pingServer();
-        } catch (MqttException e) {
-            throw new StatusRuntimeException(Status.UNAVAILABLE.fromThrowable(e));
-        }
+        client.subscribe(serverTopics.status, new MessagingListenerExceptionLogger((String topic, byte[] buffer) -> {
+            try {
+                this.serverConnected = ConnectionStatus.parseFrom(buffer).getConnected();
+            } catch (InvalidProtocolBufferException e) {
+                log.error("Failed to parse connection status", e);
+                return;
+            }
+            log.debug("Server connected status = " + this.serverConnected);
+            if (!this.serverConnected) {
+                //Clean up all existing calls because the server has been disconnected.
+                this.onServerDisconnected();
+            }
+            this.serverConnectedLatch.countDown();
+        }));
+        pingServer();
         initialized = true;
     }
 
@@ -195,7 +191,7 @@ public class MqttChannel extends Channel {
      * The channel will fail to send messages if it thinks that a server is not connected.
      * This method will fool the channel into thinking that a real server is connected.
      */
-    public void fakeServerConnectedForTests(){
+    public void fakeServerConnectedForTests() {
         this.serverConnected = true;
     }
 
@@ -208,23 +204,23 @@ public class MqttChannel extends Channel {
         //In case the server is already started, prompt it to send its connection status
         //If it is not started it will send connection status when it does start.
         try {
-            client.publish(serverTopics.statusPrompt, new MqttMessage());
-        } catch (MqttException e) {
+            client.publish(serverTopics.statusPrompt, new byte[0]);
+        } catch (MessagingException e) {
             throw new StatusRuntimeException(Status.UNAVAILABLE.fromThrowable(e));
         }
     }
 
-    private void onServerDisconnected(){
+    private void onServerDisconnected() {
         //Interrupt the client's call queue with an unavailable status, the call will be cleaned up when it is closed.
         //We could just call close on the call directly but we want the call to finish processing whatever
         //message it has first and if we put it on the queue it means we don't have to worry about thread safety.
-        for(MqttClientCall call: clientCallsById.values()){
+        for (MsgClientCall call : clientCallsById.values()) {
             final Status status = Status.UNAVAILABLE.withDescription("Server disconnected");
             final com.google.rpc.Status grpcStatus = StatusProto.fromStatusAndTrailers(status, null);
             RpcMessage rpcMessage = RpcMessage.newBuilder()
                     .setStatus(grpcStatus)
                     .setCallId(call.callId)
-                    .setSequence(MessageProcessor.INTERRUPT_SEQUENCE)
+                    .setSequence(MsgProcessor.INTERRUPT_SEQUENCE)
                     .build();
             call.queueServerMessage(rpcMessage);
         }
@@ -235,17 +231,15 @@ public class MqttChannel extends Channel {
     public void close() {
         try {
             //TODO: make const timeout, cancel all calls? Empty map?
-
             //Notify that this client has been closed so that any server with ongoing calls can cancel them and
             //release resources.
-            String statusTopic = ServerTopics.make(serverTopics.statusClients, this.clientId);
+            String statusTopic = ServerTopics.make(client.topicSeparator(), serverTopics.statusClients, this.clientId);
             log.debug("Closing channel. Sending notification on " + statusTopic);
             final byte[] connectedMsg = ConnectionStatus.newBuilder().setConnected(false).build().toByteArray();
-            client.publish(statusTopic , new MqttMessage(connectedMsg));
-
-            client.unsubscribe(this.replyTopicPrefix + "/#").waitForCompletion(5000);
+            client.publish(statusTopic, connectedMsg);
+            client.unsubscribeAll(this.replyTopicPrefix);
             client.unsubscribe(serverTopics.statusPrompt);
-        } catch (MqttException e) {
+        } catch (MessagingException e) {
             log.error("Failed to unsub", e);
         }
     }
@@ -253,7 +247,7 @@ public class MqttChannel extends Channel {
 
     @Override
     public <RequestT, ResponseT> ClientCall newCall(MethodDescriptor<RequestT, ResponseT> methodDescriptor, CallOptions callOptions) {
-        MqttClientCall call = new MqttClientCall<>(methodDescriptor, callOptions, executor, queueSize);
+        MsgClientCall call = new MsgClientCall<>(methodDescriptor, callOptions, executor, queueSize);
         clientCallsById.put(call.getCallId(), call);
         return call;
     }
@@ -263,10 +257,10 @@ public class MqttChannel extends Channel {
         return serverTopics.root;
     }
 
-    public Stats getStats(){
+    public Stats getStats() {
         int subscribers = 0;
         final Set<String> topics = subscribersByTopic.keySet();
-        for(String topic: topics){
+        for (String topic : topics) {
             subscribers += subscribersByTopic.get(topic).size();
         }
 
@@ -276,49 +270,62 @@ public class MqttChannel extends Channel {
     /**
      * Subscribe for responses from a service. To use this the client should specify a RESPONSE_TOPIC when constructing
      * a stub for the service, for example:
-     * MyService.newBlockingStub(channel).withOption(MqttChannel.RESPONSE_TOPIC, "mydevice/o/myresponsetopic");
+     * MyService.newBlockingStub(channel).withOption(MsgChannel.RESPONSE_TOPIC, "mydevice/o/myresponsetopic");
      * Before issuing the call the client should first subscribe for responses e.g.
      * channel.subscribe("mydevice/o/myresponsetopic", HelloReply.parser(), myStreamObserver);
      * The subscription will automatically be closed when the response stream is completed but the client
      * can unsubscribe at any time using channel.unsubscribe("mydevice/o/myresponsetopic");
-     * @param responseTopic The topic to which to send responses. All responses will be sent to this topic and the
-     *                      stub will not receive any direct responses.
-     * @param parser The parser corresponding to the response type e.g. HelloReply.parser()
+     *
+     * @param responseTopic  The topic to which to send responses. All responses will be sent to this topic and the
+     *                       stub will not receive any direct responses.
+     * @param parser         The parser corresponding to the response type e.g. HelloReply.parser()
      * @param streamObserver Each observer that it subscribed to a responseTopic will receive all responses.
-     * @param <T> The type of the response e.g. HelloReply
+     * @param <T>            The type of the response e.g. HelloReply
      */
     public <T> void subscribe(String responseTopic, Parser<T> parser, final StreamObserver<T> streamObserver) {
 
         List<StreamObserver> subscribers = subscribersByTopic.get(responseTopic);
-        if(subscribers != null){
+        if (subscribers != null) {
             subscribers.add(streamObserver);
             return;
         }
 
-        final IMqttMessageListener messageListener = new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
+        final MessagingListener messageListener = new MessagingListenerExceptionLogger((String topic, byte[] buffer) -> {
             final List<StreamObserver> observers = subscribersByTopic.get(topic);
-            if(observers == null){
+            if (observers == null) {
                 //We should not receive any messages if there are no subscribers
                 log.warn("No subscribers for " + topic);
                 return;
             }
-            final RpcMessage message = RpcMessage.parseFrom(mqttMessage.getPayload());
-            switch (message.getMessageCase()){
+            final RpcMessage message;
+            try {
+                message = RpcMessage.parseFrom(buffer);
+            } catch (InvalidProtocolBufferException e) {
+                log.error("Failed to parse RpcMessage", e);
+                return;
+            }
+            switch (message.getMessageCase()) {
                 case VALUE:
-                    final T value = parser.parseFrom(message.getValue().getContents());
-                    for(StreamObserver observer: observers) {
+                    final T value;
+                    try {
+                        value = parser.parseFrom(message.getValue().getContents());
+                    } catch (InvalidProtocolBufferException e) {
+                        log.error("Failed to parse Value", e);
+                        return;
+                    }
+                    for (StreamObserver observer : observers) {
                         observer.onNext(value);
                     }
                     return;
                 case STATUS:
                     Status status = googleRpcStatusToGrpcStatus(message.getStatus());
-                    if(status.isOk()){
-                        for(StreamObserver observer: observers) {
+                    if (status.isOk()) {
+                        for (StreamObserver observer : observers) {
                             observer.onCompleted();
                         }
                     } else {
                         final StatusRuntimeException sre = new StatusRuntimeException(status, null);
-                        for(StreamObserver observer: observers) {
+                        for (StreamObserver observer : observers) {
                             observer.onError(sre);
                         }
                     }
@@ -329,14 +336,13 @@ public class MqttChannel extends Channel {
         });
 
         try {
-            //This will throw an exception if it times out.
-            client.subscribe(responseTopic, 1, messageListener).waitForCompletion(SUBSCRIPTION_TIMEOUT_MILLIS);
-            if(subscribers == null){
+            client.subscribe(responseTopic, messageListener);
+            if (subscribers == null) {
                 subscribers = new ArrayList<>();
                 subscribersByTopic.put(responseTopic, subscribers);
             }
             subscribers.add(streamObserver);
-        } catch (MqttException e) {
+        } catch (MessagingException e) {
             throw new StatusRuntimeException(Status.UNAVAILABLE.fromThrowable(e));
         }
 
@@ -345,13 +351,13 @@ public class MqttChannel extends Channel {
     /**
      * Unsubscribe all StreamObservers from responseTopic
      */
-    public void unsubscribe(String responseTopic){
+    public void unsubscribe(String responseTopic) {
         final List<StreamObserver> observers = subscribersByTopic.get(responseTopic);
-        if(observers != null){
+        if (observers != null) {
             subscribersByTopic.remove(responseTopic);
             try {
                 client.unsubscribe(responseTopic);
-            } catch (MqttException e) {
+            } catch (MessagingException e) {
                 log.error("Failed to unsubscribe for " + responseTopic, e);
             }
         } else {
@@ -362,22 +368,21 @@ public class MqttChannel extends Channel {
     /**
      * Unsubscribe a specific StreamObserver from responseTopic
      */
-    public void unsubscribe(String responseTopic, StreamObserver observer){
+    public void unsubscribe(String responseTopic, StreamObserver observer) {
         final List<StreamObserver> observers = subscribersByTopic.get(responseTopic);
-        if(observers != null){
-            if(!observers.remove(observer)){
+        if (observers != null) {
+            if (!observers.remove(observer)) {
                 log.warn("Observer not found");
             }
-            if(observers.isEmpty()){
+            if (observers.isEmpty()) {
                 try {
                     client.unsubscribe(responseTopic);
-                } catch (MqttException e) {
+                } catch (MessagingException e) {
                     log.error("Failed to unsubscribe for " + responseTopic, e);
                 }
             }
         }
     }
-
 
 
     /**
@@ -390,8 +395,7 @@ public class MqttChannel extends Channel {
     }
 
 
-
-    private class MqttClientCall<ReqT, RespT> extends ClientCall<ReqT, RespT> implements MessageProcessor.MessageHandler {
+    private class MsgClientCall<ReqT, RespT> extends ClientCall<ReqT, RespT> implements MsgProcessor.MessageHandler {
 
         final MethodDescriptor<ReqT, RespT> methodDescriptor;
         final CallOptions callOptions;
@@ -404,7 +408,9 @@ public class MqttChannel extends Channel {
         private ScheduledFuture<?> deadlineCancellationFuture;
         private boolean cancelCalled = false;
         private boolean closed = false;
-        /**List of recent sequence ids, Used for checking for duplicate messages*/
+        /**
+         * List of recent sequence ids, Used for checking for duplicate messages
+         */
         private Recents recents = new Recents();
         Deadline effectiveDeadline = null;
         Metadata metadata = null;
@@ -413,17 +419,17 @@ public class MqttChannel extends Channel {
         private final ContextCancellationListener cancellationListener =
                 new ContextCancellationListener();
 
-        private final MessageProcessor messageProcessor;
+        private final MsgProcessor msgProcessor;
 
-        private MqttClientCall(MethodDescriptor<ReqT, RespT> methodDescriptor, CallOptions callOptions,
-                               Executor executor, int queueSize) {
+        private MsgClientCall(MethodDescriptor<ReqT, RespT> methodDescriptor, CallOptions callOptions,
+                              Executor executor, int queueSize) {
             this.clientExecutor = callOptions.getExecutor();
             this.methodDescriptor = methodDescriptor;
             this.callOptions = callOptions;
             this.context = Context.current().withCancellation();
             this.callId = Id.random();
-            this.replyTo = ServerTopics.replyTopic(replyTopicPrefix, methodDescriptor.getFullMethodName(), callId);
-            messageProcessor = new MessageProcessor(executor, queueSize, this);
+            this.replyTo = ServerTopics.replyTopic(replyTopicPrefix, client.topicSeparator(), methodDescriptor.getFullMethodName(), callId);
+            msgProcessor = new MsgProcessor(executor, queueSize, this);
         }
 
         public String getCallId() {
@@ -437,21 +443,25 @@ public class MqttChannel extends Channel {
 
             //If the client specified authentication details then merge them into the metadata
             final CallCredentials credentials = this.callOptions.getCredentials();
-            if(credentials != null){
+            if (credentials != null) {
                 MetadataMerger merger = new MetadataMerger(headers);
                 CallCredentials.RequestInfo requestInfo = new CallCredentials.RequestInfo() {
                     public MethodDescriptor<?, ?> getMethodDescriptor() {
                         return methodDescriptor;
                     }
+
                     public CallOptions getCallOptions() {
                         return callOptions;
                     }
+
                     public SecurityLevel getSecurityLevel() {
                         return SecurityLevel.NONE;
                     }
+
                     public String getAuthority() {
                         return "";
                     }
+
                     public Attributes getTransportAttrs() {
                         return null;
                     }
@@ -465,7 +475,7 @@ public class MqttChannel extends Channel {
 
             if (context.isCancelled()) {
                 //Call is already cancelled
-                clientExec(()->close(Status.CANCELLED));
+                clientExec(() -> close(Status.CANCELLED));
                 return;
             }
 
@@ -498,7 +508,7 @@ public class MqttChannel extends Channel {
                 } catch (InterruptedException e) {
                     log.error("", e);
                 }
-                if(!serverConnected) {
+                if (!serverConnected) {
                     this.close(Status.UNAVAILABLE.withDescription("Server is not connected"));
                 }
             }
@@ -511,7 +521,7 @@ public class MqttChannel extends Channel {
             final Value.Builder valueBuilder = Value.newBuilder();
 
             ByteString valueByteString;
-            if(message instanceof MessageLite){
+            if (message instanceof MessageLite) {
                 valueByteString = ((MessageLite) message).toByteString();
             } else {
                 //If we use GrpcProxy then the message will be a byte array
@@ -523,11 +533,11 @@ public class MqttChannel extends Channel {
                 //This is the start of the call so make a Start message with a header
                 Header.Builder header = Header.newBuilder();
                 header.setClientId(clientId);
-                if(effectiveDeadline != null){
+                if (effectiveDeadline != null) {
                     header.setTimeoutMillis(effectiveDeadline.timeRemaining(TimeUnit.MILLISECONDS));
                 }
                 final String responseTopic = this.callOptions.getOption(RESPONSE_TOPIC);
-                if(responseTopic != null && responseTopic.trim().length() != 0){
+                if (responseTopic != null && responseTopic.trim().length() != 0) {
                     //If the client specified a responseTopic then set that in the message to the server and
                     //close the call. The client should have already done a subscribe to receive the responses
                     //Note that deadlines will be ignored in this case (although they will be passed to the server)
@@ -581,21 +591,22 @@ public class MqttChannel extends Channel {
 
 
         public void queueServerMessage(RpcMessage message) {
-           this.messageProcessor.queueMessage(new MessageProcessor.MessageWithTopic(message));
+            this.msgProcessor.queueMessage(new MsgProcessor.MessageWithTopic(message));
         }
 
 
         /**
          * onMessage() may be called from multiple threads but only one onMessage will be active at a time.
          * So it is thread safe with respect to itself but cannot use thread locals
+         *
          * @param messageWithTopic
          */
         @Override
-        public void onBrokerMessage(MessageProcessor.MessageWithTopic messageWithTopic) {
+        public void onBrokerMessage(MsgProcessor.MessageWithTopic messageWithTopic) {
 
             final RpcMessage message = messageWithTopic.message;
 
-            switch(message.getMessageCase()){
+            switch (message.getMessageCase()) {
                 case STATUS:
                     log.debug("Received completed response");
                     close(googleRpcStatusToGrpcStatus(message.getStatus()));
@@ -641,15 +652,15 @@ public class MqttChannel extends Channel {
 
         public void close(Status status) {
             closed = true;
-            log.debug("Closing call {} with status: {} {}", new Object[]{Id.shrt(this.callId), status.getCode(),  status.getDescription()});
+            log.debug("Closing call {} with status: {} {}", new Object[]{Id.shrt(this.callId), status.getCode(), status.getDescription()});
             context.removeListener(cancellationListener);
             cancelTimeouts();
             clientExec(() -> responseListener.onClose(status, EMPTY_METADATA));
             clientCallsById.remove(this.callId);
         }
 
-        public void cancelTimeouts(){
-            if(this.deadlineCancellationFuture != null){
+        public void cancelTimeouts() {
+            if (this.deadlineCancellationFuture != null) {
                 this.deadlineCancellationFuture.cancel(false);
             }
         }
@@ -667,7 +678,7 @@ public class MqttChannel extends Channel {
         public void cancel(@Nullable String message, @Nullable Throwable cause) {
             //Note that cancel is not called from a synchronized method and so all data
             //accessed here needs to be thread safe.
-            if(closed){
+            if (closed) {
                 //In the case of a deadline timeout we will call this.close(Status.CANCELLED)
                 //which will call responseListener.onClose(Status.CANCELLED)
                 //The listener will then call this.cancel()
@@ -702,7 +713,6 @@ public class MqttChannel extends Channel {
         }
 
 
-
         @Override
         public void halfClose() {
             //This will be sent by the client (e.g a stub) when the client stream is complete (or after one unary request)
@@ -730,8 +740,8 @@ public class MqttChannel extends Channel {
                 final RpcMessage message = messageBuilder.build();
                 log.debug("Sending {} {} {} on :{} ",
                         new Object[]{message.getMessageCase(), message.getSequence(), Id.shrt(message.getCallId()), topic});
-                client.publish(topic, new MqttMessage(message.toByteArray()));
-            } catch (MqttException e) {
+                client.publish(topic, message.toByteArray());
+            } catch (MessagingException e) {
                 throw new StatusRuntimeException(Status.UNAVAILABLE.fromThrowable(e));
             }
         }
@@ -752,7 +762,7 @@ public class MqttChannel extends Channel {
     }
 
 
-    public static class Stats{
+    public static class Stats {
         private final int activeCalls;
         private final int subscribers;
 
@@ -761,15 +771,14 @@ public class MqttChannel extends Channel {
             this.subscribers = subscribers;
         }
 
-        public int getActiveCalls(){
+        public int getActiveCalls() {
             return activeCalls;
         }
 
-        public int getSubscribers(){
+        public int getSubscribers() {
             return subscribers;
         }
     }
-
 
 
 }

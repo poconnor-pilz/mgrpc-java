@@ -8,8 +8,8 @@ import io.grpc.stub.StreamObserver;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
 import io.mgrpc.*;
+import io.mgrpc.utils.MqttMessagingClient;
 import io.mgrpc.utils.MqttUtils;
-import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
@@ -52,12 +52,12 @@ public class TestProxy {
         ManagedChannel httpChannel = ManagedChannelBuilder.forTarget(target)
                 .usePlaintext().build();
 
-        final MqttAsyncClient clientMqttConnection = MqttUtils.makeClient(null);
+        final MqttMessagingClient clientMqttConnection = MqttUtils.makeClient(null);
         final String clientId = Id.random();
-        MqttChannel mqttChannel = new MqttChannel(clientMqttConnection, clientId, SERVER);
-        mqttChannel.init();
+        MsgChannel msgChannel = new MsgChannel(clientMqttConnection, clientId, SERVER);
+        msgChannel.init();
 
-        GrpcProxy<byte[], byte[]> proxy = new GrpcProxy<>(mqttChannel);
+        GrpcProxy<byte[], byte[]> proxy = new GrpcProxy<>(msgChannel);
 
         Server httpServer = ServerBuilder.forPort(port)
                 .fallbackHandlerRegistry(new GrpcProxy.Registry(proxy))
@@ -67,10 +67,10 @@ public class TestProxy {
                 new ListenForHello(),
                 new ServerAuthInterceptor());
 
-        final MqttAsyncClient serverMqttConnection = MqttUtils.makeClient(null);
-        MqttServer mqttServer = new MqttServer(serverMqttConnection, SERVER);
-        mqttServer.addService(serviceWithIntercept);
-        mqttServer.init();
+        final MqttMessagingClient serverMqttConnection = MqttUtils.makeClient(null);
+        MsgServer msgServer = new MsgServer(serverMqttConnection, SERVER);
+        msgServer.addService(serviceWithIntercept);
+        msgServer.init();
 
         //Make a jwt token and add it to the call credentials
         final String testclientId = "aTestClientID";
@@ -99,8 +99,8 @@ public class TestProxy {
 
         httpChannel.shutdown();
         httpServer.shutdown();
-        mqttChannel.close();
-        mqttServer.close();
+        msgChannel.close();
+        msgServer.close();
     }
 
 
@@ -114,10 +114,10 @@ public class TestProxy {
         //Make server name short but random to prevent stray status messages from previous tests affecting this test
         final String SERVER = Id.shrt(Id.random());
 
-        final MqttAsyncClient clientMqttConnection = MqttUtils.makeClient(null);
+        final MqttMessagingClient clientMqttConnection = MqttUtils.makeClient(null);
         final String clientId = Id.random();
-        MqttChannel mqttChannel = new MqttChannel(clientMqttConnection, clientId, SERVER);
-        mqttChannel.init();
+        MsgChannel msgChannel = new MsgChannel(clientMqttConnection, clientId, SERVER);
+        msgChannel.init();
 
 
         final ServerServiceDefinition serviceWithIntercept = ServerInterceptors.intercept(
@@ -133,10 +133,10 @@ public class TestProxy {
                 .usePlaintext().build();
         final GrpcProxy<byte[], byte[]> proxy = new GrpcProxy<>(httpChannel);
 
-        final MqttAsyncClient serverMqttConnection = MqttUtils.makeClient(null);
-        MqttServer mqttServer = new MqttServer(serverMqttConnection, SERVER);
-        mqttServer.setFallBackRegistry(new GrpcProxy.Registry(proxy));
-        mqttServer.init();
+        final MqttMessagingClient serverMqttConnection = MqttUtils.makeClient(null);
+        MsgServer msgServer = new MsgServer(serverMqttConnection, SERVER);
+        msgServer.setFallBackRegistry(new GrpcProxy.Registry(proxy));
+        msgServer.init();
 
         //Make a jwt token and add it to the call credentials
         final String testclientId = "aTestClientID";
@@ -149,7 +149,7 @@ public class TestProxy {
         BearerToken token = new BearerToken(jwtString);
 
         final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub stub = ExampleHelloServiceGrpc
-                .newBlockingStub(mqttChannel).withCallCredentials(token);
+                .newBlockingStub(msgChannel).withCallCredentials(token);
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
         final HelloReply helloReply = stub.sayHello(joe);
 
@@ -158,15 +158,15 @@ public class TestProxy {
 
         //Verify that not setting authentication causes failure
         final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub stub1 =
-                ExampleHelloServiceGrpc.newBlockingStub(mqttChannel);
+                ExampleHelloServiceGrpc.newBlockingStub(msgChannel);
         StatusRuntimeException ex = assertThrows(StatusRuntimeException.class, () -> stub1.sayHello(joe));
         assertEquals(Status.UNAUTHENTICATED.getCode(), ex.getStatus().getCode());
         assertTrue(ex.getMessage().contains("Authorization token is missing"));
 
         httpChannel.shutdown();
         httpServer.shutdown();
-        mqttChannel.close();
-        mqttServer.close();
+        msgChannel.close();
+        msgServer.close();
     }
 
 

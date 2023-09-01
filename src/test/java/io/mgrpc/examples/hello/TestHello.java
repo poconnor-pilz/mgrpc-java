@@ -9,9 +9,9 @@ import io.grpc.inprocess.InProcessChannelBuilder;
 import io.grpc.inprocess.InProcessServerBuilder;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
+import io.mgrpc.utils.MqttMessagingClient;
 import io.mgrpc.utils.MqttUtils;
 import io.mgrpc.utils.ToList;
-import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
 import org.junit.jupiter.api.*;
 import org.slf4j.Logger;
@@ -30,11 +30,11 @@ public class TestHello {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-    private static MqttAsyncClient serverMqtt;
-    private static MqttAsyncClient clientMqtt;
+    private static MqttMessagingClient serverMqtt;
+    private static MqttMessagingClient clientMqtt;
 
-    private MqttChannel channel;
-    private MqttServer server;
+    private MsgChannel channel;
+    private MsgServer server;
 
     //Make server name short but random to prevent stray status messages from previous tests affecting this test
     private static final String SERVER = Id.shrt(Id.random());
@@ -62,10 +62,10 @@ public class TestHello {
     void setup() throws Exception{
 
         //Set up the serverb
-        server = new MqttServer(serverMqtt, SERVER);
+        server = new MsgServer(serverMqtt, SERVER);
         server.init();
         server.addService(new HelloServiceForTest());
-        channel = new MqttChannel(clientMqtt, Id.random(), SERVER);
+        channel = new MsgChannel(clientMqtt, Id.random(), SERVER);
         channel.init();
     }
 
@@ -97,11 +97,11 @@ public class TestHello {
 
 
     @Test
-    public void testSayHelloWithCustomReplyTopicPrefix() {
+    public void testSayHelloWithCustomReplyTopicPrefix() throws MessagingException {
 
-        String replyTopicPrefix = ServerTopics.out(SERVER, "blah");
-        MqttChannel customChannel = new MqttChannel(clientMqtt, SERVER, Id.random(), replyTopicPrefix,
-                MqttChannel.DEFAULT_QUEUE_SIZE, MqttChannel.getExecutorInstance());
+        String replyTopicPrefix = ServerTopics.out(clientMqtt.topicSeparator(), SERVER, "blah");
+        MsgChannel customChannel = new MsgChannel(clientMqtt, SERVER, Id.random(), replyTopicPrefix,
+                MsgChannel.DEFAULT_QUEUE_SIZE, MsgChannel.getExecutorInstance());
         customChannel.init();
         final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub blockingStub = ExampleHelloServiceGrpc.newBlockingStub(customChannel);
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();

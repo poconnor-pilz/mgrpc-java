@@ -6,16 +6,16 @@ import com.google.rpc.Code;
 import com.google.rpc.ErrorInfo;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
-import io.grpc.examples.helloworld.*;
+import io.grpc.examples.helloworld.ExampleHelloServiceGrpc;
+import io.grpc.examples.helloworld.HelloCustomError;
+import io.grpc.examples.helloworld.HelloReply;
+import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.protobuf.StatusProto;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
+import io.mgrpc.utils.MqttMessagingClient;
 import io.mgrpc.utils.MqttUtils;
-import io.mgrpc.utils.RpcMessageBuilder;
-import org.eclipse.paho.client.mqttv3.IMqttMessageListener;
-import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
-import org.eclipse.paho.client.mqttv3.MqttMessage;
 import org.junit.jupiter.api.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,11 +31,11 @@ public class TestErrors {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-    private static MqttAsyncClient serverMqtt;
-    private static MqttAsyncClient clientMqtt;
+    private static MqttMessagingClient serverMqtt;
+    private static MqttMessagingClient clientMqtt;
 
-    private MqttChannel channel;
-    private MqttServer server;
+    private MsgChannel channel;
+    private MsgServer server;
 
 
     //Make server name short but random to prevent stray status messages from previous tests affecting this test
@@ -64,10 +64,10 @@ public class TestErrors {
     void setup() throws Exception {
 
         //Set up the server
-        server = new MqttServer(serverMqtt, SERVER);
+        server = new MsgServer(serverMqtt, SERVER);
         server.init();
         final String clientId = Id.random();
-        channel = new MqttChannel(clientMqtt, clientId, SERVER);
+        channel = new MsgChannel(clientMqtt, clientId, SERVER);
         channel.init();
     }
 

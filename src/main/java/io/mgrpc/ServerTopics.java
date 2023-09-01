@@ -1,7 +1,5 @@
 package io.mgrpc;
 
-import org.eclipse.paho.client.mqttv3.MqttTopic;
-
 public class ServerTopics {
 
     public static final String IN = "i";
@@ -17,6 +15,7 @@ public class ServerTopics {
      * Root topic for server e.g. "device1"
      */
     public final String root;
+    public final String sep;
     /**
      * Server status will be reported at this topic and LWT should also be sent here.
      * Has the form {root}/o/sys/status
@@ -40,12 +39,13 @@ public class ServerTopics {
      */
     public final String servicesIn;
 
-    public ServerTopics(String root) {
+    public ServerTopics(String root, String topicSeparator) {
         this.root = root;
-        this.status = make(root, OUT, SYS, STATUS);
-        this.statusPrompt = make(root, IN, SYS, STATUS, PROMPT);
-        this.statusClients = make(this.status, CLIENT);
-        this.servicesIn = make(root, IN , SVC);
+        this.sep = topicSeparator;
+        this.status = make(sep, root, OUT, SYS, STATUS);
+        this.statusPrompt = make(sep, root, IN, SYS, STATUS, PROMPT);
+        this.statusClients = make(sep, this.status, CLIENT);
+        this.servicesIn = make(sep, root, IN , SVC);
     }
 
 
@@ -61,8 +61,8 @@ public class ServerTopics {
         //Replace dots with slashes in fullMethodName because some brokers (e.g. artemis) will replace
         //dots with slashes anyway when handling mqtt. So it's better to do this up front here and
         //then on the server side put the dots back in before calling the method.
-        final String fullMethodNameWithSlashes = fullMethodName.replace('.', '/');
-        return make(servicesIn, fullMethodNameWithSlashes);
+        final String fullMethodNameWithSlashes = fullMethodName.replace(".", sep);
+        return make(sep, servicesIn, fullMethodNameWithSlashes);
     }
 
     /**
@@ -72,12 +72,12 @@ public class ServerTopics {
      */
     public String fullMethodNameFromTopic(String topic){
         final String fullMethodNameWithSlashes = topic.substring(servicesIn.length() + 1);
-        final int lastSlashPos = fullMethodNameWithSlashes.lastIndexOf("/");
+        final int lastSlashPos = fullMethodNameWithSlashes.lastIndexOf(sep);
         if(lastSlashPos == -1){
             //This should never happen
             throw new RuntimeException("A grpc topic should always have at least on slash");
         }
-        return fullMethodNameWithSlashes.substring(0, lastSlashPos).replace('/', '.') + "/"
+        return fullMethodNameWithSlashes.substring(0, lastSlashPos).replace(sep, ".") + sep
                 + fullMethodNameWithSlashes.substring(lastSlashPos + 1);
     }
 
@@ -88,8 +88,8 @@ public class ServerTopics {
      * @param callId e.g. "ppjupponvo5vtpzt"
      * @return e.g "myServer/helloworld/ExampleHelloService/LotsOfReplies/ppjupponvo5vtpzt"
      */
-    public static String replyTopic(String replyTopicPrefix, String fullMethodName, String callId){
-        return make(replyTopicPrefix, fullMethodName.replace('.', '/'), callId);
+    public static String replyTopic(String replyTopicPrefix, String topicSeparator, String fullMethodName, String callId){
+        return make(topicSeparator, replyTopicPrefix, fullMethodName.replace(".", topicSeparator), callId);
     }
 
     /**
@@ -97,12 +97,12 @@ public class ServerTopics {
      * Has the form {root}/o/svc/{clientId}
      */
     public String servicesOutForClient(String clientId){
-        return make(root, OUT , SVC, clientId);
+        return make(sep, root, OUT , SVC, clientId);
     }
 
 
-    public static String out(String server, String ... segments){
-        return make(make(server, OUT), make(segments));
+    public static String out(String topicSeparator, String server, String ... segments){
+        return make(topicSeparator, make(topicSeparator, server, OUT), make(topicSeparator, segments));
     }
 
 
@@ -111,7 +111,7 @@ public class ServerTopics {
      * Convenience method for constructing a topic from a set of strings
      * It just inserts the '/' separator between them
      */
-    public static String make(String ... segments)
+    public static String make(String topicSeparator, String ... segments)
     {
         if(segments.length == 0) {
             return null;
@@ -123,7 +123,7 @@ public class ServerTopics {
 
         StringBuffer result = new StringBuffer(segments[0]);
         for(int i = 1; i < segments.length; i++) {
-            result.append(MqttTopic.TOPIC_LEVEL_SEPARATOR).append(segments[i]);
+            result.append(topicSeparator).append(segments[i]);
         }
 
         return result.toString();

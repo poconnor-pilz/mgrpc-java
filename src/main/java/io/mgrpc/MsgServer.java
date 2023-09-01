@@ -1,12 +1,10 @@
 package io.mgrpc;
 
 import com.google.protobuf.ByteString;
+import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.protobuf.MessageLite;
 import io.grpc.*;
 import io.grpc.protobuf.StatusProto;
-import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
-import org.eclipse.paho.client.mqttv3.MqttException;
-import org.eclipse.paho.client.mqttv3.MqttMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -18,10 +16,10 @@ import java.util.concurrent.*;
 import static io.mgrpc.RpcMessage.MessageCase.START;
 
 
-public class MqttServer {
+public class MsgServer {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
-    private MqttInternalHandlerRegistry registry = new MqttInternalHandlerRegistry();
+    private MInternalHandlerRegistry registry = new MInternalHandlerRegistry();
 
     private HandlerRegistry fallBackRegistry = null;
     private final static Metadata EMPTY_METADATA = new Metadata();
@@ -34,7 +32,7 @@ public class MqttServer {
 
     private static Executor getExecutorInstance() {
         if (executorSingleton == null) {
-            synchronized (MqttServer.class) {
+            synchronized (MsgServer.class) {
                 if (executorSingleton == null) {
                     //TODO: What kind of thread pool should we use here. It should probably be limited to a fixed maximum or maybe it should be passed as a constructor parameter?
                     executorSingleton = Executors.newCachedThreadPool();
@@ -44,7 +42,7 @@ public class MqttServer {
         return executorSingleton;
     }
 
-    private final MqttAsyncClient client;
+    private final MessagingClient client;
 
     private final Map<String, MgMessageHandler> handlersByCallId = new ConcurrentHashMap<>();
 
@@ -68,9 +66,9 @@ public class MqttServer {
     private static final int SINGLE_MESSAGE_STREAM = 0;
 
     /**
-     * @param client Mqtt client
+     * @param client PubsubClient
      * @param serverTopic The root topic of the server e.g. "tenant1/device1"
-     *                   The server will subscribe for requests on {serverTopic}/i/svc/#
+     *                   The server will subscribe for requests on subtopics of {serverTopic}/i/svc
      *                   A request for a method should be sent to sent to {serverTopic}/i/svc/{service}/{method}
      *                   Replies will be sent to whatever the client specifies in the message header's replyTo
      *                   This will normally be:
@@ -78,18 +76,18 @@ public class MqttServer {
      * @param queueSize  The size of the incoming message queue for each call
      * @param executor   Executor which will process incoming message queues.
      */
-    public MqttServer(MqttAsyncClient client, String serverTopic, int queueSize, Executor executor) {
+    public MsgServer(MessagingClient client, String serverTopic, int queueSize, Executor executor) {
         this.client = client;
-        this.serverTopics = new ServerTopics(serverTopic);
+        this.serverTopics = new ServerTopics(serverTopic, client.topicSeparator());
         this.executor = executor;
         this.queueSize = queueSize;
     }
 
-    public MqttServer(MqttAsyncClient client, String serverTopic, int queueSize) {
+    public MsgServer(MessagingClient client, String serverTopic, int queueSize) {
         this(client, serverTopic, queueSize, getExecutorInstance());
     }
 
-    public MqttServer(MqttAsyncClient client, String serverTopic) {
+    public MsgServer(MessagingClient client, String serverTopic) {
         this(client, serverTopic, DEFAULT_QUEUE_SIZE, getExecutorInstance());
     }
 
@@ -110,18 +108,23 @@ public class MqttServer {
 
 
     public void removeAllServices() {
-        this.registry = new MqttInternalHandlerRegistry();
+        this.registry = new MInternalHandlerRegistry();
     }
 
-    public void init() throws MqttException {
+    public void init() throws MessagingException {
 
-        final String servicesInFilter = serverTopics.servicesIn + "/#";
-        log.debug("subscribe server at: " + servicesInFilter);
+        log.debug("subscribe server for all subtopics of: " + serverTopics.servicesIn);
 
-        client.subscribe(servicesInFilter, 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
-            //We use an MqttExceptionLogger here because if a we throw an exception in the subscribe handler
+        client.subscribeAll(serverTopics.servicesIn, new MessagingListenerExceptionLogger((String topic, byte[] buffer) -> {
+            //We use an PubsubListenerExceptionLogger here because if a we throw an exception in the subscribe handler
             //it will disconnect the mqtt client
-            final RpcMessage message = RpcMessage.parseFrom(mqttMessage.getPayload());
+            final RpcMessage message;
+            try {
+                message = RpcMessage.parseFrom(buffer);
+            } catch (InvalidProtocolBufferException e) {
+                log.error("Failed to parse RpcMessage", e);
+                return;
+            }
             log.debug("Received {} {} {} on : {}", new Object[]{message.getMessageCase(),
                     message.getSequence(), Id.shrt(message.getCallId()), topic});
             final String callId = message.getCallId();
@@ -146,9 +149,9 @@ public class MqttServer {
                 handlersByCallId.put(callId, handler);
             }
             //put the message on the handler's queue
-            handler.queueClientMessage(new MessageProcessor.MessageWithTopic(topic, message));
+            handler.queueClientMessage(new MsgProcessor.MessageWithTopic(topic, message));
 
-        })).waitForCompletion(20000);
+        }));
 
 
         //Every 10 minutes clear out recentlyRemovedCallIds that are more than 10 minutes old
@@ -158,31 +161,27 @@ public class MqttServer {
         }, 10, 10, TimeUnit.MINUTES);
 
         //If a client prompts this server for a connection notification then send it
-        client.subscribe(serverTopics.statusPrompt, 1, new MqttExceptionLogger((String topic, MqttMessage msg)->{
+        client.subscribe(serverTopics.statusPrompt, new MessagingListenerExceptionLogger((String topic, byte[] buffer)->{
             log.debug("Sending notification of connection status = true");
             notifyConnected(true);
-        })).waitForCompletion(20000);
+        }));
 
-        try {
-            client.subscribe(serverTopics.statusClients + "/#", 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
-                //If the client sends any message to this topic it means that it has disconnected
-                //The client will send the message to {serverTopic}/in/sys/status/client/{clientId}
-                //So we need to parse the clientId from the topic
-                log.debug("Received client disconnected notification on " + topic);
-                String clientId = topic.substring(topic.lastIndexOf('/') + 1);
-                onClientDisconnected(clientId);
-            }));
-        } catch (MqttException e) {
-            throw new StatusRuntimeException(Status.UNAVAILABLE.fromThrowable(e));
-        }
+        client.subscribeAll(serverTopics.statusClients, new MessagingListenerExceptionLogger((String topic, byte[] buffer) -> {
+            //If the client sends any message to this topic it means that it has disconnected
+            //The client will send the message to {serverTopic}/in/sys/status/client/{clientId}
+            //So we need to parse the clientId from the topic
+            log.debug("Received client disconnected notification on " + topic);
+            String clientId = topic.substring(topic.lastIndexOf(client.topicSeparator()) + client.topicSeparator().length());
+            onClientDisconnected(clientId);
+        }));
 
         notifyConnected(true);
     }
 
-    public void notifyConnected(boolean connected) throws MqttException {
+    public void notifyConnected(boolean connected) throws MessagingException {
         //Notify any clients that the server has been connected
         final byte[] connectedMsg = ConnectionStatus.newBuilder().setConnected(connected).build().toByteArray();
-        client.publish(serverTopics.status, new MqttMessage(connectedMsg));
+        client.publish(serverTopics.status, connectedMsg);
     }
 
     private void onClientDisconnected(String clientId) {
@@ -196,11 +195,11 @@ public class MqttServer {
                 RpcMessage rpcMessage = RpcMessage.newBuilder()
                         .setStatus(grpcStatus)
                         .setCallId(callId)
-                        .setSequence(MessageProcessor.INTERRUPT_SEQUENCE)
+                        .setSequence(MsgProcessor.INTERRUPT_SEQUENCE)
                         .build();
                 //Note that because this is a cancel it will get processed immediately by queueClientMessage
                 //so setting INTERRUPT_SEQUENCE above was strictly unnecessary.
-                messageHandler.queueClientMessage(new MessageProcessor.MessageWithTopic(rpcMessage));
+                messageHandler.queueClientMessage(new MsgProcessor.MessageWithTopic(rpcMessage));
             }
         }
     }
@@ -208,12 +207,12 @@ public class MqttServer {
     public void close() {
         try {
             //TODO: make const timeout, cancel all calls? Empty map?
-            client.unsubscribe(serverTopics.servicesIn + "/#").waitForCompletion(5000);
-            client.unsubscribe(serverTopics.statusPrompt).waitForCompletion(5000);
-            client.unsubscribe(serverTopics.statusClients + "/#").waitForCompletion(5000);
+            client.unsubscribeAll(serverTopics.servicesIn);
+            client.unsubscribe(serverTopics.statusPrompt);
+            client.unsubscribeAll(serverTopics.statusClients );
             notifyConnected(false);
-        } catch (MqttException e) {
-            log.error("Failed to unsub", e);
+        } catch (MessagingException e) {
+            log.error("Failed to unsubscribe", e);
         }
     }
 
@@ -241,10 +240,10 @@ public class MqttServer {
         try {
             log.debug("Sending {} {} {} on: {} ",
                     new Object[]{message.getMessageCase(), message.getSequence(), Id.shrt(message.getCallId()), topic});
-            client.publish(topic, message.toByteArray(), 1, false);
-        } catch (MqttException e) {
+            client.publish(topic, message.toByteArray());
+        } catch (MessagingException e) {
             //We can only log the exception here as the broker is broken
-            log.error("Failed to publish message to broker", e);
+            log.error("Failed to publish message", e);
         }
 
     }
@@ -263,11 +262,11 @@ public class MqttServer {
     }
 
 
-    private class MgMessageHandler implements MessageProcessor.MessageHandler {
+    private class MgMessageHandler implements MsgProcessor.MessageHandler {
         private final String callId;
         private String clientId;
 
-        private MqttServerCall serverCall;
+        private MsgServerCall serverCall;
 
         /**
          * This will be set when the call is half closed or removed so that it will no longer
@@ -276,18 +275,18 @@ public class MqttServer {
         private boolean removed = false;
 
 
-        private final MessageProcessor messageProcessor;
+        private final MsgProcessor msgProcessor;
 
         private MgMessageHandler(String callId, Executor executor, int queueSize) {
             this.callId = callId;
-            messageProcessor = new MessageProcessor(executor, queueSize, this);
+            msgProcessor = new MsgProcessor(executor, queueSize, this);
         }
 
         public String getClientId(){
             return clientId;
         }
 
-        public void queueClientMessage(MessageProcessor.MessageWithTopic messageWithTopic) {
+        public void queueClientMessage(MsgProcessor.MessageWithTopic messageWithTopic) {
 
             //Check if this is a cancel message.
             //If we queue a cancel message it won't get processed until after the previous message
@@ -312,7 +311,7 @@ public class MqttServer {
                     return;
                 }
             }
-            messageProcessor.queueMessage(messageWithTopic);
+            msgProcessor.queueMessage(messageWithTopic);
         }
 
 
@@ -323,7 +322,7 @@ public class MqttServer {
          * @param messageWithTopic
          */
         @Override
-        public void onBrokerMessage(MessageProcessor.MessageWithTopic messageWithTopic) {
+        public void onBrokerMessage(MsgProcessor.MessageWithTopic messageWithTopic) {
 
             if (removed) {
                 log.debug("Message received for removed handler {}, returning", callId);
@@ -368,7 +367,7 @@ public class MqttServer {
                 }
                 final ServerCallHandler<?, ?> serverCallHandler = serverMethodDefinition.getServerCallHandler();
 
-                serverCall = new MqttServerCall<>(client, serverMethodDefinition.getMethodDescriptor(),
+                serverCall = new MsgServerCall<>(serverMethodDefinition.getMethodDescriptor(),
                         header, callId);
 
                 //Extract the clientId from the header. It may be used later to find calls for a
@@ -398,7 +397,7 @@ public class MqttServer {
 
 
         public void remove() {
-            MqttServer.this.removeCall(this.callId);
+            MsgServer.this.removeCall(this.callId);
             this.removed = true;
         }
 
@@ -409,10 +408,9 @@ public class MqttServer {
          * by calling listener.onMessage(). When the method implementation sends a message to the response/server
          * stream of the method it will call ServerCall.sendMessage()
          */
-        private class MqttServerCall<ReqT, RespT> extends ServerCall<ReqT, RespT> {
+        private class MsgServerCall<ReqT, RespT> extends ServerCall<ReqT, RespT> {
 
             final MethodDescriptor<ReqT, RespT> methodDescriptor;
-            final MqttAsyncClient client;
             final Header header;
             final String callId;
             int sequence = 0;
@@ -423,9 +421,8 @@ public class MqttServer {
             private Context.CancellableContext cancellableContext = null;
             private Context context = null;
 
-            MqttServerCall(MqttAsyncClient client, MethodDescriptor<ReqT, RespT> methodDescriptor, Header header, String callId) {
+            MsgServerCall(MethodDescriptor<ReqT, RespT> methodDescriptor, Header header, String callId) {
                 this.methodDescriptor = methodDescriptor;
-                this.client = client;
                 this.header = header;
                 this.callId = callId;
             }

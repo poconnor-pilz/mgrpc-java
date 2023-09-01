@@ -10,16 +10,14 @@ import io.grpc.stub.ServerCallStreamObserver;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.EmbeddedBroker;
 import io.mgrpc.Id;
-import io.mgrpc.MqttChannel;
-import io.mgrpc.MqttServer;
+import io.mgrpc.MsgChannel;
+import io.mgrpc.MsgServer;
+import io.mgrpc.utils.MqttMessagingClient;
 import io.mgrpc.utils.MqttUtils;
-import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
-import org.eclipse.paho.client.mqttv3.MqttException;
 import org.junit.jupiter.api.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -35,11 +33,11 @@ public class TestCancelAndTimeout {
 
 
 
-    private static MqttAsyncClient serverMqtt;
-    private static MqttAsyncClient clientMqtt;
+    private static MqttMessagingClient serverMqtt;
+    private static MqttMessagingClient clientMqtt;
 
-    private MqttChannel channel;
-    private MqttServer server;
+    private MsgChannel channel;
+    private MsgServer server;
 
 
     //Make server name short but random to prevent stray status messages from previous tests affecting this test
@@ -47,14 +45,14 @@ public class TestCancelAndTimeout {
 
 
     @BeforeAll
-    public static void startClients() throws Exception, IOException {
+    public static void startClients() throws Exception {
         EmbeddedBroker.start();
         serverMqtt = MqttUtils.makeClient();
         clientMqtt = MqttUtils.makeClient(null);
     }
 
     @AfterAll
-    public static void stopClients() throws MqttException {
+    public static void stopClients() throws Exception {
         serverMqtt.disconnect();
         serverMqtt.close();
         serverMqtt = null;
@@ -68,10 +66,10 @@ public class TestCancelAndTimeout {
     void setup() throws Exception {
 
         //Set up the server
-        server = new MqttServer(serverMqtt, SERVER);
+        server = new MsgServer(serverMqtt, SERVER);
         server.init();
         final String clientId = Id.random();
-        channel = new MqttChannel(clientMqtt, clientId, SERVER);
+        channel = new MsgChannel(clientMqtt, clientId, SERVER);
         channel.init();
     }
 
@@ -271,7 +269,7 @@ public class TestCancelAndTimeout {
 
         server.close();
         //Make a server with queue size 10
-        server = new MqttServer(serverMqtt, SERVER, 10);
+        server = new MsgServer(serverMqtt, SERVER, 10);
         server.init();
 
         final CountDownLatch serviceLatch = new CountDownLatch(1);
@@ -335,7 +333,7 @@ public class TestCancelAndTimeout {
         channel.close();
         //Make a channel with queue size 10
         final String clientId = Id.random();
-        channel = new MqttChannel(serverMqtt, SERVER, clientId, 10);
+        channel = new MsgChannel(serverMqtt, SERVER, clientId, 10);
         channel.init();
 
         final CountDownLatch serverCancelledLatch = new CountDownLatch(1);

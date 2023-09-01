@@ -11,7 +11,7 @@ import java.util.concurrent.ConcurrentMap;
 
 //Copied from io.grpc.util.MutableHandlerRegistry
 //Saves us having to include grpc.core in our build
-public class MqttInternalHandlerRegistry extends HandlerRegistry {
+public class MInternalHandlerRegistry extends HandlerRegistry {
     private final ConcurrentMap<String, ServerServiceDefinition> services
             = new ConcurrentHashMap<>();
 

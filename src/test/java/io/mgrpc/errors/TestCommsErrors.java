@@ -6,8 +6,8 @@ import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
+import io.mgrpc.utils.MqttMessagingClient;
 import io.mgrpc.utils.MqttUtils;
-import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
@@ -26,8 +26,8 @@ public class TestCommsErrors {
     private static final String SERVER = Id.shrt(Id.random());
 
 
-    private static MqttAsyncClient serverMqtt;
-    private static MqttAsyncClient clientMqtt;
+    private static MqttMessagingClient serverMqtt;
+    private static MqttMessagingClient clientMqtt;
 
     @BeforeAll
     public static void startClients() throws Exception {
@@ -57,7 +57,7 @@ public class TestCommsErrors {
 
         //Verify that if a server is not connected then a call will fail with an UNAVAILABLE error
 
-        MqttChannel channel = new MqttChannel(clientMqtt, Id.random(), SERVER);
+        MsgChannel channel = new MsgChannel(clientMqtt, Id.random(), SERVER);
         channel.init();
         ErrorObserver errorObserver = new ErrorObserver("obs");
 
@@ -77,7 +77,7 @@ public class TestCommsErrors {
         //Verify that a call succeeds even if the server is connected sometime after the channel
         //but before the call is made
 
-        MqttChannel channel = new MqttChannel(clientMqtt, Id.random(), SERVER);
+        MsgChannel channel = new MsgChannel(clientMqtt, Id.random(), SERVER);
         channel.init();
         ErrorObserver errorObserver = new ErrorObserver("obs");
 
@@ -85,7 +85,7 @@ public class TestCommsErrors {
         Thread.sleep(500);
 
         //The server will send a connected status when it starts up
-        MqttServer server = new MqttServer(serverMqtt, SERVER);
+        MsgServer server = new MsgServer(serverMqtt, SERVER);
         server.init();
         server.addService(new HelloService());
 
@@ -111,10 +111,10 @@ public class TestCommsErrors {
         //Note that in http grpc if the server is shutdown while streaming to a client
         //then the client will not receive an error. This may be because the server may re-connect and continue
         //In our case the channel will send an error and all client calls will be cleaned up
-        MqttChannel channel = new MqttChannel(clientMqtt, Id.random(), SERVER);
+        MsgChannel channel = new MsgChannel(clientMqtt, Id.random(), SERVER);
         channel.init();
-        MqttAsyncClient serverMqttWithLwt = MqttUtils.makeClient(new ServerTopics(SERVER).status);
-        MqttServer server = new MqttServer(serverMqttWithLwt, SERVER);
+        MqttMessagingClient serverMqttWithLwt = MqttUtils.makeClient(new ServerTopics(SERVER, "/").status);
+        MsgServer server = new MsgServer(serverMqttWithLwt, SERVER);
         server.init();
         server.addService(new HelloService());
 
@@ -144,12 +144,12 @@ public class TestCommsErrors {
         //Note that in http grpc if the server is shutdown while streaming to a client
         //then the client will not receive an error. This may be because the server may re-connect and continue
         //In our case the channel will send an error and all client calls will be cleaned up
-        MqttChannel channel = new MqttChannel(clientMqtt, Id.random(), SERVER);
+        MsgChannel channel = new MsgChannel(clientMqtt, Id.random(), SERVER);
         channel.init();
-        final String statusTopic = new ServerTopics(SERVER).status;
+        final String statusTopic = new ServerTopics(SERVER, "/").status;
         CloseableSocketFactory sf = new CloseableSocketFactory();
-        MqttAsyncClient serverMqttWithLwt = MqttUtils.makeClient(statusTopic, sf);
-        MqttServer server = new MqttServer(serverMqttWithLwt, SERVER);
+        MqttMessagingClient serverMqttWithLwt = MqttUtils.makeClient(statusTopic, sf);
+        MsgServer server = new MsgServer(serverMqttWithLwt, SERVER);
         server.init();
         server.addService(new HelloService());
 
@@ -183,11 +183,11 @@ public class TestCommsErrors {
         //io.grpc.StatusRuntimeException: CANCELLED: tryit
 
         final ListenForCancel listenForCancel = new ListenForCancel();
-        MqttServer server = new MqttServer(serverMqtt, SERVER);
+        MsgServer server = new MsgServer(serverMqtt, SERVER);
         server.init();
         server.addService(listenForCancel);
 
-        MqttChannel channel = new MqttChannel(clientMqtt, Id.random(), SERVER);
+        MsgChannel channel = new MsgChannel(clientMqtt, Id.random(), SERVER);
         channel.init();
 
         final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
@@ -227,15 +227,15 @@ public class TestCommsErrors {
         //io.grpc.StatusRuntimeException: CANCELLED: tryit
 
         final ListenForCancel listenForCancel = new ListenForCancel();
-        MqttServer server = new MqttServer(serverMqtt, SERVER);
+        MsgServer server = new MsgServer(serverMqtt, SERVER);
         server.init();
         server.addService(listenForCancel);
 
         CloseableSocketFactory sf = new CloseableSocketFactory();
         String clientId = Id.random();
-        String clientStatusTopic = new ServerTopics(SERVER).statusClients + "/" + clientId;
-        MqttAsyncClient clientMqttWithLwt = MqttUtils.makeClient(clientStatusTopic, sf);
-        MqttChannel channel = new MqttChannel(clientMqttWithLwt, clientId, SERVER);
+        String clientStatusTopic = new ServerTopics(SERVER, "/").statusClients + "/" + clientId;
+        MqttMessagingClient clientMqttWithLwt = MqttUtils.makeClient(clientStatusTopic, sf);
+        MsgChannel channel = new MsgChannel(clientMqttWithLwt, clientId, SERVER);
         channel.init();
 
         final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
