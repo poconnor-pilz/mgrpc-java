@@ -5,14 +5,16 @@
 
 
 plugins {
-    id 'java'
+    id 'java-library'
     id "com.google.protobuf" version "0.8.19"
+    id 'maven-publish'
 }
 
-group 'org.example'
+group 'io.mgrpc'
 version '1.0-SNAPSHOT'
 
 repositories {
+    mavenLocal()
     mavenCentral()
 }
 
@@ -38,8 +40,11 @@ dependencies {
     implementation group: 'org.eclipse.paho', name: 'org.eclipse.paho.client.mqttv3', version: '1.2.5'
 
     //Need this because grpc will generate code that has annotations from javax.annotation (@generated)
-    implementation group: "javax.annotation", name: "javax.annotation-api", version: "1.3.2"
-
+    if (JavaVersion.current().isJava9Compatible()) {
+        // Workaround for @javax.annotation.Generated
+        // see: https://github.com/grpc/grpc-java/issues/3633
+        implementation 'javax.annotation:javax.annotation-api:1.3.2'
+    }
     //For InProcess server
     testImplementation "io.grpc:grpc-core:${grpcVersion}"
 
@@ -85,6 +90,21 @@ test {
     useJUnitPlatform()
 }
 
+jar {
+    exclude '*.proto'
+    includeEmptyDirs false
+}
+
+publishing {
+    repositories {
+        mavenLocal()
+    }
+    publications {
+        mavenJava(MavenPublication) {
+            from components.java
+        }
+    }
+}
 
 protobuf {
     protoc {
