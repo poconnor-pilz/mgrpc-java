@@ -29,29 +29,29 @@ public class MqttUtils {
     }
 
 
-    public static MqttMessagingClient makeClient() throws Exception {
+    public static MqttAsyncClient makeClient() throws Exception {
         String brokerUrl = (String)getProperties().get("brokerUrl");
         return makeClient(null, brokerUrl);
     }
 
-    public static MqttMessagingClient makeClient(String lwtTopic) throws Exception {
+    public static MqttAsyncClient makeClient(String lwtTopic) throws Exception {
         String brokerUrl = (String)getProperties().get("brokerUrl");
         return makeClient(lwtTopic, brokerUrl);
     }
 
-    public static MqttMessagingClient makeClient(String lwtTopic, String brokerUrl) throws Exception {
+    public static MqttAsyncClient makeClient(String lwtTopic, String brokerUrl) throws Exception {
 
         return makeClient(lwtTopic, brokerUrl, null);
     }
 
-    public static MqttMessagingClient makeClient(String lwtTopic, SocketFactory socketFactory) throws Exception {
+    public static MqttAsyncClient makeClient(String lwtTopic, SocketFactory socketFactory) throws Exception {
 
         String brokerUrl = (String)getProperties().get("brokerUrl");
         return makeClient(lwtTopic, brokerUrl, socketFactory);
     }
 
 
-    public static MqttMessagingClient makeClient(String lwtTopic, String brokerUrl, SocketFactory socketFactory) throws Exception {
+    public static MqttAsyncClient makeClient(String lwtTopic, String brokerUrl, SocketFactory socketFactory) throws Exception {
         final MqttAsyncClient client;
         client = new MqttAsyncClient(
                 brokerUrl,
@@ -70,8 +70,7 @@ public class MqttUtils {
             mqttConnectOptions.setWill(lwtTopic, lwtMessage, 1, true);
         }
         client.connect(mqttConnectOptions).waitForCompletion();
-        return new MqttMessagingClient(client);
-
+        return client;
     }
 
 

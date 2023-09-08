@@ -27,8 +27,8 @@ public class MsgProcessor {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
     //Messages are ordered by sequence
-    private final BlockingQueue<MessageWithTopic> messageQueue = new PriorityBlockingQueue<>(1,
-            Comparator.comparingInt(o -> o.message.getSequence()));
+    private final BlockingQueue<RpcMessage> messageQueue = new PriorityBlockingQueue<>(1,
+            Comparator.comparingInt(o -> o.getSequence()));
 
     private final int queueSize;
 
@@ -52,28 +52,13 @@ public class MsgProcessor {
     }
 
 
-    public static class MessageWithTopic {
-        final String topic;
-        final RpcMessage message;
-
-        MessageWithTopic(String topic, RpcMessage message) {
-            this.topic = topic;
-            this.message = message;
-        }
-
-        MessageWithTopic(RpcMessage message) {
-            this("", message);
-        }
-
-    }
-
     public interface MessageHandler {
         /**
          * onMessage() may be called from multiple threads but only one onMessage will be active at a time.
          * So it is thread safe with respect to itself but cannot use thread locals
-         * @param messageWithTopic
+         * @param message
          */
-        void onBrokerMessage(MessageWithTopic messageWithTopic);
+        void onProviderMessage(RpcMessage message);
 
         /**
          * onQueueCapacityExceeded() is not thread safe and can be called at the same time as an
@@ -83,7 +68,7 @@ public class MsgProcessor {
     }
 
 
-    public void queueMessage(MessageWithTopic messageWithTopic) {
+    public void queueMessage(RpcMessage message) {
         //It would be simpler here to dedicate a single thread to a call
         //But this would mean that a call with low activity would hog that thread for its duration
         //With java project loom this would not matter as threads are cheap.
@@ -104,14 +89,14 @@ public class MsgProcessor {
             }
             if ((messageQueue.size() + 1) > queueSize) {
                 log.error("Queue capacity ({}) exceeded for call {}",
-                        queueSize, Id.shrt(messageWithTopic.message.getCallId()));
+                        queueSize, Id.shrt(message.getCallId()));
                 this.messageHandler.onQueueCapacityExceeded();
                 queueCapacityExceeded = true;
                 return;
             }
 //            log.debug("Queueing {} with sequence {}.", messageWithTopic.message.getMessageCase(),
 //                    messageWithTopic.message.getSequence());
-            messageQueue.put(messageWithTopic);
+            messageQueue.put(message);
             //Process queue on thread pool
             this.executor.execute(() -> processQueue());
         } catch (InterruptedException e) {
@@ -124,10 +109,9 @@ public class MsgProcessor {
         //service method call will only process one message in a stream at a time i.e. the
         //service method *call* behaves like an actor. However, the service method itself may have
         //many calls ongoing concurrently (unless the service developer synchronizes it).
-        MessageWithTopic messageWithTopic = messageQueue.poll();
-        while (messageWithTopic != null && !queueCapacityExceeded) {
+        RpcMessage message  = messageQueue.poll();
+        while (message != null && !queueCapacityExceeded) {
 
-            RpcMessage message = messageWithTopic.message;
             final int sequence = message.getSequence();
             if (sequence < 0) {
                 if(sequence != INTERRUPT_SEQUENCE) {
@@ -143,7 +127,7 @@ public class MsgProcessor {
                     //Put this out-of-order message back on the ordered queue and wait for the in-order message to arrive.
                     try {
                         log.warn("{} with sequence {}, is out of order. Putting back on queue.", message.getMessageCase(), sequence);
-                        messageQueue.put(messageWithTopic);
+                        messageQueue.put(message);
                     } catch (InterruptedException e) {
                         log.error("Interrupted while putting message back on queue", e);
                     }
@@ -158,14 +142,14 @@ public class MsgProcessor {
                 log.debug("Handling {} {} {}", new Object[]{message.getMessageCase(), message.getSequence(),
                         Id.shrt(message.getCallId())});
                 try {
-                    this.messageHandler.onBrokerMessage(messageWithTopic);
+                    this.messageHandler.onProviderMessage(message);
                 } catch (Exception ex){
                     log.error("Exception processing message in thread: " + Thread.currentThread().getName(), ex);
                 }
             }
 
             //get the next message and process it.
-            messageWithTopic = messageQueue.poll();
+            message = messageQueue.poll();
         }
     }
 

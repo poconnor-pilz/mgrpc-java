@@ -12,13 +12,12 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 import java.lang.invoke.MethodHandles;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.*;
 
-public class MsgChannel extends Channel {
+public class MsgChannel extends Channel implements MessagingListener{
 
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
@@ -44,17 +43,11 @@ public class MsgChannel extends Channel {
     }
 
 
-    private final MessagingClient client;
-    /**
-     * The topic prefix of the server e.g. devices/device1
-     */
-    private final ServerTopics serverTopics;
+    private final MessagingProvider messagingProvider;
 
     private final String clientId;
 
-    private boolean serverConnected;
     private boolean initialized = false;
-    private CountDownLatch serverConnectedLatch;
 
     private final Map<String, MsgClientCall> clientCallsById = new ConcurrentHashMap<>();
 
@@ -67,76 +60,35 @@ public class MsgChannel extends Channel {
     public static final int DEFAULT_QUEUE_SIZE = 100;
     private final int queueSize;
 
-    private final String replyTopicPrefix;
-
 
     /**
-     * @param client           PubsubClient
-     * @param serverTopic      The root topic of the server to connect to e.g. "tenant1/device1"
-     *                         Requests will be sent to {serverTopic}/i/svc/{service}/{method}
+     * @param messagingProvider           PubsubClient
      * @param clientId         The client id for the channel. Should be unique.
-     * @param replyTopicPrefix The channel will subscribe for replies on subtopics of {replyTopicPrefix}
-     *                         The channel will receive replies to a specific call on
-     *                         {replyTopicPrefix}/{service}/{method}/{callId}
      * @param queueSize        The size of the message queue for each call's replies
      * @param executor         Executor on which replies will be processed.
      */
-    public MsgChannel(MessagingClient client, String serverTopic, String clientId,
-                      String replyTopicPrefix, int queueSize, Executor executor) {
-        this.client = client;
-        this.serverTopics = new ServerTopics(serverTopic, client.topicSeparator());
+    public MsgChannel(MessagingProvider messagingProvider, String clientId, int queueSize, Executor executor) {
+        this.messagingProvider = messagingProvider;
         this.clientId = clientId;
         this.executor = executor;
         this.queueSize = queueSize;
-        if (replyTopicPrefix != null) {
-            this.replyTopicPrefix = replyTopicPrefix;
-        } else {
-            this.replyTopicPrefix = serverTopics.servicesOutForClient(clientId);
-        }
     }
 
     /**
-     * @param client      PubsubClient
-     * @param serverTopic The root topic of the server to connect to e.g. "tenant1/device1"
-     *                    Requests will be sent to {serverTopic}/i/svc/{service}/{method}
-     *                    The channel will subscribe for replies on {serverTopic}/o/svc/{clientId}/#
-     *                    The channel will receive replies to a specific call on
-     *                    {serverTopic}/o/svc/{clientId}/{service}/{method}/{callId}
-     * @param clientId    The client id for the channel. Should be unique.
-     * @param queueSize   The size of the message queue for each call's replies
-     * @param executor    Executor on which replies will be processed.
-     */
-    public MsgChannel(MessagingClient client, String serverTopic, String clientId,
-                      int queueSize, Executor executor) {
-        this(client, serverTopic, clientId, null, queueSize, executor);
-    }
-
-
-    /**
-     * @param client      PubsubClient
-     * @param serverTopic The root topic of the server to connect to e.g. "tenant1/device1"
-     *                    Requests will be sent to {serverTopic}/i/svc/{service}/{method}
-     *                    The channel will subscribe for replies on subtopics of {serverTopic}/o/svc/{clientId}
-     *                    The channel will receive replies to a specific call on
-     *                    {serverTopic}/o/svc/{clientId}/{service}/{method}/{callId}
+     * @param messagingProvider      PubsubClient
      * @param clientId    The client id for the channel. Should be unique.
      * @param queueSize   The size of the message queue for each call's replies
      */
-    public MsgChannel(MessagingClient client, String serverTopic, String clientId, int queueSize) {
-        this(client, serverTopic, clientId, queueSize, getExecutorInstance());
+    public MsgChannel(MessagingProvider messagingProvider, String clientId, int queueSize) {
+        this(messagingProvider, clientId, queueSize, getExecutorInstance());
     }
 
     /**
-     * @param client      Mqtt client
-     * @param serverTopic The root topic of the server to connect to e.g. "tenant1/device1"
-     *                    Requests will be sent to {serverTopic}/i/svc/{service}/{method}
-     *                    The channel will subscribe for replies on subtopics of {serverTopic}/o/svc/{clientId}
-     *                    The channel will receive replies to a specific call on
-     *                    {serverTopic}/o/svc/{clientId}/{service}/{method}/{callId}
+     * @param messagingProvider      Mqtt client
      * @param clientId    The client id for the channel. Should be unique.
      */
-    public MsgChannel(MessagingClient client, String clientId, String serverTopic) {
-        this(client, serverTopic, clientId, DEFAULT_QUEUE_SIZE, getExecutorInstance());
+    public MsgChannel(MessagingProvider messagingProvider, String clientId ) {
+        this(messagingProvider, clientId, DEFAULT_QUEUE_SIZE, getExecutorInstance());
     }
 
 
@@ -147,70 +99,31 @@ public class MsgChannel extends Channel {
      */
     public void init() throws MessagingException {
 
-
-        final MessagingListener replyListener = new MessagingListenerExceptionLogger((String topic, byte[] buffer) -> {
-            final RpcMessage message;
-            try {
-                message = RpcMessage.parseFrom(buffer);
-            } catch (InvalidProtocolBufferException e) {
-                log.error("Failed to parse RpcMessage", e);
-                return;
-            }
-            final MsgClientCall call = clientCallsById.get(message.getCallId());
-            if (call == null) {
-                log.error("Could not find call with callId: " + Id.shrt(message.getCallId()) + " for message " + message.getSequence());
-                return;
-            }
-            call.queueServerMessage(message);
-        });
-
-        //This will throw an exception if it times out.
-        log.debug("Subscribing for responses on: " + this.replyTopicPrefix);
-        client.subscribeAll(this.replyTopicPrefix, replyListener);
-
-        client.subscribe(serverTopics.status, new MessagingListenerExceptionLogger((String topic, byte[] buffer) -> {
-            try {
-                this.serverConnected = ConnectionStatus.parseFrom(buffer).getConnected();
-            } catch (InvalidProtocolBufferException e) {
-                log.error("Failed to parse connection status", e);
-                return;
-            }
-            log.debug("Server connected status = " + this.serverConnected);
-            if (!this.serverConnected) {
-                //Clean up all existing calls because the server has been disconnected.
-                this.onServerDisconnected();
-            }
-            this.serverConnectedLatch.countDown();
-        }));
-        pingServer();
+        messagingProvider.connectListener(this);
         initialized = true;
     }
 
-    /**
-     * Some tests will not use a real server that responds to pings.
-     * The channel will fail to send messages if it thinks that a server is not connected.
-     * This method will fool the channel into thinking that a real server is connected.
-     */
-    public void fakeServerConnectedForTests() {
-        this.serverConnected = true;
-    }
-
-    /**
-     * Send the server an empty message to the prompt topic to prompt it so send back its status
-     * This will be handled in the client.subscribe(Topics.statusOut(serverTopic) set up in this.init()
-     */
-    private void pingServer() {
-        this.serverConnectedLatch = new CountDownLatch(1);
-        //In case the server is already started, prompt it to send its connection status
-        //If it is not started it will send connection status when it does start.
+    @Override
+    public void onMessage(String topic, byte[] buffer) throws Exception {
+        final RpcMessage message;
         try {
-            client.publish(serverTopics.statusPrompt, new byte[0]);
-        } catch (MessagingException e) {
-            throw new StatusRuntimeException(Status.UNAVAILABLE.fromThrowable(e));
+            message = RpcMessage.parseFrom(buffer);
+        } catch (InvalidProtocolBufferException e) {
+            log.error("Failed to parse RpcMessage", e);
+            return;
         }
+        final MsgClientCall call = clientCallsById.get(message.getCallId());
+        if (call == null) {
+            log.error("Could not find call with callId: " + Id.shrt(message.getCallId()) + " for message " + message.getSequence());
+            return;
+        }
+        call.queueServerMessage(message);
+
     }
 
-    private void onServerDisconnected() {
+    @Override
+    public void onCounterpartDisconnected(String clientId) {
+        //Clean up all existing calls because the server has been disconnected.
         //Interrupt the client's call queue with an unavailable status, the call will be cleaned up when it is closed.
         //We could just call close on the call directly but we want the call to finish processing whatever
         //message it has first and if we put it on the queue it means we don't have to worry about thread safety.
@@ -229,19 +142,7 @@ public class MsgChannel extends Channel {
 
 
     public void close() {
-        try {
-            //TODO: make const timeout, cancel all calls? Empty map?
-            //Notify that this client has been closed so that any server with ongoing calls can cancel them and
-            //release resources.
-            String statusTopic = ServerTopics.make(client.topicSeparator(), serverTopics.statusClients, this.clientId);
-            log.debug("Closing channel. Sending notification on " + statusTopic);
-            final byte[] connectedMsg = ConnectionStatus.newBuilder().setConnected(false).build().toByteArray();
-            client.publish(statusTopic, connectedMsg);
-            client.unsubscribeAll(this.replyTopicPrefix);
-            client.unsubscribe(serverTopics.statusPrompt);
-        } catch (MessagingException e) {
-            log.error("Failed to unsub", e);
-        }
+        messagingProvider.disconnectListener();
     }
 
 
@@ -254,7 +155,7 @@ public class MsgChannel extends Channel {
 
     @Override
     public String authority() {
-        return serverTopics.root;
+        return "";
     }
 
     public Stats getStats() {
@@ -284,105 +185,108 @@ public class MsgChannel extends Channel {
      */
     public <T> void subscribe(String responseTopic, Parser<T> parser, final StreamObserver<T> streamObserver) {
 
-        List<StreamObserver> subscribers = subscribersByTopic.get(responseTopic);
-        if (subscribers != null) {
-            subscribers.add(streamObserver);
-            return;
-        }
+        //TODO: Get this working again
 
-        final MessagingListener messageListener = new MessagingListenerExceptionLogger((String topic, byte[] buffer) -> {
-            final List<StreamObserver> observers = subscribersByTopic.get(topic);
-            if (observers == null) {
-                //We should not receive any messages if there are no subscribers
-                log.warn("No subscribers for " + topic);
-                return;
-            }
-            final RpcMessage message;
-            try {
-                message = RpcMessage.parseFrom(buffer);
-            } catch (InvalidProtocolBufferException e) {
-                log.error("Failed to parse RpcMessage", e);
-                return;
-            }
-            switch (message.getMessageCase()) {
-                case VALUE:
-                    final T value;
-                    try {
-                        value = parser.parseFrom(message.getValue().getContents());
-                    } catch (InvalidProtocolBufferException e) {
-                        log.error("Failed to parse Value", e);
-                        return;
-                    }
-                    for (StreamObserver observer : observers) {
-                        observer.onNext(value);
-                    }
-                    return;
-                case STATUS:
-                    Status status = googleRpcStatusToGrpcStatus(message.getStatus());
-                    if (status.isOk()) {
-                        for (StreamObserver observer : observers) {
-                            observer.onCompleted();
-                        }
-                    } else {
-                        final StatusRuntimeException sre = new StatusRuntimeException(status, null);
-                        for (StreamObserver observer : observers) {
-                            observer.onError(sre);
-                        }
-                    }
-                    subscribersByTopic.remove(topic);
-                    client.unsubscribe(topic);
-                    return;
-            }
-        });
-
-        try {
-            client.subscribe(responseTopic, messageListener);
-            if (subscribers == null) {
-                subscribers = new ArrayList<>();
-                subscribersByTopic.put(responseTopic, subscribers);
-            }
-            subscribers.add(streamObserver);
-        } catch (MessagingException e) {
-            throw new StatusRuntimeException(Status.UNAVAILABLE.fromThrowable(e));
-        }
-
+//        List<StreamObserver> subscribers = subscribersByTopic.get(responseTopic);
+//        if (subscribers != null) {
+//            subscribers.add(streamObserver);
+//            return;
+//        }
+//
+//        final MessagingListener messageListener = new MessagingListenerExceptionLogger((String topic, byte[] buffer) -> {
+//            final List<StreamObserver> observers = subscribersByTopic.get(topic);
+//            if (observers == null) {
+//                //We should not receive any messages if there are no subscribers
+//                log.warn("No subscribers for " + topic);
+//                return;
+//            }
+//            final RpcMessage message;
+//            try {
+//                message = RpcMessage.parseFrom(buffer);
+//            } catch (InvalidProtocolBufferException e) {
+//                log.error("Failed to parse RpcMessage", e);
+//                return;
+//            }
+//            switch (message.getMessageCase()) {
+//                case VALUE:
+//                    final T value;
+//                    try {
+//                        value = parser.parseFrom(message.getValue().getContents());
+//                    } catch (InvalidProtocolBufferException e) {
+//                        log.error("Failed to parse Value", e);
+//                        return;
+//                    }
+//                    for (StreamObserver observer : observers) {
+//                        observer.onNext(value);
+//                    }
+//                    return;
+//                case STATUS:
+//                    Status status = googleRpcStatusToGrpcStatus(message.getStatus());
+//                    if (status.isOk()) {
+//                        for (StreamObserver observer : observers) {
+//                            observer.onCompleted();
+//                        }
+//                    } else {
+//                        final StatusRuntimeException sre = new StatusRuntimeException(status, null);
+//                        for (StreamObserver observer : observers) {
+//                            observer.onError(sre);
+//                        }
+//                    }
+//                    subscribersByTopic.remove(topic);
+//                    client.unsubscribe(topic);
+//                    return;
+//            }
+//        });
+//
+//        try {
+//            client.subscribe(responseTopic, messageListener);
+//            if (subscribers == null) {
+//                subscribers = new ArrayList<>();
+//                subscribersByTopic.put(responseTopic, subscribers);
+//            }
+//            subscribers.add(streamObserver);
+//        } catch (MessagingException e) {
+//            throw new StatusRuntimeException(Status.UNAVAILABLE.fromThrowable(e));
+//        }
+//
     }
+
 
     /**
      * Unsubscribe all StreamObservers from responseTopic
      */
-    public void unsubscribe(String responseTopic) {
-        final List<StreamObserver> observers = subscribersByTopic.get(responseTopic);
-        if (observers != null) {
-            subscribersByTopic.remove(responseTopic);
-            try {
-                client.unsubscribe(responseTopic);
-            } catch (MessagingException e) {
-                log.error("Failed to unsubscribe for " + responseTopic, e);
-            }
-        } else {
-            log.warn("No subscription found for responseTopic: " + responseTopic);
-        }
-    }
+//    public void unsubscribe(String responseTopic) {
+//        final List<StreamObserver> observers = subscribersByTopic.get(responseTopic);
+//        if (observers != null) {
+//            subscribersByTopic.remove(responseTopic);
+//            try {
+//                messagingProvider.unsubscribe(responseTopic);
+//            } catch (MessagingException e) {
+//                log.error("Failed to unsubscribe for " + responseTopic, e);
+//            }
+//        } else {
+//            log.warn("No subscription found for responseTopic: " + responseTopic);
+//        }
+//    }
 
     /**
      * Unsubscribe a specific StreamObserver from responseTopic
      */
-    public void unsubscribe(String responseTopic, StreamObserver observer) {
-        final List<StreamObserver> observers = subscribersByTopic.get(responseTopic);
-        if (observers != null) {
-            if (!observers.remove(observer)) {
-                log.warn("Observer not found");
-            }
-            if (observers.isEmpty()) {
-                try {
-                    client.unsubscribe(responseTopic);
-                } catch (MessagingException e) {
-                    log.error("Failed to unsubscribe for " + responseTopic, e);
-                }
-            }
-        }
-    }
+//    public void unsubscribe(String responseTopic, StreamObserver observer) {
+//        final List<StreamObserver> observers = subscribersByTopic.get(responseTopic);
+//        if (observers != null) {
+//            if (!observers.remove(observer)) {
+//                log.warn("Observer not found");
+//            }
+//            if (observers.isEmpty()) {
+//                try {
+//                    messagingProvider.unsubscribe(responseTopic);
+//                } catch (MessagingException e) {
+//                    log.error("Failed to unsubscribe for " + responseTopic, e);
+//                }
+//            }
+//        }
+//    }
 
 
     /**
@@ -395,6 +299,7 @@ public class MsgChannel extends Channel {
     }
 
 
+
     private class MsgClientCall<ReqT, RespT> extends ClientCall<ReqT, RespT> implements MsgProcessor.MessageHandler {
 
         final MethodDescriptor<ReqT, RespT> methodDescriptor;
@@ -403,7 +308,6 @@ public class MsgChannel extends Channel {
         final Executor clientExecutor;
         final String callId;
         int sequence = 0;
-        final String replyTo;
         Listener<RespT> responseListener;
         private ScheduledFuture<?> deadlineCancellationFuture;
         private boolean cancelCalled = false;
@@ -428,7 +332,6 @@ public class MsgChannel extends Channel {
             this.callOptions = callOptions;
             this.context = Context.current().withCancellation();
             this.callId = Id.random();
-            this.replyTo = ServerTopics.replyTopic(replyTopicPrefix, client.topicSeparator(), methodDescriptor.getFullMethodName(), callId);
             msgProcessor = new MsgProcessor(executor, queueSize, this);
         }
 
@@ -499,21 +402,6 @@ public class MsgChannel extends Channel {
         @Override
         public void sendMessage(ReqT message) {
 
-            if (!serverConnected) {
-                //The server should have an mqtt LWT that reliably sends a message when it is disconnected.
-                //Nevertheless send it a ping to make double sure that it is definitely not connected.
-                pingServer();
-                try {
-                    serverConnectedLatch.await(2, TimeUnit.SECONDS);
-                } catch (InterruptedException e) {
-                    log.error("", e);
-                }
-                if (!serverConnected) {
-                    this.close(Status.UNAVAILABLE.withDescription("Server is not connected"));
-                }
-            }
-
-
             //Send message to the server
             final RpcMessage.Builder msgBuilder = RpcMessage.newBuilder()
                     .setCallId(callId);
@@ -533,6 +421,7 @@ public class MsgChannel extends Channel {
                 //This is the start of the call so make a Start message with a header
                 Header.Builder header = Header.newBuilder();
                 header.setClientId(clientId);
+                header.setMethodName(methodDescriptor.getFullMethodName());
                 if (effectiveDeadline != null) {
                     header.setTimeoutMillis(effectiveDeadline.timeRemaining(TimeUnit.MILLISECONDS));
                 }
@@ -544,8 +433,6 @@ public class MsgChannel extends Channel {
                     log.debug("replyTo topic = " + responseTopic);
                     header.setReplyTo(responseTopic);
                     close(Status.OK);
-                } else {
-                    header.setReplyTo(this.replyTo);
                 }
 
                 //Add metadata to header
@@ -573,7 +460,12 @@ public class MsgChannel extends Channel {
             }
             msgBuilder.setSequence(sequence);
 
-            sendToBroker(methodDescriptor.getFullMethodName(), msgBuilder);
+            try {
+                send(methodDescriptor.getFullMethodName(), msgBuilder);
+            } catch (MessagingException sre){
+                this.close(sre.getStatus());
+                return;
+            }
             responseListener.onReady();
         }
 
@@ -591,7 +483,7 @@ public class MsgChannel extends Channel {
 
 
         public void queueServerMessage(RpcMessage message) {
-            this.msgProcessor.queueMessage(new MsgProcessor.MessageWithTopic(message));
+            this.msgProcessor.queueMessage(message);
         }
 
 
@@ -599,12 +491,10 @@ public class MsgChannel extends Channel {
          * onMessage() may be called from multiple threads but only one onMessage will be active at a time.
          * So it is thread safe with respect to itself but cannot use thread locals
          *
-         * @param messageWithTopic
+         * @param message
          */
         @Override
-        public void onBrokerMessage(MsgProcessor.MessageWithTopic messageWithTopic) {
-
-            final RpcMessage message = messageWithTopic.message;
+        public void onProviderMessage(RpcMessage message) {
 
             switch (message.getMessageCase()) {
                 case STATUS:
@@ -646,7 +536,11 @@ public class MsgChannel extends Channel {
                     .setCallId(callId)
                     .setSequence(sequence)
                     .setStatus(cancelled);
-            sendToBroker(methodDescriptor.getFullMethodName(), msgBuilder);
+            try {
+                send(methodDescriptor.getFullMethodName(), msgBuilder);
+            } catch (MessagingException e) {
+                log.error("onQueueCapacityExceeded() failed to send cancelled status", e);
+            }
 
         }
 
@@ -708,7 +602,11 @@ public class MsgChannel extends Channel {
                     .setCallId(callId)
                     .setSequence(sequence)
                     .setStatus(cancelled);
-            sendToBroker(methodDescriptor.getFullMethodName(), msgBuilder);
+            try {
+                send(methodDescriptor.getFullMethodName(), msgBuilder);
+            } catch (MessagingException e) {
+                throw new StatusRuntimeException(e.getStatus());
+            }
 
         }
 
@@ -726,24 +624,23 @@ public class MsgChannel extends Channel {
                     .setCallId(callId)
                     .setSequence(sequence)
                     .setStatus(ok);
-            sendToBroker(methodDescriptor.getFullMethodName(), msgBuilder);
+            try {
+                send(methodDescriptor.getFullMethodName(), msgBuilder);
+            } catch (MessagingException e) {
+                throw new StatusRuntimeException(e.getStatus());
+            }
         }
 
 
-        private void sendToBroker(String fullMethodName, RpcMessage.Builder messageBuilder) throws StatusRuntimeException {
+        private void send(String fullMethodName, RpcMessage.Builder messageBuilder) throws MessagingException {
             //fullMethodName will be e.g. "helloworld.ExampleHelloService/LotsOfReplies"
             if (!initialized) {
-                throw new StatusRuntimeException(Status.UNAVAILABLE.withDescription("channel.init() was not called"));
+                throw new MessagingException(Status.UNAVAILABLE.withDescription("channel.init() was not called"));
             }
-            try {
-                final String topic = serverTopics.methodIn(fullMethodName);
-                final RpcMessage message = messageBuilder.build();
-                log.debug("Sending {} {} {} on :{} ",
-                        new Object[]{message.getMessageCase(), message.getSequence(), Id.shrt(message.getCallId()), topic});
-                client.publish(topic, message.toByteArray());
-            } catch (MessagingException e) {
-                throw new StatusRuntimeException(Status.UNAVAILABLE.fromThrowable(e));
-            }
+            final RpcMessage message = messageBuilder.build();
+            log.debug("Sending {} {} {} ",
+                    new Object[]{message.getMessageCase(), message.getSequence(), Id.shrt(message.getCallId())});
+            messagingProvider.send(clientId, fullMethodName, message.toByteArray());
         }
 
 

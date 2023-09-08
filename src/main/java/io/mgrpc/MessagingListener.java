@@ -3,5 +3,7 @@ package io.mgrpc;
 
 public interface MessagingListener {
 
-    void messageArrived(String topic, byte[] buffer) throws Exception;
+    void onMessage(String topic, byte[] buffer) throws Exception;
+
+    void onCounterpartDisconnected(String clientId);
 }

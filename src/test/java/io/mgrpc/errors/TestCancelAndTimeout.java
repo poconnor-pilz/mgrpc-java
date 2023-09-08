@@ -12,8 +12,10 @@ import io.mgrpc.EmbeddedBroker;
 import io.mgrpc.Id;
 import io.mgrpc.MsgChannel;
 import io.mgrpc.MsgServer;
-import io.mgrpc.utils.MqttMessagingClient;
+import io.mgrpc.mqtt.MqttChannelMessageProvider;
+import io.mgrpc.mqtt.MqttServerMessageProvider;
 import io.mgrpc.utils.MqttUtils;
+import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.junit.jupiter.api.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,8 +35,8 @@ public class TestCancelAndTimeout {
 
 
 
-    private static MqttMessagingClient serverMqtt;
-    private static MqttMessagingClient clientMqtt;
+    private static MqttAsyncClient serverMqtt;
+    private static MqttAsyncClient clientMqtt;
 
     private MsgChannel channel;
     private MsgServer server;
@@ -66,10 +68,10 @@ public class TestCancelAndTimeout {
     void setup() throws Exception {
 
         //Set up the server
-        server = new MsgServer(serverMqtt, SERVER);
+        server = new MsgServer(new MqttServerMessageProvider(serverMqtt, SERVER));
         server.init();
         final String clientId = Id.random();
-        channel = new MsgChannel(clientMqtt, clientId, SERVER);
+        channel = new MsgChannel(new MqttChannelMessageProvider(clientMqtt, SERVER, clientId), clientId);
         channel.init();
     }
 
@@ -269,7 +271,7 @@ public class TestCancelAndTimeout {
 
         server.close();
         //Make a server with queue size 10
-        server = new MsgServer(serverMqtt, SERVER, 10);
+        server = new MsgServer(new MqttServerMessageProvider(serverMqtt, SERVER), 10);
         server.init();
 
         final CountDownLatch serviceLatch = new CountDownLatch(1);
@@ -333,7 +335,7 @@ public class TestCancelAndTimeout {
         channel.close();
         //Make a channel with queue size 10
         final String clientId = Id.random();
-        channel = new MsgChannel(serverMqtt, SERVER, clientId, 10);
+        channel = new MsgChannel(new MqttChannelMessageProvider(serverMqtt, SERVER, clientId), clientId, 10);
         channel.init();
 
         final CountDownLatch serverCancelledLatch = new CountDownLatch(1);

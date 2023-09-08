@@ -85,11 +85,10 @@ public class ServerTopics {
      * Return the replyTopic for a method call. Dots in fullMethodName will be replaced with slashes.
      * @param replyTopicPrefix e.g. "myServer/o/svc/dlfxl55d7hsn6lwl" (where "dlfxl55d7hsn6lwl" is clientId)
      * @param fullMethodName e.g. "helloworld.ExampleHelloService/LotsOfReplies"
-     * @param callId e.g. "ppjupponvo5vtpzt"
      * @return e.g "myServer/helloworld/ExampleHelloService/LotsOfReplies/ppjupponvo5vtpzt"
      */
-    public static String replyTopic(String replyTopicPrefix, String topicSeparator, String fullMethodName, String callId){
-        return make(topicSeparator, replyTopicPrefix, fullMethodName.replace(".", topicSeparator), callId);
+    public static String replyTopic(String replyTopicPrefix, String topicSeparator, String fullMethodName){
+        return make(topicSeparator, replyTopicPrefix, fullMethodName.replace(".", topicSeparator));
     }
 
     /**

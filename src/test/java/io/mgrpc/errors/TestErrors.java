@@ -13,8 +13,10 @@ import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.protobuf.StatusProto;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
-import io.mgrpc.utils.MqttMessagingClient;
+import io.mgrpc.mqtt.MqttChannelMessageProvider;
+import io.mgrpc.mqtt.MqttServerMessageProvider;
 import io.mgrpc.utils.MqttUtils;
+import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
 import org.junit.jupiter.api.*;
 import org.slf4j.Logger;
@@ -31,8 +33,8 @@ public class TestErrors {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-    private static MqttMessagingClient serverMqtt;
-    private static MqttMessagingClient clientMqtt;
+    private static MqttAsyncClient serverMqtt;
+    private static MqttAsyncClient clientMqtt;
 
     private MsgChannel channel;
     private MsgServer server;
@@ -64,10 +66,10 @@ public class TestErrors {
     void setup() throws Exception {
 
         //Set up the server
-        server = new MsgServer(serverMqtt, SERVER);
+        server = new MsgServer(new MqttServerMessageProvider(serverMqtt, SERVER));
         server.init();
         final String clientId = Id.random();
-        channel = new MsgChannel(clientMqtt, clientId, SERVER);
+        channel = new MsgChannel(new MqttChannelMessageProvider(clientMqtt, SERVER, clientId), clientId);
         channel.init();
     }
 

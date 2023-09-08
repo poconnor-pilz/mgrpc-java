@@ -1,32 +1,28 @@
 package io.mgrpc.examples.hello;
 
-import io.grpc.examples.helloworld.ExampleHelloServiceGrpc;
-import io.grpc.examples.helloworld.HelloReply;
-import io.grpc.examples.helloworld.HelloRequest;
-import io.grpc.stub.StreamObserver;
-import io.mgrpc.*;
-import io.mgrpc.utils.MqttMessagingClient;
+import io.mgrpc.EmbeddedBroker;
+import io.mgrpc.Id;
+import io.mgrpc.MsgChannel;
+import io.mgrpc.MsgServer;
+import io.mgrpc.mqtt.MqttChannelMessageProvider;
+import io.mgrpc.mqtt.MqttServerMessageProvider;
 import io.mgrpc.utils.MqttUtils;
-import io.mgrpc.utils.ToList;
+import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
 import org.junit.jupiter.api.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
-import java.util.Iterator;
-import java.util.List;
-import java.util.concurrent.CountDownLatch;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 
 public class TestSubscription {
 
     private static Logger log = LoggerFactory.getLogger(TestSubscription.class);
 
-    private static MqttMessagingClient serverMqtt;
-    private static MqttMessagingClient clientMqtt;
+    private static MqttAsyncClient serverMqtt;
+    private static MqttAsyncClient clientMqtt;
 
     private MsgChannel channel;
     private MsgServer server;
@@ -56,11 +52,11 @@ public class TestSubscription {
     void setup() throws Exception{
 
         //Set up the serverb
-        server = new MsgServer(serverMqtt, SERVER);
+        server = new MsgServer(new MqttServerMessageProvider(serverMqtt, SERVER));
         server.init();
         server.addService(new HelloServiceForTest());
         final String clientId = Id.random();
-        channel = new MsgChannel(clientMqtt, clientId, SERVER);
+        channel = new MsgChannel(new MqttChannelMessageProvider(clientMqtt, SERVER, clientId), clientId);
         channel.init();
     }
 
@@ -90,104 +86,107 @@ public class TestSubscription {
         //a single service via pub sub
         //See the java doc for MqttChannel.subscribe()
 
-        class HelloObserver implements StreamObserver<HelloReply>{
-
-            public final CountDownLatch countDownLatch;
-            public final List<HelloReply> replies = new ArrayList<>();
-
-            HelloObserver(CountDownLatch countDownLatch) {
-                this.countDownLatch = countDownLatch;
-            }
-
-            @Override
-            public void onNext(HelloReply helloReply) {
-                replies.add(helloReply);
-            }
-            @Override
-            public void onError(Throwable throwable) {
-                log.error("", throwable);
-            }
-            @Override
-            public void onCompleted() {
-                this.countDownLatch.countDown();
-            }
-        }
-
-        final String responseTopic1 = ServerTopics.out(clientMqtt.topicSeparator(), SERVER,"atesttopic");
-        final String responseTopic2 = ServerTopics.out(clientMqtt.topicSeparator(), SERVER,"atesttopic2");
-
-
-
-        //Subscribe for responses
-        CountDownLatch latch = new CountDownLatch(3);
-        HelloObserver obs1 = new HelloObserver(latch);
-        channel.subscribe(responseTopic1, HelloReply.parser(), obs1);
-        HelloObserver obs2 = new HelloObserver(latch);
-        channel.subscribe(responseTopic1, HelloReply.parser(), obs2);
-        HelloObserver obsTemp = new HelloObserver(latch);
-        channel.subscribe(responseTopic1, HelloReply.parser(), obsTemp);
-        assertEquals(channel.getStats().getSubscribers(), 3);
-
-        //Unsubscribe one of the observers of responseTopic1 and verify that it is removed
-        channel.unsubscribe(responseTopic1, obsTemp);
-        assertEquals(channel.getStats().getSubscribers(), 2);
-
-        HelloObserver obs3 = new HelloObserver(latch);
-        channel.subscribe(responseTopic2, HelloReply.parser(), obs3);
-        assertEquals(channel.getStats().getSubscribers(), 3);
-
-        //Send two requests each with a different responseTopic
-        final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub blockingStub1 =
-                ExampleHelloServiceGrpc.newBlockingStub(channel)
-                        .withOption(MsgChannel.RESPONSE_TOPIC, responseTopic1);
-
-        HelloRequest request1 = HelloRequest.newBuilder().setName("2").build();
-        final Iterator<HelloReply> helloReplyIterator = blockingStub1.lotsOfReplies(request1);
-        //The request should have no responses because all the responses are sent to the response topic
-        //instead of the replyTo
-        assertEquals(0, ToList.toList(helloReplyIterator).size());
-
-        final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub blockingStub2 =
-                ExampleHelloServiceGrpc.newBlockingStub(channel)
-                        .withOption(MsgChannel.RESPONSE_TOPIC, responseTopic2);
-        HelloRequest request2 = HelloRequest.newBuilder().setName("3").build();
-        blockingStub2.lotsOfReplies(request2);
-
-        latch.await();
-
-        //All subscriptions should be closed because the streams have completed
-        assertEquals(channel.getStats().getSubscribers(), 0);
-
-        assertEquals(obs1.replies.size(), 2);
-        assertEquals("Hello 0", obs1.replies.get(0).getMessage());
-        assertEquals("Hello 1", obs1.replies.get(1).getMessage());
-
-        assertEquals(obs2.replies.size(), 2);
-        assertEquals("Hello 0", obs2.replies.get(0).getMessage());
-        assertEquals("Hello 1", obs2.replies.get(1).getMessage());
-
-        assertEquals(obs3.replies.size(), 3);
-        assertEquals("Hello 0", obs3.replies.get(0).getMessage());
-        assertEquals("Hello 1", obs3.replies.get(1).getMessage());
-        assertEquals("Hello 2", obs3.replies.get(2).getMessage());
-
-        //obsTemp was unsubscribed and so should not receive any responses
-        assertEquals(obsTemp.replies.size(), 0);
-
-        checkForLeaks(0);
-
-        //Test unsubscribe of all observers to a responseTopic
-        channel.subscribe(responseTopic1, HelloReply.parser(), obs1);
-        channel.subscribe(responseTopic1, HelloReply.parser(), obs2);
-        channel.subscribe(responseTopic2, HelloReply.parser(), obs3);
-        assertEquals(3, channel.getStats().getSubscribers());
-
-        channel.unsubscribe(responseTopic1);
-        //All 2 of the subscribers to responseTopic1 should be removed
-        assertEquals(1, channel.getStats().getSubscribers());
-
-        channel.unsubscribe(responseTopic2);
-        assertEquals(0, channel.getStats().getSubscribers());
+        //TODO: fix this test
+        assertTrue(false);
+//
+//        class HelloObserver implements StreamObserver<HelloReply>{
+//
+//            public final CountDownLatch countDownLatch;
+//            public final List<HelloReply> replies = new ArrayList<>();
+//
+//            HelloObserver(CountDownLatch countDownLatch) {
+//                this.countDownLatch = countDownLatch;
+//            }
+//
+//            @Override
+//            public void onNext(HelloReply helloReply) {
+//                replies.add(helloReply);
+//            }
+//            @Override
+//            public void onError(Throwable throwable) {
+//                log.error("", throwable);
+//            }
+//            @Override
+//            public void onCompleted() {
+//                this.countDownLatch.countDown();
+//            }
+//        }
+//
+//        final String responseTopic1 = ServerTopics.out("/", SERVER,"atesttopic");
+//        final String responseTopic2 = ServerTopics.out("/", SERVER,"atesttopic2");
+//
+//
+//
+//        //Subscribe for responses
+//        CountDownLatch latch = new CountDownLatch(3);
+//        HelloObserver obs1 = new HelloObserver(latch);
+//        channel.subscribe(responseTopic1, HelloReply.parser(), obs1);
+//        HelloObserver obs2 = new HelloObserver(latch);
+//        channel.subscribe(responseTopic1, HelloReply.parser(), obs2);
+//        HelloObserver obsTemp = new HelloObserver(latch);
+//        channel.subscribe(responseTopic1, HelloReply.parser(), obsTemp);
+//        assertEquals(channel.getStats().getSubscribers(), 3);
+//
+//        //Unsubscribe one of the observers of responseTopic1 and verify that it is removed
+//        channel.unsubscribe(responseTopic1, obsTemp);
+//        assertEquals(channel.getStats().getSubscribers(), 2);
+//
+//        HelloObserver obs3 = new HelloObserver(latch);
+//        channel.subscribe(responseTopic2, HelloReply.parser(), obs3);
+//        assertEquals(channel.getStats().getSubscribers(), 3);
+//
+//        //Send two requests each with a different responseTopic
+//        final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub blockingStub1 =
+//                ExampleHelloServiceGrpc.newBlockingStub(channel)
+//                        .withOption(MsgChannel.RESPONSE_TOPIC, responseTopic1);
+//
+//        HelloRequest request1 = HelloRequest.newBuilder().setName("2").build();
+//        final Iterator<HelloReply> helloReplyIterator = blockingStub1.lotsOfReplies(request1);
+//        //The request should have no responses because all the responses are sent to the response topic
+//        //instead of the replyTo
+//        assertEquals(0, ToList.toList(helloReplyIterator).size());
+//
+//        final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub blockingStub2 =
+//                ExampleHelloServiceGrpc.newBlockingStub(channel)
+//                        .withOption(MsgChannel.RESPONSE_TOPIC, responseTopic2);
+//        HelloRequest request2 = HelloRequest.newBuilder().setName("3").build();
+//        blockingStub2.lotsOfReplies(request2);
+//
+//        latch.await();
+//
+//        //All subscriptions should be closed because the streams have completed
+//        assertEquals(channel.getStats().getSubscribers(), 0);
+//
+//        assertEquals(obs1.replies.size(), 2);
+//        assertEquals("Hello 0", obs1.replies.get(0).getMessage());
+//        assertEquals("Hello 1", obs1.replies.get(1).getMessage());
+//
+//        assertEquals(obs2.replies.size(), 2);
+//        assertEquals("Hello 0", obs2.replies.get(0).getMessage());
+//        assertEquals("Hello 1", obs2.replies.get(1).getMessage());
+//
+//        assertEquals(obs3.replies.size(), 3);
+//        assertEquals("Hello 0", obs3.replies.get(0).getMessage());
+//        assertEquals("Hello 1", obs3.replies.get(1).getMessage());
+//        assertEquals("Hello 2", obs3.replies.get(2).getMessage());
+//
+//        //obsTemp was unsubscribed and so should not receive any responses
+//        assertEquals(obsTemp.replies.size(), 0);
+//
+//        checkForLeaks(0);
+//
+//        //Test unsubscribe of all observers to a responseTopic
+//        channel.subscribe(responseTopic1, HelloReply.parser(), obs1);
+//        channel.subscribe(responseTopic1, HelloReply.parser(), obs2);
+//        channel.subscribe(responseTopic2, HelloReply.parser(), obs3);
+//        assertEquals(3, channel.getStats().getSubscribers());
+//
+//        channel.unsubscribe(responseTopic1);
+//        //All 2 of the subscribers to responseTopic1 should be removed
+//        assertEquals(1, channel.getStats().getSubscribers());
+//
+//        channel.unsubscribe(responseTopic2);
+//        assertEquals(0, channel.getStats().getSubscribers());
 
     }
 

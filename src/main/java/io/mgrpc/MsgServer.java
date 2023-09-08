@@ -16,7 +16,7 @@ import java.util.concurrent.*;
 import static io.mgrpc.RpcMessage.MessageCase.START;
 
 
-public class MsgServer {
+public class MsgServer implements MessagingListener {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
     private MInternalHandlerRegistry registry = new MInternalHandlerRegistry();
@@ -25,7 +25,6 @@ public class MsgServer {
     private final static Metadata EMPTY_METADATA = new Metadata();
 
     private final static int CANCELLED_CODE = Status.CANCELLED.getCode().value();
-
 
 
     private static volatile Executor executorSingleton;
@@ -42,7 +41,7 @@ public class MsgServer {
         return executorSingleton;
     }
 
-    private final MessagingClient client;
+    private final MessagingProvider messagingProvider;
 
     private final Map<String, MgMessageHandler> handlersByCallId = new ConcurrentHashMap<>();
 
@@ -58,7 +57,6 @@ public class MsgServer {
      */
     final ConcurrentHashMap<String, Long> recentlyRemovedCallIds = new ConcurrentHashMap<>();
 
-    private final ServerTopics serverTopics;
     private final Executor executor;
     private static final int DEFAULT_QUEUE_SIZE = 100;
     private final int queueSize;
@@ -66,29 +64,22 @@ public class MsgServer {
     private static final int SINGLE_MESSAGE_STREAM = 0;
 
     /**
-     * @param client PubsubClient
-     * @param serverTopic The root topic of the server e.g. "tenant1/device1"
-     *                   The server will subscribe for requests on subtopics of {serverTopic}/i/svc
-     *                   A request for a method should be sent to sent to {serverTopic}/i/svc/{service}/{method}
-     *                   Replies will be sent to whatever the client specifies in the message header's replyTo
-     *                   This will normally be:
-     *                   {serverTopic}/o/svc/{clientId}/{service}/{method}/{callId}
-     * @param queueSize  The size of the incoming message queue for each call
-     * @param executor   Executor which will process incoming message queues.
+     * @param messagingProvider PubsubClient
+     * @param queueSize         The size of the incoming message queue for each call
+     * @param executor          Executor which will process incoming message queues.
      */
-    public MsgServer(MessagingClient client, String serverTopic, int queueSize, Executor executor) {
-        this.client = client;
-        this.serverTopics = new ServerTopics(serverTopic, client.topicSeparator());
+    public MsgServer(MessagingProvider messagingProvider, int queueSize, Executor executor) {
+        this.messagingProvider = messagingProvider;
         this.executor = executor;
         this.queueSize = queueSize;
     }
 
-    public MsgServer(MessagingClient client, String serverTopic, int queueSize) {
-        this(client, serverTopic, queueSize, getExecutorInstance());
+    public MsgServer(MessagingProvider messagingProvider, int queueSize) {
+        this(messagingProvider, queueSize, getExecutorInstance());
     }
 
-    public MsgServer(MessagingClient client, String serverTopic) {
-        this(client, serverTopic, DEFAULT_QUEUE_SIZE, getExecutorInstance());
+    public MsgServer(MessagingProvider messagingProvider) {
+        this(messagingProvider, DEFAULT_QUEUE_SIZE, getExecutorInstance());
     }
 
 
@@ -102,7 +93,7 @@ public class MsgServer {
         registry.addService(service);
     }
 
-    public void setFallBackRegistry(HandlerRegistry fallBackRegistry){
+    public void setFallBackRegistry(HandlerRegistry fallBackRegistry) {
         this.fallBackRegistry = fallBackRegistry;
     }
 
@@ -113,46 +104,8 @@ public class MsgServer {
 
     public void init() throws MessagingException {
 
-        log.debug("subscribe server for all subtopics of: " + serverTopics.servicesIn);
 
-        client.subscribeAll(serverTopics.servicesIn, new MessagingListenerExceptionLogger((String topic, byte[] buffer) -> {
-            //We use an PubsubListenerExceptionLogger here because if a we throw an exception in the subscribe handler
-            //it will disconnect the mqtt client
-            final RpcMessage message;
-            try {
-                message = RpcMessage.parseFrom(buffer);
-            } catch (InvalidProtocolBufferException e) {
-                log.error("Failed to parse RpcMessage", e);
-                return;
-            }
-            log.debug("Received {} {} {} on : {}", new Object[]{message.getMessageCase(),
-                    message.getSequence(), Id.shrt(message.getCallId()), topic});
-            final String callId = message.getCallId();
-            if (callId.isEmpty()) {
-                log.error("Every message sent from the client must have a callId");
-                return;
-            }
-
-            //Check if this message is for a removed call and ignore it if it is
-            //A message could arrive for a removed call in the case where the server was disconnected
-            //but the client didn't detect this and is still sending messages for a previous call.
-            //This could also occur when the call's queue has reached its limit but the client hasn't
-            //received the error message yet.
-            if (recentlyRemovedCallIds.contains(callId)) {
-                log.warn("Message received for removed call {}. Ignoring", Id.shrt(callId));
-                return;
-            }
-
-            MgMessageHandler handler = handlersByCallId.get(callId);
-            if (handler == null) {
-                handler = new MgMessageHandler(callId, executor, queueSize);
-                handlersByCallId.put(callId, handler);
-            }
-            //put the message on the handler's queue
-            handler.queueClientMessage(new MsgProcessor.MessageWithTopic(topic, message));
-
-        }));
-
+        messagingProvider.connectListener(this);
 
         //Every 10 minutes clear out recentlyRemovedCallIds that are more than 10 minutes old
         TimerService.get().scheduleAtFixedRate(() -> {
@@ -160,31 +113,47 @@ public class MsgServer {
             recentlyRemovedCallIds.values().removeIf(time -> time < tenMinutesAgo);
         }, 10, 10, TimeUnit.MINUTES);
 
-        //If a client prompts this server for a connection notification then send it
-        client.subscribe(serverTopics.statusPrompt, new MessagingListenerExceptionLogger((String topic, byte[] buffer)->{
-            log.debug("Sending notification of connection status = true");
-            notifyConnected(true);
-        }));
-
-        client.subscribeAll(serverTopics.statusClients, new MessagingListenerExceptionLogger((String topic, byte[] buffer) -> {
-            //If the client sends any message to this topic it means that it has disconnected
-            //The client will send the message to {serverTopic}/in/sys/status/client/{clientId}
-            //So we need to parse the clientId from the topic
-            log.debug("Received client disconnected notification on " + topic);
-            String clientId = topic.substring(topic.lastIndexOf(client.topicSeparator()) + client.topicSeparator().length());
-            onClientDisconnected(clientId);
-        }));
-
-        notifyConnected(true);
     }
 
-    public void notifyConnected(boolean connected) throws MessagingException {
-        //Notify any clients that the server has been connected
-        final byte[] connectedMsg = ConnectionStatus.newBuilder().setConnected(connected).build().toByteArray();
-        client.publish(serverTopics.status, connectedMsg);
+    @Override
+    public void onMessage(String topic, byte[] buffer) throws Exception {
+        final RpcMessage message;
+        try {
+            message = RpcMessage.parseFrom(buffer);
+        } catch (InvalidProtocolBufferException e) {
+            log.error("Failed to parse RpcMessage", e);
+            return;
+        }
+        log.debug("Received {} {} {} on : {}", new Object[]{message.getMessageCase(),
+                message.getSequence(), Id.shrt(message.getCallId()), topic});
+        final String callId = message.getCallId();
+        if (callId.isEmpty()) {
+            log.error("Every message sent from the client must have a callId");
+            return;
+        }
+
+        //Check if this message is for a removed call and ignore it if it is
+        //A message could arrive for a removed call in the case where the server was disconnected
+        //but the client didn't detect this and is still sending messages for a previous call.
+        //This could also occur when the call's queue has reached its limit but the client hasn't
+        //received the error message yet.
+        if (recentlyRemovedCallIds.contains(callId)) {
+            log.warn("Message received for removed call {}. Ignoring", Id.shrt(callId));
+            return;
+        }
+
+        MgMessageHandler handler = handlersByCallId.get(callId);
+        if (handler == null) {
+            handler = new MgMessageHandler(callId, executor, queueSize);
+            handlersByCallId.put(callId, handler);
+        }
+        //put the message on the handler's queue
+        handler.queueClientMessage(message);
+
     }
 
-    private void onClientDisconnected(String clientId) {
+    @Override
+    public void onCounterpartDisconnected(String clientId) {
         //When a client is disconnected we need to cancel all calls for it so that they get cleaned up.
         for (String callId : this.handlersByCallId.keySet()) {
             MgMessageHandler messageHandler = this.handlersByCallId.get(callId);
@@ -199,25 +168,18 @@ public class MsgServer {
                         .build();
                 //Note that because this is a cancel it will get processed immediately by queueClientMessage
                 //so setting INTERRUPT_SEQUENCE above was strictly unnecessary.
-                messageHandler.queueClientMessage(new MsgProcessor.MessageWithTopic(rpcMessage));
+                messageHandler.queueClientMessage(rpcMessage);
             }
         }
     }
 
+
     public void close() {
-        try {
-            //TODO: make const timeout, cancel all calls? Empty map?
-            client.unsubscribeAll(serverTopics.servicesIn);
-            client.unsubscribe(serverTopics.statusPrompt);
-            client.unsubscribeAll(serverTopics.statusClients );
-            notifyConnected(false);
-        } catch (MessagingException e) {
-            log.error("Failed to unsubscribe", e);
-        }
+        messagingProvider.disconnectListener();
     }
 
 
-    private void sendStatus(String replyTo, String callId, int sequence, Status status) {
+    private void sendStatus(String clientId, String fullMethodName, String callId, int sequence, Status status) {
         final com.google.rpc.Status grpcStatus = StatusProto.fromStatusAndTrailers(status, null);
         RpcMessage message = RpcMessage.newBuilder()
                 .setStatus(grpcStatus)
@@ -229,23 +191,22 @@ public class MsgServer {
         } else {
             log.debug("Sending completed: " + status);
         }
-        publish(replyTo, message);
+        try {
+            send(clientId, fullMethodName, message);
+        } catch (MessagingException e) {
+            //We cannot do anything here to help the client because there is no way of sending a message so just log.
+            log.error("Failed to send status", e);
+        }
     }
 
     public Stats getStats() {
         return new Stats(handlersByCallId.size());
     }
 
-    private void publish(String topic, RpcMessage message) {
-        try {
-            log.debug("Sending {} {} {} on: {} ",
-                    new Object[]{message.getMessageCase(), message.getSequence(), Id.shrt(message.getCallId()), topic});
-            client.publish(topic, message.toByteArray());
-        } catch (MessagingException e) {
-            //We can only log the exception here as the broker is broken
-            log.error("Failed to publish message", e);
-        }
-
+    private void send(String clientId, String fullMethodName, RpcMessage message) throws MessagingException {
+        log.debug("Sending {} {} {} for: {} ",
+                new Object[]{message.getMessageCase(), message.getSequence(), Id.shrt(message.getCallId()), fullMethodName});
+        messagingProvider.send(clientId, fullMethodName, message.toByteArray());
     }
 
     public void removeCall(String callId) {
@@ -282,11 +243,11 @@ public class MsgServer {
             msgProcessor = new MsgProcessor(executor, queueSize, this);
         }
 
-        public String getClientId(){
+        public String getClientId() {
             return clientId;
         }
 
-        public void queueClientMessage(MsgProcessor.MessageWithTopic messageWithTopic) {
+        public void queueClientMessage(RpcMessage message) {
 
             //Check if this is a cancel message.
             //If we queue a cancel message it won't get processed until after the previous message
@@ -295,10 +256,10 @@ public class MsgServer {
             //implementation converts any error status to CANCELLED anyway.
             //(grpc models CANCELLED as RST_STREAM on the wire but we use a Status because we have high
             //level messaging)
-            if (messageWithTopic.message.hasStatus()) {
-                if (messageWithTopic.message.getStatus().getCode() == CANCELLED_CODE) {
+            if (message.hasStatus()) {
+                if (message.getStatus().getCode() == CANCELLED_CODE) {
                     //Don't run the cancel on the mqtt message thread
-                    executor.execute(()->{
+                    executor.execute(() -> {
                         log.debug("Canceling");
                         //If the call was constructed, cancel it.
                         if (serverCall != null) {
@@ -311,7 +272,7 @@ public class MsgServer {
                     return;
                 }
             }
-            msgProcessor.queueMessage(messageWithTopic);
+            msgProcessor.queueMessage(message);
         }
 
 
@@ -319,17 +280,15 @@ public class MsgServer {
          * onMessage() may be called from multiple threads but only one onMessage will be active at a time.
          * So it is thread safe with respect to itself but cannot use thread locals
          *
-         * @param messageWithTopic
+         * @param message
          */
         @Override
-        public void onBrokerMessage(MsgProcessor.MessageWithTopic messageWithTopic) {
+        public void onProviderMessage(RpcMessage message) {
 
             if (removed) {
                 log.debug("Message received for removed handler {}, returning", callId);
                 return;
             }
-            final RpcMessage message = messageWithTopic.message;
-            final String topic = messageWithTopic.topic;
 
             try {
                 if (message.getMessageCase() != START) {
@@ -352,16 +311,17 @@ public class MsgServer {
                 }
 
 
-                String fullMethodName = serverTopics.fullMethodNameFromTopic(topic);
+                String fullMethodName = header.getMethodName();
                 //fullMethodName is e.g. "helloworld.ExampleHelloService/SayHello"
+                log.debug("fullMethodName is: " + fullMethodName);
                 ServerMethodDefinition<?, ?> serverMethodDefinition = registry.lookupMethod(fullMethodName);
                 if (serverMethodDefinition == null) {
                     if (fallBackRegistry != null) {
                         serverMethodDefinition = fallBackRegistry.lookupMethod(fullMethodName);
                     }
                 }
-                if(serverMethodDefinition == null){
-                    sendStatus(header.getReplyTo(), callId, 1,
+                if (serverMethodDefinition == null) {
+                    sendStatus(header.getClientId(), fullMethodName, callId, 1,
                             Status.UNIMPLEMENTED.withDescription("No method registered for " + fullMethodName));
                     return;
                 }
@@ -378,7 +338,7 @@ public class MsgServer {
 
                 serverCall.onClientMessage(message);
             } catch (Exception ex) {
-                log.error("Error processing MgMessage", ex);
+                log.error("Error processing RpcMessage", ex);
             }
 
         }
@@ -427,7 +387,7 @@ public class MsgServer {
                 this.callId = callId;
             }
 
-            public void start(ServerCallHandler<?, ?> serverCallHandler){
+            public void start(ServerCallHandler<?, ?> serverCallHandler) {
                 log.debug("Starting call to " + this.methodDescriptor.getFullMethodName());
                 if (header.getTimeoutMillis() > 0) {
                     Deadline deadline = Deadline.after(header.getTimeoutMillis(), TimeUnit.MILLISECONDS);
@@ -453,7 +413,7 @@ public class MsgServer {
                 //possibly send an error on the responseStream etc.
                 //After the implementation of sayHello is called the rest of the interaction is done via
                 //the streams that sayHello returns and accepts
-                context.run(()->{
+                context.run(() -> {
                     this.listener = serverCallHandler.startCall(serverCall, metadata);
                 });
             }
@@ -504,7 +464,7 @@ public class MsgServer {
                 //Note its importan to use the run method here which will swap this.context back out of the
                 //threadlocal in a finally block. If it didn't then the context and its listeners could remain
                 //in the threadlocal indefinitely and not get garbage collected.
-                context.run(()->{
+                context.run(() -> {
                     listener.onMessage(objValue);
                 });
 
@@ -523,7 +483,7 @@ public class MsgServer {
                 //Send the response up to the client
 
                 ByteString valueByteString;
-                if(message instanceof MessageLite){
+                if (message instanceof MessageLite) {
                     valueByteString = ((MessageLite) message).toByteString();
                 } else {
                     //If we use GrpcProxy then the message will be a byte array
@@ -548,7 +508,12 @@ public class MsgServer {
                         .setValue(value)
                         .setCallId(callId)
                         .setSequence(seq).build();
-                publish(header.getReplyTo(), rpcMessage);
+
+                try {
+                    send(clientId, methodDescriptor.getFullMethodName(), rpcMessage);
+                } catch (MessagingException e) {
+                    throw new StatusRuntimeException(Status.UNAVAILABLE);//.withCause(e));
+                }
             }
 
             public void cancelTimeouts() {
@@ -568,11 +533,11 @@ public class MsgServer {
                 //of the client calling onError. This is ok because the client channel will have
                 //closed the call automatically because the first message the server sent will have
                 //sequence==SINGLE_MESSAGE_STREAM which the client will check for.
-                if(methodDescriptor.getType().serverSendsOneMessage() && status.isOk() && sequence > 0 ) {
+                if (methodDescriptor.getType().serverSendsOneMessage() && status.isOk() && sequence > 0) {
                     ;//It's clearer to have empty statement here than express the if conditions negatively
                 } else {
                     sequence++;
-                    sendStatus(header.getReplyTo(), callId, sequence, status);
+                    sendStatus(clientId, methodDescriptor.getFullMethodName(), callId, sequence, status);
                 }
                 cancelTimeouts();
                 MgMessageHandler.this.remove();
@@ -605,7 +570,7 @@ public class MsgServer {
                 //implementation to listen for cancels. One is in the onCancelHandler() above and
                 //the other is to do a Context.addListener(new Context.CancellationListener()...
                 //so we need to call this listener here by calling context.cancel()
-                if(cancellableContext != null){
+                if (cancellableContext != null) {
                     cancellableContext.cancel(null);
                 } else {
                     //This only seems to happen in bad test code that doesn't wait for the call to start.

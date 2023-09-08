@@ -8,8 +8,10 @@ import io.grpc.stub.StreamObserver;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
 import io.mgrpc.*;
-import io.mgrpc.utils.MqttMessagingClient;
+import io.mgrpc.mqtt.MqttChannelMessageProvider;
+import io.mgrpc.mqtt.MqttServerMessageProvider;
 import io.mgrpc.utils.MqttUtils;
+import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
@@ -52,9 +54,9 @@ public class TestProxy {
         ManagedChannel httpChannel = ManagedChannelBuilder.forTarget(target)
                 .usePlaintext().build();
 
-        final MqttMessagingClient clientMqttConnection = MqttUtils.makeClient(null);
+        final MqttAsyncClient clientMqttConnection = MqttUtils.makeClient(null);
         final String clientId = Id.random();
-        MsgChannel msgChannel = new MsgChannel(clientMqttConnection, clientId, SERVER);
+        MsgChannel msgChannel = new MsgChannel(new MqttChannelMessageProvider(clientMqttConnection, SERVER, clientId), clientId);
         msgChannel.init();
 
         GrpcProxy<byte[], byte[]> proxy = new GrpcProxy<>(msgChannel);
@@ -67,8 +69,8 @@ public class TestProxy {
                 new ListenForHello(),
                 new ServerAuthInterceptor());
 
-        final MqttMessagingClient serverMqttConnection = MqttUtils.makeClient(null);
-        MsgServer msgServer = new MsgServer(serverMqttConnection, SERVER);
+        final MqttAsyncClient serverMqttConnection = MqttUtils.makeClient(null);
+        MsgServer msgServer = new MsgServer(new MqttServerMessageProvider(serverMqttConnection, SERVER));
         msgServer.addService(serviceWithIntercept);
         msgServer.init();
 
@@ -114,9 +116,9 @@ public class TestProxy {
         //Make server name short but random to prevent stray status messages from previous tests affecting this test
         final String SERVER = Id.shrt(Id.random());
 
-        final MqttMessagingClient clientMqttConnection = MqttUtils.makeClient(null);
+        final MqttAsyncClient clientMqttConnection = MqttUtils.makeClient(null);
         final String clientId = Id.random();
-        MsgChannel msgChannel = new MsgChannel(clientMqttConnection, clientId, SERVER);
+        MsgChannel msgChannel = new MsgChannel(new MqttChannelMessageProvider(clientMqttConnection, SERVER, clientId), clientId);
         msgChannel.init();
 
 
@@ -133,8 +135,8 @@ public class TestProxy {
                 .usePlaintext().build();
         final GrpcProxy<byte[], byte[]> proxy = new GrpcProxy<>(httpChannel);
 
-        final MqttMessagingClient serverMqttConnection = MqttUtils.makeClient(null);
-        MsgServer msgServer = new MsgServer(serverMqttConnection, SERVER);
+        final MqttAsyncClient serverMqttConnection = MqttUtils.makeClient(null);
+        MsgServer msgServer = new MsgServer(new MqttServerMessageProvider(serverMqttConnection, SERVER));
         msgServer.setFallBackRegistry(new GrpcProxy.Registry(proxy));
         msgServer.init();
 

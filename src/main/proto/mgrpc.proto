@@ -53,15 +53,16 @@ message Value{
 }
 
 message Header{
-  //The topic to which to send all replies for this call.
-  string replyTo = 1;
-
-  //Timeout in milliseconds. If not 0 then the server call should timeout after this interval.
-  uint64 timeoutMillis = 2;
 
   //A unique id corresponding to the Channel on the client side. Used to identify ongoing calls that must be
   //cleaned up when a client is disconnected or closed. See comments about ConnectionStatus below
-  string clientId = 3;
+  string clientId = 1;
+
+  //The full name of the method to call e.g. "helloworld.ExampleHelloService/SayHello"
+  string methodName = 2;
+
+  //Timeout in milliseconds. If not 0 then the server call should timeout after this interval.
+  uint64 timeoutMillis = 3;
 
   //A list of metadata entries. Metadata can be used for things like security tokens etc.
   //Note that when using security tokens it is important to secure access to topics on the broker
@@ -69,9 +70,9 @@ message Header{
   //(to prevent other clients stealing the tokens and using them)
   repeated MetadataEntry metadata = 4;
 
-  //This can be aquired from MethodDescriptor.toProto()
-  //This will only be set for first message in a client stream
-  //MethodDescriptorProto methodDescriptor = 2;
+  //If the provider/transport supports topics then this can be used to override the default reply topic
+  string replyTo = 5;
+
 }
 
 message MetadataEntry{

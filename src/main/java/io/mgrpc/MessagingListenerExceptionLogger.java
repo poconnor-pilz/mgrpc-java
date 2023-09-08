@@ -16,15 +16,21 @@ public class MessagingListenerExceptionLogger implements MessagingListener {
     }
 
     @Override
-    public void messageArrived(String topic, byte[] buffer) {
+    public void onMessage(String topic, byte[] buffer) {
 
         //If an exception is thrown in messageArrived of IMqttMessageListener
         //the calling code will close the mqtt connection.
         //Instead just trap the exception here and log it
         try {
-            inner.messageArrived(topic, buffer);
+            inner.onMessage(topic, buffer);
         } catch (Throwable t) {
             log.error("Exception occurred in MessageListener", t);
         }
+    }
+
+
+    @Override
+    public void onCounterpartDisconnected(String clientId) {
+        log.error("This shouldn't be called");
     }
 }
