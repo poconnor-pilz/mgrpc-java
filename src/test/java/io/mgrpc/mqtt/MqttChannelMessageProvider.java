@@ -140,7 +140,7 @@ public class MqttChannelMessageProvider implements MessagingProvider, MessagingS
             }
             if (!serverConnected) {
                 log.warn("Tried to send message but server is not connected");
-                throw new MessagingException("Server is not connected", Status.UNAVAILABLE);
+                throw new MessagingException("Server is not connected");
             }
         }
         final String topic = serverTopics.methodIn(methodName);
@@ -210,7 +210,7 @@ public class MqttChannelMessageProvider implements MessagingProvider, MessagingS
             }
             subscribers.add(streamObserver);
         } catch (MqttException e) {
-            throw new MessagingException(Status.UNAVAILABLE.withCause(e));
+            throw new MessagingException("Subscription failed",e);
         }
 
     }

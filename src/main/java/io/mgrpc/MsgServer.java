@@ -224,7 +224,7 @@ public class MsgServer implements MessagingListener {
                 publisher.publish(topic, message.toByteArray());
             } else {
                 //The client tried to override topic but provider does not support publishing
-                throw new MessagingException("Provider does not support MessagingPublisher", Status.UNIMPLEMENTED);
+                throw new MessagingException("Provider does not support MessagingPublisher");
             }
         } else {
             messagingProvider.send(clientId, fullMethodName, message.toByteArray());

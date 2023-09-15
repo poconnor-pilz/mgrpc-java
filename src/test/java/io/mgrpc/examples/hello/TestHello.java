@@ -99,25 +99,6 @@ public class TestHello {
     }
 
 
-
-    @Test
-    public void testSayHelloWithCustomReplyTopicPrefix() throws MessagingException {
-
-        //TODO: fix this
-//        String replyTopicPrefix = ServerTopics.out(clientMqtt.topicSeparator(), SERVER, "blah");
-//        String clientId = Id.random();
-//        MsgChannel customChannel = new MsgChannel(new MqttChannelMessageProvider(clientMqtt, SERVER, clientId), SERVER, clientId, replyTopicPrefix,
-//                MsgChannel.DEFAULT_QUEUE_SIZE, MsgChannel.getExecutorInstance());
-//        customChannel.init();
-//        final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub blockingStub = ExampleHelloServiceGrpc.newBlockingStub(customChannel);
-//        HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
-//        final HelloReply helloReply = blockingStub.sayHello(joe);
-//        assertEquals("Hello joe", helloReply.getMessage());
-//        checkForLeaks(0);
-//        customChannel.close();
-    }
-
-
     @Test
     public void testLotsOfReplies() throws Throwable{
 

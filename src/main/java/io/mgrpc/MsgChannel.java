@@ -335,8 +335,8 @@ public class MsgChannel extends Channel implements MessagingListener {
 
             try {
                 send(methodDescriptor.getFullMethodName(), msgBuilder);
-            } catch (MessagingException sre){
-                this.close(sre.getStatus());
+            } catch (MessagingException ex){
+                this.close(Status.UNAVAILABLE.withDescription(ex.getMessage()).withCause(ex));
                 return;
             }
             responseListener.onReady();
@@ -477,8 +477,8 @@ public class MsgChannel extends Channel implements MessagingListener {
                     .setStatus(cancelled);
             try {
                 send(methodDescriptor.getFullMethodName(), msgBuilder);
-            } catch (MessagingException e) {
-                throw new StatusRuntimeException(e.getStatus());
+            } catch (MessagingException ex) {
+                throw new StatusRuntimeException(Status.UNAVAILABLE.withDescription(ex.getMessage()).withCause(ex));
             }
 
         }
@@ -499,8 +499,8 @@ public class MsgChannel extends Channel implements MessagingListener {
                     .setStatus(ok);
             try {
                 send(methodDescriptor.getFullMethodName(), msgBuilder);
-            } catch (MessagingException e) {
-                throw new StatusRuntimeException(e.getStatus());
+            } catch (MessagingException ex) {
+                throw new StatusRuntimeException(Status.UNAVAILABLE.withDescription(ex.getMessage()).withCause(ex));
             }
         }
 
@@ -508,7 +508,7 @@ public class MsgChannel extends Channel implements MessagingListener {
         private void send(String fullMethodName, RpcMessage.Builder messageBuilder) throws MessagingException {
             //fullMethodName will be e.g. "helloworld.ExampleHelloService/LotsOfReplies"
             if (!initialized) {
-                throw new MessagingException(Status.UNAVAILABLE.withDescription("channel.init() was not called"));
+                throw new MessagingException("channel.init() was not called");
             }
             final RpcMessage message = messageBuilder.build();
             log.debug("Sending {} {} {} ",
@@ -530,6 +530,7 @@ public class MsgChannel extends Channel implements MessagingListener {
 
 
     }
+
 
 
     public static class Stats {
