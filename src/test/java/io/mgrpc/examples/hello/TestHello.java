@@ -9,6 +9,7 @@ import io.grpc.inprocess.InProcessChannelBuilder;
 import io.grpc.inprocess.InProcessServerBuilder;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
+import io.mgrpc.messaging.MessagingException;
 import io.mgrpc.mqtt.MqttChannelMessageProvider;
 import io.mgrpc.mqtt.MqttServerMessageProvider;
 import io.mgrpc.utils.MqttUtils;

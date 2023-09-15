@@ -3,21 +3,21 @@ package io.mgrpc;
 import com.google.protobuf.ByteString;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.protobuf.MessageLite;
-import com.google.protobuf.Parser;
 import io.grpc.*;
 import io.grpc.protobuf.StatusProto;
-import io.grpc.stub.StreamObserver;
+import io.mgrpc.messaging.MessagingException;
+import io.mgrpc.messaging.MessagingListener;
+import io.mgrpc.messaging.MessagingProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 import java.lang.invoke.MethodHandles;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.*;
 
-public class MsgChannel extends Channel implements MessagingListener{
+public class MsgChannel extends Channel implements MessagingListener {
 
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
@@ -51,7 +51,6 @@ public class MsgChannel extends Channel implements MessagingListener{
 
     private final Map<String, MsgClientCall> clientCallsById = new ConcurrentHashMap<>();
 
-    private final Map<String, List<StreamObserver>> subscribersByTopic = new ConcurrentHashMap<>();
 
 
     private static final int SINGLE_MESSAGE_STREAM = 0;
@@ -159,134 +158,8 @@ public class MsgChannel extends Channel implements MessagingListener{
     }
 
     public Stats getStats() {
-        int subscribers = 0;
-        final Set<String> topics = subscribersByTopic.keySet();
-        for (String topic : topics) {
-            subscribers += subscribersByTopic.get(topic).size();
-        }
-
-        return new Stats(clientCallsById.size(), subscribers);
+        return new Stats(clientCallsById.size());
     }
-
-    /**
-     * Subscribe for responses from a service. To use this the client should specify a RESPONSE_TOPIC when constructing
-     * a stub for the service, for example:
-     * MyService.newBlockingStub(channel).withOption(MsgChannel.RESPONSE_TOPIC, "mydevice/o/myresponsetopic");
-     * Before issuing the call the client should first subscribe for responses e.g.
-     * channel.subscribe("mydevice/o/myresponsetopic", HelloReply.parser(), myStreamObserver);
-     * The subscription will automatically be closed when the response stream is completed but the client
-     * can unsubscribe at any time using channel.unsubscribe("mydevice/o/myresponsetopic");
-     *
-     * @param responseTopic  The topic to which to send responses. All responses will be sent to this topic and the
-     *                       stub will not receive any direct responses.
-     * @param parser         The parser corresponding to the response type e.g. HelloReply.parser()
-     * @param streamObserver Each observer that it subscribed to a responseTopic will receive all responses.
-     * @param <T>            The type of the response e.g. HelloReply
-     */
-    public <T> void subscribe(String responseTopic, Parser<T> parser, final StreamObserver<T> streamObserver) {
-
-        //TODO: Get this working again
-
-//        List<StreamObserver> subscribers = subscribersByTopic.get(responseTopic);
-//        if (subscribers != null) {
-//            subscribers.add(streamObserver);
-//            return;
-//        }
-//
-//        final MessagingListener messageListener = new MessagingListenerExceptionLogger((String topic, byte[] buffer) -> {
-//            final List<StreamObserver> observers = subscribersByTopic.get(topic);
-//            if (observers == null) {
-//                //We should not receive any messages if there are no subscribers
-//                log.warn("No subscribers for " + topic);
-//                return;
-//            }
-//            final RpcMessage message;
-//            try {
-//                message = RpcMessage.parseFrom(buffer);
-//            } catch (InvalidProtocolBufferException e) {
-//                log.error("Failed to parse RpcMessage", e);
-//                return;
-//            }
-//            switch (message.getMessageCase()) {
-//                case VALUE:
-//                    final T value;
-//                    try {
-//                        value = parser.parseFrom(message.getValue().getContents());
-//                    } catch (InvalidProtocolBufferException e) {
-//                        log.error("Failed to parse Value", e);
-//                        return;
-//                    }
-//                    for (StreamObserver observer : observers) {
-//                        observer.onNext(value);
-//                    }
-//                    return;
-//                case STATUS:
-//                    Status status = googleRpcStatusToGrpcStatus(message.getStatus());
-//                    if (status.isOk()) {
-//                        for (StreamObserver observer : observers) {
-//                            observer.onCompleted();
-//                        }
-//                    } else {
-//                        final StatusRuntimeException sre = new StatusRuntimeException(status, null);
-//                        for (StreamObserver observer : observers) {
-//                            observer.onError(sre);
-//                        }
-//                    }
-//                    subscribersByTopic.remove(topic);
-//                    client.unsubscribe(topic);
-//                    return;
-//            }
-//        });
-//
-//        try {
-//            client.subscribe(responseTopic, messageListener);
-//            if (subscribers == null) {
-//                subscribers = new ArrayList<>();
-//                subscribersByTopic.put(responseTopic, subscribers);
-//            }
-//            subscribers.add(streamObserver);
-//        } catch (MessagingException e) {
-//            throw new StatusRuntimeException(Status.UNAVAILABLE.fromThrowable(e));
-//        }
-//
-    }
-
-
-    /**
-     * Unsubscribe all StreamObservers from responseTopic
-     */
-//    public void unsubscribe(String responseTopic) {
-//        final List<StreamObserver> observers = subscribersByTopic.get(responseTopic);
-//        if (observers != null) {
-//            subscribersByTopic.remove(responseTopic);
-//            try {
-//                messagingProvider.unsubscribe(responseTopic);
-//            } catch (MessagingException e) {
-//                log.error("Failed to unsubscribe for " + responseTopic, e);
-//            }
-//        } else {
-//            log.warn("No subscription found for responseTopic: " + responseTopic);
-//        }
-//    }
-
-    /**
-     * Unsubscribe a specific StreamObserver from responseTopic
-     */
-//    public void unsubscribe(String responseTopic, StreamObserver observer) {
-//        final List<StreamObserver> observers = subscribersByTopic.get(responseTopic);
-//        if (observers != null) {
-//            if (!observers.remove(observer)) {
-//                log.warn("Observer not found");
-//            }
-//            if (observers.isEmpty()) {
-//                try {
-//                    messagingProvider.unsubscribe(responseTopic);
-//                } catch (MessagingException e) {
-//                    log.error("Failed to unsubscribe for " + responseTopic, e);
-//                }
-//            }
-//        }
-//    }
 
 
     /**
@@ -661,20 +534,15 @@ public class MsgChannel extends Channel implements MessagingListener{
 
     public static class Stats {
         private final int activeCalls;
-        private final int subscribers;
 
-        public Stats(int activeCalls, int subscribers) {
+        public Stats(int activeCalls) {
             this.activeCalls = activeCalls;
-            this.subscribers = subscribers;
         }
 
         public int getActiveCalls() {
             return activeCalls;
         }
 
-        public int getSubscribers() {
-            return subscribers;
-        }
     }
 
 

@@ -1,4 +1,4 @@
-package io.mgrpc;
+package io.mgrpc.messaging;
 
 
 public interface MessagingListener {

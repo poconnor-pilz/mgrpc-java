@@ -1,4 +1,4 @@
-package io.mgrpc;
+package io.mgrpc.messaging;
 
 /**
  * Interface to messagin client. Adapters should implement this to work with different message protocols.

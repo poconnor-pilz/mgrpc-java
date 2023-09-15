@@ -1,6 +1,10 @@
 package io.mgrpc.mqtt;
 
 import io.mgrpc.*;
+import io.mgrpc.messaging.MessagingException;
+import io.mgrpc.messaging.MessagingListener;
+import io.mgrpc.messaging.MessagingProvider;
+import io.mgrpc.messaging.MessagingPublisher;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
@@ -9,7 +13,7 @@ import org.slf4j.LoggerFactory;
 
 import java.lang.invoke.MethodHandles;
 
-public class MqttServerMessageProvider implements MessagingProvider {
+public class MqttServerMessageProvider implements MessagingProvider, MessagingPublisher {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -114,5 +118,13 @@ public class MqttServerMessageProvider implements MessagingProvider {
     }
 
 
-
+    @Override
+    public void publish(String topic, byte[] buffer) throws MessagingException {
+        try {
+            client.publish(topic, new MqttMessage(buffer));
+        } catch (MqttException e) {
+            log.error("Failed to send mqtt message", e);
+            throw new MessagingException(e);
+        }
+    }
 }

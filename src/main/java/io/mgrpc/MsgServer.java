@@ -5,6 +5,10 @@ import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.protobuf.MessageLite;
 import io.grpc.*;
 import io.grpc.protobuf.StatusProto;
+import io.mgrpc.messaging.MessagingException;
+import io.mgrpc.messaging.MessagingListener;
+import io.mgrpc.messaging.MessagingProvider;
+import io.mgrpc.messaging.MessagingPublisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -180,6 +184,10 @@ public class MsgServer implements MessagingListener {
 
 
     private void sendStatus(String clientId, String fullMethodName, String callId, int sequence, Status status) {
+        sendStatus(null, clientId, fullMethodName, callId, sequence, status);
+    }
+
+    private void sendStatus(String topic, String clientId, String fullMethodName, String callId, int sequence, Status status) {
         final com.google.rpc.Status grpcStatus = StatusProto.fromStatusAndTrailers(status, null);
         RpcMessage message = RpcMessage.newBuilder()
                 .setStatus(grpcStatus)
@@ -192,21 +200,39 @@ public class MsgServer implements MessagingListener {
             log.debug("Sending completed: " + status);
         }
         try {
-            send(clientId, fullMethodName, message);
+            send(topic, clientId, fullMethodName, message);
         } catch (MessagingException e) {
             //We cannot do anything here to help the client because there is no way of sending a message so just log.
             log.error("Failed to send status", e);
         }
     }
 
-    public Stats getStats() {
-        return new Stats(handlersByCallId.size());
+    private void send(String clientId, String fullMethodName, RpcMessage message) throws MessagingException {
+        send(null, clientId, fullMethodName, message);
     }
 
-    private void send(String clientId, String fullMethodName, RpcMessage message) throws MessagingException {
-        log.debug("Sending {} {} {} for: {} ",
-                new Object[]{message.getMessageCase(), message.getSequence(), Id.shrt(message.getCallId()), fullMethodName});
-        messagingProvider.send(clientId, fullMethodName, message.toByteArray());
+    private void send(String topic, String clientId, String fullMethodName, RpcMessage message) throws MessagingException {
+
+        log.debug("Sending {} {} {} for {} on topic {} ",
+                new Object[]{message.getMessageCase(), message.getSequence(),
+                        Id.shrt(message.getCallId()), fullMethodName, topic});
+
+        if (topic != null && !topic.trim().isEmpty()) {
+            //The client has overridden the replyTo
+            if (messagingProvider instanceof MessagingPublisher) {
+                MessagingPublisher publisher = (MessagingPublisher) messagingProvider;
+                publisher.publish(topic, message.toByteArray());
+            } else {
+                //The client tried to override topic but provider does not support publishing
+                throw new MessagingException("Provider does not support MessagingPublisher", Status.UNIMPLEMENTED);
+            }
+        } else {
+            messagingProvider.send(clientId, fullMethodName, message.toByteArray());
+        }
+    }
+
+    public Stats getStats() {
+        return new Stats(handlersByCallId.size());
     }
 
     public void removeCall(String callId) {
@@ -510,7 +536,7 @@ public class MsgServer implements MessagingListener {
                         .setSequence(seq).build();
 
                 try {
-                    send(clientId, methodDescriptor.getFullMethodName(), rpcMessage);
+                    send(header.getReplyTo(), clientId, methodDescriptor.getFullMethodName(), rpcMessage);
                 } catch (MessagingException e) {
                     throw new StatusRuntimeException(Status.UNAVAILABLE);//.withCause(e));
                 }
@@ -537,7 +563,7 @@ public class MsgServer implements MessagingListener {
                     ;//It's clearer to have empty statement here than express the if conditions negatively
                 } else {
                     sequence++;
-                    sendStatus(clientId, methodDescriptor.getFullMethodName(), callId, sequence, status);
+                    sendStatus(header.getReplyTo(), clientId, methodDescriptor.getFullMethodName(), callId, sequence, status);
                 }
                 cancelTimeouts();
                 MgMessageHandler.this.remove();
