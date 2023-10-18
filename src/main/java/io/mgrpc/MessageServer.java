@@ -6,9 +6,9 @@ import com.google.protobuf.MessageLite;
 import io.grpc.*;
 import io.grpc.protobuf.StatusProto;
 import io.mgrpc.messaging.MessagingException;
-import io.mgrpc.messaging.MessagingListener;
-import io.mgrpc.messaging.MessagingProvider;
-import io.mgrpc.messaging.pubsub.MessagingPublisher;
+import io.mgrpc.messaging.ServerMessageListener;
+import io.mgrpc.messaging.ServerMessageTransport;
+import io.mgrpc.messaging.pubsub.MessagePublisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -20,7 +20,7 @@ import java.util.concurrent.*;
 import static io.mgrpc.RpcMessage.MessageCase.START;
 
 
-public class MsgServer implements MessagingListener {
+public class MessageServer implements ServerMessageListener {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
     private MInternalHandlerRegistry registry = new MInternalHandlerRegistry();
@@ -35,7 +35,7 @@ public class MsgServer implements MessagingListener {
 
     private static Executor getExecutorInstance() {
         if (executorSingleton == null) {
-            synchronized (MsgServer.class) {
+            synchronized (MessageServer.class) {
                 if (executorSingleton == null) {
                     //TODO: What kind of thread pool should we use here. It should probably be limited to a fixed maximum or maybe it should be passed as a constructor parameter?
                     executorSingleton = Executors.newCachedThreadPool();
@@ -45,7 +45,7 @@ public class MsgServer implements MessagingListener {
         return executorSingleton;
     }
 
-    private final MessagingProvider messagingProvider;
+    private final ServerMessageTransport transport;
 
     private final Map<String, MgMessageHandler> handlersByCallId = new ConcurrentHashMap<>();
 
@@ -67,23 +67,46 @@ public class MsgServer implements MessagingListener {
 
     private static final int SINGLE_MESSAGE_STREAM = 0;
 
+    private  ScheduledFuture<?> clearRecentlyRemovedTimer;
+
     /**
-     * @param messagingProvider PubsubClient
+     * @param transport PubsubClient
      * @param queueSize         The size of the incoming message queue for each call
      * @param executor          Executor which will process incoming message queues.
      */
-    public MsgServer(MessagingProvider messagingProvider, int queueSize, Executor executor) {
-        this.messagingProvider = messagingProvider;
+    public MessageServer(ServerMessageTransport transport, int queueSize, Executor executor) {
+        this.transport = transport;
         this.executor = executor;
         this.queueSize = queueSize;
     }
 
-    public MsgServer(MessagingProvider messagingProvider, int queueSize) {
-        this(messagingProvider, queueSize, getExecutorInstance());
+    public MessageServer(ServerMessageTransport transport, int queueSize) {
+        this(transport, queueSize, getExecutorInstance());
     }
 
-    public MsgServer(MessagingProvider messagingProvider) {
-        this(messagingProvider, DEFAULT_QUEUE_SIZE, getExecutorInstance());
+    public MessageServer(ServerMessageTransport transport) {
+        this(transport, DEFAULT_QUEUE_SIZE, getExecutorInstance());
+    }
+
+
+    public void start() throws MessagingException {
+
+
+        transport.start(this);
+
+        //Every 10 minutes clear out recentlyRemovedCallIds that are more than 10 minutes old
+        clearRecentlyRemovedTimer = TimerService.get().scheduleAtFixedRate(() -> {
+            final long tenMinutesAgo = System.currentTimeMillis() - (10 * 60 * 1000);
+            recentlyRemovedCallIds.values().removeIf(time -> time < tenMinutesAgo);
+        }, 10, 10, TimeUnit.MINUTES);
+
+    }
+
+    public void close() {
+        transport.close();
+        if(clearRecentlyRemovedTimer != null){
+            clearRecentlyRemovedTimer.cancel(false);
+        }
     }
 
 
@@ -106,18 +129,6 @@ public class MsgServer implements MessagingListener {
         this.registry = new MInternalHandlerRegistry();
     }
 
-    public void init() throws MessagingException {
-
-
-        messagingProvider.connectListener(this);
-
-        //Every 10 minutes clear out recentlyRemovedCallIds that are more than 10 minutes old
-        TimerService.get().scheduleAtFixedRate(() -> {
-            final long tenMinutesAgo = System.currentTimeMillis() - (10 * 60 * 1000);
-            recentlyRemovedCallIds.values().removeIf(time -> time < tenMinutesAgo);
-        }, 10, 10, TimeUnit.MINUTES);
-
-    }
 
     @Override
     public void onMessage(byte[] buffer) {
@@ -157,18 +168,18 @@ public class MsgServer implements MessagingListener {
     }
 
     @Override
-    public void onCounterpartDisconnected(String clientId) {
+    public void onChannelDisconnected(String channelId) {
         //When a client is disconnected we need to cancel all calls for it so that they get cleaned up.
         for (String callId : this.handlersByCallId.keySet()) {
             MgMessageHandler messageHandler = this.handlersByCallId.get(callId);
-            String foundClientId = messageHandler.getClientId();
-            if (foundClientId != null && foundClientId.equals(clientId)) {
+            String foundChannelId = messageHandler.getChannelId();
+            if (foundChannelId != null && foundChannelId.equals(channelId)) {
                 final Status status = Status.CANCELLED.withDescription("Client disconnected");
                 final com.google.rpc.Status grpcStatus = StatusProto.fromStatusAndTrailers(status, null);
                 RpcMessage rpcMessage = RpcMessage.newBuilder()
                         .setStatus(grpcStatus)
                         .setCallId(callId)
-                        .setSequence(MsgProcessor.INTERRUPT_SEQUENCE)
+                        .setSequence(MessageProcessor.INTERRUPT_SEQUENCE)
                         .build();
                 //Note that because this is a cancel it will get processed immediately by queueClientMessage
                 //so setting INTERRUPT_SEQUENCE above was strictly unnecessary.
@@ -178,16 +189,13 @@ public class MsgServer implements MessagingListener {
     }
 
 
-    public void close() {
-        messagingProvider.disconnectListener();
+
+
+    private void sendStatus(String channelId, String fullMethodName, String callId, int sequence, Status status) {
+        sendStatus(null, channelId, fullMethodName, callId, sequence, status);
     }
 
-
-    private void sendStatus(String clientId, String fullMethodName, String callId, int sequence, Status status) {
-        sendStatus(null, clientId, fullMethodName, callId, sequence, status);
-    }
-
-    private void sendStatus(String topic, String clientId, String fullMethodName, String callId, int sequence, Status status) {
+    private void sendStatus(String topic, String channelId, String fullMethodName, String callId, int sequence, Status status) {
         final com.google.rpc.Status grpcStatus = StatusProto.fromStatusAndTrailers(status, null);
         RpcMessage message = RpcMessage.newBuilder()
                 .setStatus(grpcStatus)
@@ -200,18 +208,15 @@ public class MsgServer implements MessagingListener {
             log.debug("Sending completed: " + status);
         }
         try {
-            send(topic, clientId, fullMethodName, message);
+            send(topic, channelId, fullMethodName, message);
         } catch (MessagingException e) {
             //We cannot do anything here to help the client because there is no way of sending a message so just log.
             log.error("Failed to send status", e);
         }
     }
 
-    private void send(String clientId, String fullMethodName, RpcMessage message) throws MessagingException {
-        send(null, clientId, fullMethodName, message);
-    }
 
-    private void send(String topic, String clientId, String fullMethodName, RpcMessage message) throws MessagingException {
+    private void send(String topic, String channelId, String fullMethodName, RpcMessage message) throws MessagingException {
 
         log.debug("Sending {} {} {} for {} on topic {} ",
                 new Object[]{message.getMessageCase(), message.getSequence(),
@@ -219,15 +224,15 @@ public class MsgServer implements MessagingListener {
 
         if (topic != null && !topic.trim().isEmpty()) {
             //The client has overridden the replyTo
-            if (messagingProvider instanceof MessagingPublisher) {
-                MessagingPublisher publisher = (MessagingPublisher) messagingProvider;
+            if (transport instanceof MessagePublisher) {
+                MessagePublisher publisher = (MessagePublisher) transport;
                 publisher.publish(topic, message.toByteArray());
             } else {
                 //The client tried to override topic but provider does not support publishing
                 throw new MessagingException("Provider does not support MessagingPublisher");
             }
         } else {
-            messagingProvider.send(clientId, fullMethodName, message.toByteArray());
+            transport.send(channelId, fullMethodName, message.toByteArray());
         }
     }
 
@@ -249,9 +254,9 @@ public class MsgServer implements MessagingListener {
     }
 
 
-    private class MgMessageHandler implements MsgProcessor.MessageHandler {
+    private class MgMessageHandler implements MessageProcessor.MessageHandler {
         private final String callId;
-        private String clientId;
+        private String channelId;
 
         private MsgServerCall serverCall;
 
@@ -262,15 +267,15 @@ public class MsgServer implements MessagingListener {
         private boolean removed = false;
 
 
-        private final MsgProcessor msgProcessor;
+        private final MessageProcessor messageProcessor;
 
         private MgMessageHandler(String callId, Executor executor, int queueSize) {
             this.callId = callId;
-            msgProcessor = new MsgProcessor(executor, queueSize, this);
+            messageProcessor = new MessageProcessor(executor, queueSize, this);
         }
 
-        public String getClientId() {
-            return clientId;
+        public String getChannelId() {
+            return channelId;
         }
 
         public void queueClientMessage(RpcMessage message) {
@@ -298,7 +303,7 @@ public class MsgServer implements MessagingListener {
                     return;
                 }
             }
-            msgProcessor.queueMessage(message);
+            messageProcessor.queueMessage(message);
         }
 
 
@@ -347,7 +352,7 @@ public class MsgServer implements MessagingListener {
                     }
                 }
                 if (serverMethodDefinition == null) {
-                    sendStatus(header.getClientId(), fullMethodName, callId, 1,
+                    sendStatus(header.getChannelId(), fullMethodName, callId, 1,
                             Status.UNIMPLEMENTED.withDescription("No method registered for " + fullMethodName));
                     return;
                 }
@@ -358,7 +363,7 @@ public class MsgServer implements MessagingListener {
 
                 //Extract the clientId from the header. It may be used later to find calls for a
                 //particular client that need to be cleaned up because the client has disconnected.
-                this.clientId = header.getClientId();
+                this.channelId = header.getChannelId();
 
                 serverCall.start(serverCallHandler);
 
@@ -383,7 +388,7 @@ public class MsgServer implements MessagingListener {
 
 
         public void remove() {
-            MsgServer.this.removeCall(this.callId);
+            MessageServer.this.removeCall(this.callId);
             this.removed = true;
         }
 
@@ -536,7 +541,7 @@ public class MsgServer implements MessagingListener {
                         .setSequence(seq).build();
 
                 try {
-                    send(header.getReplyTo(), clientId, methodDescriptor.getFullMethodName(), rpcMessage);
+                    send(header.getReplyTo(), channelId, methodDescriptor.getFullMethodName(), rpcMessage);
                 } catch (MessagingException e) {
                     throw new StatusRuntimeException(Status.UNAVAILABLE);//.withCause(e));
                 }
@@ -563,7 +568,7 @@ public class MsgServer implements MessagingListener {
                     ;//It's clearer to have empty statement here than express the if conditions negatively
                 } else {
                     sequence++;
-                    sendStatus(header.getReplyTo(), clientId, methodDescriptor.getFullMethodName(), callId, sequence, status);
+                    sendStatus(header.getReplyTo(), channelId, methodDescriptor.getFullMethodName(), callId, sequence, status);
                 }
                 cancelTimeouts();
                 MgMessageHandler.this.remove();

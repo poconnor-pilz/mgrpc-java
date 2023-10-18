@@ -20,7 +20,7 @@ import java.util.concurrent.PriorityBlockingQueue;
  * https://docs.aws.amazon.com/iot/latest/developerguide/mqtt.html#mqtt-differences
  *
  */
-public class MsgProcessor {
+public class MessageProcessor {
 
     private static final int UNINITIALISED_SEQUENCE = -1;
     public static final int INTERRUPT_SEQUENCE = -2;
@@ -45,7 +45,7 @@ public class MsgProcessor {
 
     private int sequenceOfLastProcessedMessage = UNINITIALISED_SEQUENCE;
 
-    public MsgProcessor(Executor executor, int queueSize, MessageHandler messageHandler) {
+    public MessageProcessor(Executor executor, int queueSize, MessageHandler messageHandler) {
         this.queueSize = queueSize;
         this.executor = executor;
         this.messageHandler = messageHandler;

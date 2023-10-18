@@ -1,7 +1,5 @@
 package io.mgrpc.messaging;
 
-import io.grpc.Status;
-
 public class MessagingException extends Exception{
 
     public MessagingException(String message, Throwable cause){

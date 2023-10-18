@@ -12,10 +12,10 @@ import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
 import io.mgrpc.EmbeddedBroker;
 import io.mgrpc.Id;
-import io.mgrpc.MsgChannel;
-import io.mgrpc.MsgServer;
-import io.mgrpc.mqtt.MqttChannelMessageProvider;
-import io.mgrpc.mqtt.MqttServerMessageProvider;
+import io.mgrpc.MessageChannel;
+import io.mgrpc.MessageServer;
+import io.mgrpc.mqtt.MqttChannelMessageTransport;
+import io.mgrpc.mqtt.MqttServerServerMessageTransport;
 import io.mgrpc.utils.MqttUtils;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
@@ -37,14 +37,14 @@ public class TestAuthAndMetadata {
         EmbeddedBroker.start();
 
         //Use ServerAuthInterceptor to verify that the user is authorized test that it populates the context
-        //with clientId and level
+        //with channelId and level
         //Also verify the that the HOSTNAME metadata value inserted by ClientMetadataInterceptor is correctly
         //merged with the Auth metadata
 
         class ListenForHello extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
             @Override
             public void sayHello(HelloRequest request, StreamObserver<HelloReply> responseObserver) {
-                //Get the clientId and the level from the context. These will have been populated by the AuthInterceptor
+                //Get the channelId and the level from the context. These will have been populated by the AuthInterceptor
                 String clientId = ServerAuthInterceptor.CLIENT_ID_CONTEXT_KEY.get();
                 Integer level = ServerAuthInterceptor.LEVEL_CONTEXT_KEY.get();
                 String hostName = ServerAuthInterceptor.HOSTNAME_CONTEXT_KEY.get();
@@ -56,17 +56,16 @@ public class TestAuthAndMetadata {
 
         //Make server name short but random to prevent stray status messages from previous tests affecting this test
         final String SERVER = Id.shrt(Id.random());
-        MsgServer server = new MsgServer(new MqttServerMessageProvider(MqttUtils.makeClient(), SERVER));
+        MessageServer server = new MessageServer(new MqttServerServerMessageTransport(MqttUtils.makeClient(), SERVER));
 
-        server.init();
+        server.start();
 
         final ServerServiceDefinition serviceWithIntercept = ServerInterceptors.intercept(
                 new ListenForHello(),
                 new ServerAuthInterceptor());
         server.addService(serviceWithIntercept);
-        final String clientId = Id.random();
-        MsgChannel channel = new MsgChannel(new MqttChannelMessageProvider(MqttUtils.makeClient(), SERVER, clientId), clientId);
-        channel.init();
+        MessageChannel channel = new MessageChannel(new MqttChannelMessageTransport(MqttUtils.makeClient(), SERVER));
+        channel.start();
 
 
         //Make a jwt token and add it to the call credentials
@@ -85,7 +84,7 @@ public class TestAuthAndMetadata {
                         .withInterceptors(new ClientMetadataInterceptor());
         final HelloRequest request = HelloRequest.newBuilder().setName("joe").build();
         HelloReply response = stub.sayHello(request);
-        //HelloListener should have received values for clientId and level and hostName as part of the call context.
+        //HelloListener should have received values for channelId and level and hostName as part of the call context.
         assertEquals(testClientId + level + ClientMetadataInterceptor.MYHOST, response.getMessage());
 
 

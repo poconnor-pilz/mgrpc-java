@@ -93,10 +93,10 @@ public class ServerTopics {
 
     /**
      * @return The topic on which a server will send all output messages for a particular client
-     * Has the form {root}/o/svc/{clientId}
+     * Has the form {root}/o/svc/{channelId}
      */
-    public String servicesOutForClient(String clientId){
-        return make(sep, root, OUT , SVC, clientId);
+    public String servicesOutForChannel(String channelId){
+        return make(sep, root, OUT , SVC, channelId);
     }
 
 

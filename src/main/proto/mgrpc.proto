@@ -56,7 +56,7 @@ message Header{
 
   //A unique id corresponding to the Channel on the client side. Used to identify ongoing calls that must be
   //cleaned up when a client is disconnected or closed. See comments about ConnectionStatus below
-  string clientId = 1;
+  string channelId = 1;
 
   //The full name of the method to call e.g. "helloworld.ExampleHelloService/SayHello"
   string methodName = 2;
@@ -123,12 +123,12 @@ message MetadataEntry{
 //The server will send a connected=false message to server/o/sys/status when it shuts down normally or when it shuts down
 //abnormally via its LWT
 //The client status topic will be
-//  server/i/sys/status/client/{clientId}
+//  server/i/sys/status/client/{channelId}
 //so that clients can have restrictive policies. But the server will subscribe to
 //  server/i/sys/status/#
 //The client will send a connected=false message to server/i/sys/status/client/{clientId} when it shuts down normally
 //(or when it shuts down abnormally LWT or some kind of watchdog). The server will then release any resources it
-// has for {clientId}.
+// has for {channelId}.
 // The Channel will have a waitForServer method which a client can use to determine if a sever is up.
 // This will method will subscribe to server/o/sys/status and send a prompt to server/i/sys/status/prompt
 message ConnectionStatus{

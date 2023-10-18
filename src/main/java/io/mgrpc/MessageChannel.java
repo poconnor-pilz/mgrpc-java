@@ -5,9 +5,7 @@ import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.protobuf.MessageLite;
 import io.grpc.*;
 import io.grpc.protobuf.StatusProto;
-import io.mgrpc.messaging.MessagingException;
-import io.mgrpc.messaging.MessagingListener;
-import io.mgrpc.messaging.MessagingProvider;
+import io.mgrpc.messaging.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -17,7 +15,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.*;
 
-public class MsgChannel extends Channel implements MessagingListener {
+public class MessageChannel extends Channel implements ChannelMessageListener {
 
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
@@ -32,7 +30,7 @@ public class MsgChannel extends Channel implements MessagingListener {
 
     public static Executor getExecutorInstance() {
         if (executorSingleton == null) {
-            synchronized (MsgChannel.class) {
+            synchronized (MessageChannel.class) {
                 if (executorSingleton == null) {
                     //TODO: What kind of thread pool should we use here. It should probably be limited to a fixed maximum
                     executorSingleton = Executors.newCachedThreadPool();
@@ -43,9 +41,9 @@ public class MsgChannel extends Channel implements MessagingListener {
     }
 
 
-    private final MessagingProvider messagingProvider;
+    private final ChannelMessageTransport transport;
 
-    private final String clientId;
+    private final String channelId;
 
     private boolean initialized = false;
 
@@ -61,33 +59,40 @@ public class MsgChannel extends Channel implements MessagingListener {
 
 
     /**
-     * @param messagingProvider           PubsubClient
-     * @param clientId         The client id for the channel. Should be unique.
+     * @param transport           PubsubClient
+     * @param channelId         The client id for the channel. Should be unique.
      * @param queueSize        The size of the message queue for each call's replies
      * @param executor         Executor on which replies will be processed.
      */
-    public MsgChannel(MessagingProvider messagingProvider, String clientId, int queueSize, Executor executor) {
-        this.messagingProvider = messagingProvider;
-        this.clientId = clientId;
+    public MessageChannel(ChannelMessageTransport transport, String channelId, int queueSize, Executor executor) {
+        this.transport = transport;
+        this.channelId = channelId;
         this.executor = executor;
         this.queueSize = queueSize;
     }
 
     /**
-     * @param messagingProvider      PubsubClient
-     * @param clientId    The client id for the channel. Should be unique.
+     * @param transport      PubsubClient
      * @param queueSize   The size of the message queue for each call's replies
      */
-    public MsgChannel(MessagingProvider messagingProvider, String clientId, int queueSize) {
-        this(messagingProvider, clientId, queueSize, getExecutorInstance());
+    public MessageChannel(ChannelMessageTransport transport, int queueSize) {
+        this(transport, Id.random(), queueSize, getExecutorInstance());
+    }
+
+
+    /**
+     * @param transport      Mqtt client
+     * @param channelId    The client id for the channel. Should be unique.
+     */
+    public MessageChannel(ChannelMessageTransport transport, String channelId) {
+        this(transport, channelId, DEFAULT_QUEUE_SIZE, getExecutorInstance());
     }
 
     /**
-     * @param messagingProvider      Mqtt client
-     * @param clientId    The client id for the channel. Should be unique.
+     * @param transport      Mqtt client
      */
-    public MsgChannel(MessagingProvider messagingProvider, String clientId ) {
-        this(messagingProvider, clientId, DEFAULT_QUEUE_SIZE, getExecutorInstance());
+    public MessageChannel(ChannelMessageTransport transport) {
+        this(transport, Id.random());
     }
 
 
@@ -96,10 +101,15 @@ public class MsgChannel extends Channel implements MessagingListener {
      *
      * @throws StatusException
      */
-    public void init() throws MessagingException {
+    public void start() throws MessagingException {
 
-        messagingProvider.connectListener(this);
+        transport.start(this);
         initialized = true;
+    }
+
+    @Override
+    public String getChannelId() {
+        return this.channelId;
     }
 
     @Override
@@ -121,7 +131,7 @@ public class MsgChannel extends Channel implements MessagingListener {
     }
 
     @Override
-    public void onCounterpartDisconnected(String clientId) {
+    public void onServerDisconnected() {
         //Clean up all existing calls because the server has been disconnected.
         //Interrupt the client's call queue with an unavailable status, the call will be cleaned up when it is closed.
         //We could just call close on the call directly but we want the call to finish processing whatever
@@ -132,7 +142,7 @@ public class MsgChannel extends Channel implements MessagingListener {
             RpcMessage rpcMessage = RpcMessage.newBuilder()
                     .setStatus(grpcStatus)
                     .setCallId(call.callId)
-                    .setSequence(MsgProcessor.INTERRUPT_SEQUENCE)
+                    .setSequence(MessageProcessor.INTERRUPT_SEQUENCE)
                     .build();
             call.queueServerMessage(rpcMessage);
         }
@@ -141,7 +151,7 @@ public class MsgChannel extends Channel implements MessagingListener {
 
 
     public void close() {
-        messagingProvider.disconnectListener();
+        transport.close();
     }
 
 
@@ -173,7 +183,7 @@ public class MsgChannel extends Channel implements MessagingListener {
 
 
 
-    private class MsgClientCall<ReqT, RespT> extends ClientCall<ReqT, RespT> implements MsgProcessor.MessageHandler {
+    private class MsgClientCall<ReqT, RespT> extends ClientCall<ReqT, RespT> implements MessageProcessor.MessageHandler {
 
         final MethodDescriptor<ReqT, RespT> methodDescriptor;
         final CallOptions callOptions;
@@ -196,7 +206,7 @@ public class MsgChannel extends Channel implements MessagingListener {
         private final ContextCancellationListener cancellationListener =
                 new ContextCancellationListener();
 
-        private final MsgProcessor msgProcessor;
+        private final MessageProcessor messageProcessor;
 
         private MsgClientCall(MethodDescriptor<ReqT, RespT> methodDescriptor, CallOptions callOptions,
                               Executor executor, int queueSize) {
@@ -205,7 +215,7 @@ public class MsgChannel extends Channel implements MessagingListener {
             this.callOptions = callOptions;
             this.context = Context.current().withCancellation();
             this.callId = Id.random();
-            msgProcessor = new MsgProcessor(executor, queueSize, this);
+            messageProcessor = new MessageProcessor(executor, queueSize, this);
         }
 
         public String getCallId() {
@@ -293,7 +303,7 @@ public class MsgChannel extends Channel implements MessagingListener {
             if (sequence == 0) {
                 //This is the start of the call so make a Start message with a header
                 Header.Builder header = Header.newBuilder();
-                header.setClientId(clientId);
+                header.setChannelId(channelId);
                 header.setMethodName(methodDescriptor.getFullMethodName());
                 if (effectiveDeadline != null) {
                     header.setTimeoutMillis(effectiveDeadline.timeRemaining(TimeUnit.MILLISECONDS));
@@ -356,7 +366,7 @@ public class MsgChannel extends Channel implements MessagingListener {
 
 
         public void queueServerMessage(RpcMessage message) {
-            this.msgProcessor.queueMessage(message);
+            this.messageProcessor.queueMessage(message);
         }
 
 
@@ -513,7 +523,7 @@ public class MsgChannel extends Channel implements MessagingListener {
             final RpcMessage message = messageBuilder.build();
             log.debug("Sending {} {} {} ",
                     new Object[]{message.getMessageCase(), message.getSequence(), Id.shrt(message.getCallId())});
-            messagingProvider.send(clientId, fullMethodName, message.toByteArray());
+            transport.send(fullMethodName, message.toByteArray());
         }
 
 

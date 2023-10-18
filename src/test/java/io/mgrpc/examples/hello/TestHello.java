@@ -9,9 +9,8 @@ import io.grpc.inprocess.InProcessChannelBuilder;
 import io.grpc.inprocess.InProcessServerBuilder;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
-import io.mgrpc.messaging.MessagingException;
-import io.mgrpc.mqtt.MqttChannelMessageProvider;
-import io.mgrpc.mqtt.MqttServerMessageProvider;
+import io.mgrpc.mqtt.MqttChannelMessageTransport;
+import io.mgrpc.mqtt.MqttServerServerMessageTransport;
 import io.mgrpc.utils.MqttUtils;
 import io.mgrpc.utils.ToList;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
@@ -36,8 +35,8 @@ public class TestHello {
     private static MqttAsyncClient serverMqtt;
     private static MqttAsyncClient clientMqtt;
 
-    private MsgChannel channel;
-    private MsgServer server;
+    private MessageChannel channel;
+    private MessageServer server;
 
     //Make server name short but random to prevent stray status messages from previous tests affecting this test
     private static final String SERVER = Id.shrt(Id.random());
@@ -65,17 +64,17 @@ public class TestHello {
     void setup() throws Exception{
 
         //Set up the serverb
-        server = new MsgServer(new MqttServerMessageProvider(serverMqtt, SERVER));
-        server.init();
+        server = new MessageServer(new MqttServerServerMessageTransport(serverMqtt, SERVER));
+        server.start();
         server.addService(new HelloServiceForTest());
-        String clientId = Id.random();
-        channel = new MsgChannel(new MqttChannelMessageProvider(clientMqtt, SERVER, clientId), clientId);
-        channel.init();
+        channel = new MessageChannel(new MqttChannelMessageTransport(clientMqtt, SERVER));
+        channel.start();
     }
 
     @AfterEach
     void tearDown() throws Exception{
         server.close();
+        channel.close();
     }
 
     public void checkForLeaks(int numActiveCalls){

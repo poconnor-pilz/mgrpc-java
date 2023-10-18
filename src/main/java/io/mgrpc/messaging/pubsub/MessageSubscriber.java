@@ -4,14 +4,13 @@ package io.mgrpc.messaging.pubsub;
 import com.google.protobuf.Parser;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.messaging.MessagingException;
-import io.mgrpc.messaging.MessagingProvider;
-import io.mgrpc.messaging.pubsub.MessagingPublisher;
+import io.mgrpc.messaging.ServerMessageTransport;
 
 /**
- * Some channel {@link MessagingProvider}s may implement this interface if they want to support pub/sub
+ * Some channel {@link ServerMessageTransport}s may implement this interface if they want to support pub/sub
  * of gRPC streams. It is not necessary to implement this to support core gRPC
  */
-public interface MessagingSubscriber {
+public interface MessageSubscriber {
 
     /**
      * Subscribe for responses from a service. To use this the client should specify a RESPONSE_TOPIC when constructing
@@ -21,7 +20,7 @@ public interface MessagingSubscriber {
      * channel.subscribe("mydevice/o/myresponsetopic", HelloReply.parser(), myStreamObserver);
      * The subscription will automatically be closed when the response stream is completed but the client
      * can unsubscribe at any time using channel.unsubscribe("mydevice/o/myresponsetopic");
-     * Note that if the server provider does not support {@link MessagingPublisher} then this will fail
+     * Note that if the server provider does not support {@link MessagePublisher} then this will fail
      *
      * @param responseTopic  The topic to which to send responses. All responses will be sent to this topic and the
      *                       stub will not receive any direct responses.

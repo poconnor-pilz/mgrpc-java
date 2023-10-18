@@ -6,7 +6,7 @@ import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
 import io.mgrpc.messaging.*;
 import io.mgrpc.messaging.pubsub.BufferToStreamObserver;
-import io.mgrpc.messaging.pubsub.MessagingSubscriber;
+import io.mgrpc.messaging.pubsub.MessageSubscriber;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
@@ -22,7 +22,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
-public class MqttChannelMessageProvider implements MessagingProvider, MessagingSubscriber {
+public class MqttChannelMessageTransport implements ChannelMessageTransport, MessageSubscriber {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -30,14 +30,14 @@ public class MqttChannelMessageProvider implements MessagingProvider, MessagingS
     private final static String TOPIC_SEPARATOR = "/";
     private final static long SUBSCRIBE_TIMEOUT_MILLIS = 5000;
 
-    private final String clientId;
+    private String clientId;
 
     private final ServerTopics serverTopics;
 
     private CountDownLatch serverConnectedLatch;
     private boolean serverConnected = false;
 
-    private MessagingListener messagingListener;
+    private ChannelMessageListener channel;
 
     private final Map<String, List<StreamObserver>> subscribersByTopic = new ConcurrentHashMap<>();
 
@@ -62,31 +62,25 @@ public class MqttChannelMessageProvider implements MessagingProvider, MessagingS
      *                    The channel will subscribe for replies on {serverTopic}/o/svc/{clientId}/#
      *                    The channel will receive replies to a specific call on
      *                    {serverTopic}/o/svc/{clientId}/{service}/{method}/{callId}
-     * @param clientId
      */
-    public MqttChannelMessageProvider(MqttAsyncClient client, String serverTopic, String clientId) {
+    public MqttChannelMessageTransport(MqttAsyncClient client, String serverTopic) {
         this.client = client;
         this.serverTopics = new ServerTopics(serverTopic, TOPIC_SEPARATOR);
-        this.clientId = clientId;
-    }
-
-    public void close() throws MqttException {
-        this.client.close();
     }
 
 
     @Override
-    public void connectListener(MessagingListener listener) throws MessagingException {
+    public void start(ChannelMessageListener channel) throws MessagingException {
 
-        if (this.messagingListener != null) {
+        if (this.channel != null) {
             throw new MessagingException("Listener already connected");
         }
-        this.messagingListener = listener;
+        this.channel = channel;
         try {
-            final String replyTopicPrefix = serverTopics.servicesOutForClient(clientId) + "/#";
+            final String replyTopicPrefix = serverTopics.servicesOutForChannel(this.channel.getChannelId()) + "/#";
             log.debug("Subscribing for responses on: " + replyTopicPrefix);
             client.subscribe(replyTopicPrefix, 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
-                listener.onMessage(mqttMessage.getPayload());
+                channel.onMessage(mqttMessage.getPayload());
             })).waitForCompletion(SUBSCRIBE_TIMEOUT_MILLIS);
 
             client.subscribe(serverTopics.status, 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
@@ -95,7 +89,7 @@ public class MqttChannelMessageProvider implements MessagingProvider, MessagingS
                     log.debug("Server connected status = " + serverConnected);
                     this.serverConnectedLatch.countDown();
                     if (!serverConnected) {
-                        listener.onCounterpartDisconnected(null);
+                        channel.onServerDisconnected();
                     }
                 } catch (InvalidProtocolBufferException e) {
                     log.error("Failed to parse connection status", e);
@@ -112,15 +106,15 @@ public class MqttChannelMessageProvider implements MessagingProvider, MessagingS
     }
 
     @Override
-    public void disconnectListener() {
+    public void close() {
         try {
             //Notify that this client has been closed so that any server with ongoing calls can cancel them and
             //release resources.
-            String statusTopic = ServerTopics.make(TOPIC_SEPARATOR, serverTopics.statusClients, this.clientId);
+            String statusTopic = ServerTopics.make(TOPIC_SEPARATOR, serverTopics.statusClients, channel.getChannelId());
             log.debug("Closing channel. Sending notification on " + statusTopic);
             final byte[] connectedMsg = ConnectionStatus.newBuilder().setConnected(false).build().toByteArray();
             client.publish(statusTopic, new MqttMessage(connectedMsg));
-            final String replyTopicPrefix = serverTopics.servicesOutForClient(clientId) + "/#";
+            final String replyTopicPrefix = serverTopics.servicesOutForChannel(channel.getChannelId()) + "/#";
             client.unsubscribe(replyTopicPrefix);
             client.unsubscribe(serverTopics.status);
         } catch (MqttException exception) {
@@ -129,7 +123,7 @@ public class MqttChannelMessageProvider implements MessagingProvider, MessagingS
     }
 
     @Override
-    public void send(String clientId, String methodName, byte[] buffer) throws MessagingException {
+    public void send(String methodName, byte[] buffer) throws MessagingException {
         if (!serverConnected) {
             //The server should have an mqtt LWT that reliably sends a message when it is disconnected.
             //Nevertheless send it a ping to make double sure that it is definitely not connected.
@@ -155,7 +149,7 @@ public class MqttChannelMessageProvider implements MessagingProvider, MessagingS
 
     /**
      * Send the server an empty message to the prompt topic to prompt it so send back its status
-     * This will be handled in the client.subscribe(Topics.statusOut(serverTopic) set up in this.connectListener
+     * This will be handled in the client.subscribe(Topics.statusOut(serverTopic) set up in this.start
      */
     private void pingServer() {
         this.serverConnectedLatch = new CountDownLatch(1);
@@ -217,7 +211,7 @@ public class MqttChannelMessageProvider implements MessagingProvider, MessagingS
     }
 
     @Override
-    public void unsubscribe(String responseTopic) throws MessagingException{
+    public void unsubscribe(String responseTopic) throws MessagingException {
         final List<StreamObserver> observers = subscribersByTopic.get(responseTopic);
         if (observers != null) {
             subscribersByTopic.remove(responseTopic);
@@ -233,7 +227,7 @@ public class MqttChannelMessageProvider implements MessagingProvider, MessagingS
     }
 
     @Override
-    public void unsubscribe(String responseTopic, StreamObserver observer) throws MessagingException{
+    public void unsubscribe(String responseTopic, StreamObserver observer) throws MessagingException {
         final List<StreamObserver> observers = subscribersByTopic.get(responseTopic);
         if (observers != null) {
             if (!observers.remove(observer)) {

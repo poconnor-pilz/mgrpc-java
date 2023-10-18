@@ -1,13 +1,13 @@
 package io.mgrpc.messaging.pubsub;
 
 import io.mgrpc.messaging.MessagingException;
-import io.mgrpc.messaging.MessagingProvider;
+import io.mgrpc.messaging.ServerMessageTransport;
 
 /**
- * Some server {@link MessagingProvider}s may implement this interface if they want to support pub/sub
+ * Some server {@link ServerMessageTransport}s may implement this interface if they want to support pub/sub
  * of gRPC streams. It is not necessary to implement this to support core gRPC
  */
-public interface MessagingPublisher {
+public interface MessagePublisher {
     /**
      * Send a message (request or reply) to a server or channel.
      * @param topic The full broker topic on which to publish the buffer

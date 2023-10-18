@@ -10,10 +10,10 @@ import io.grpc.stub.ServerCallStreamObserver;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.EmbeddedBroker;
 import io.mgrpc.Id;
-import io.mgrpc.MsgChannel;
-import io.mgrpc.MsgServer;
-import io.mgrpc.mqtt.MqttChannelMessageProvider;
-import io.mgrpc.mqtt.MqttServerMessageProvider;
+import io.mgrpc.MessageChannel;
+import io.mgrpc.MessageServer;
+import io.mgrpc.mqtt.MqttChannelMessageTransport;
+import io.mgrpc.mqtt.MqttServerServerMessageTransport;
 import io.mgrpc.utils.MqttUtils;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.junit.jupiter.api.*;
@@ -38,8 +38,8 @@ public class TestCancelAndTimeout {
     private static MqttAsyncClient serverMqtt;
     private static MqttAsyncClient clientMqtt;
 
-    private MsgChannel channel;
-    private MsgServer server;
+    private MessageChannel channel;
+    private MessageServer server;
 
 
     //Make server name short but random to prevent stray status messages from previous tests affecting this test
@@ -68,11 +68,10 @@ public class TestCancelAndTimeout {
     void setup() throws Exception {
 
         //Set up the server
-        server = new MsgServer(new MqttServerMessageProvider(serverMqtt, SERVER));
-        server.init();
-        final String clientId = Id.random();
-        channel = new MsgChannel(new MqttChannelMessageProvider(clientMqtt, SERVER, clientId), clientId);
-        channel.init();
+        server = new MessageServer(new MqttServerServerMessageTransport(serverMqtt, SERVER));
+        server.start();
+        channel = new MessageChannel(new MqttChannelMessageTransport(clientMqtt, SERVER));
+        channel.start();
     }
 
     @AfterEach
@@ -271,8 +270,8 @@ public class TestCancelAndTimeout {
 
         server.close();
         //Make a server with queue size 10
-        server = new MsgServer(new MqttServerMessageProvider(serverMqtt, SERVER), 10);
-        server.init();
+        server = new MessageServer(new MqttServerServerMessageTransport(serverMqtt, SERVER), 10);
+        server.start();
 
         final CountDownLatch serviceLatch = new CountDownLatch(1);
 
@@ -334,9 +333,8 @@ public class TestCancelAndTimeout {
         //and the input stream to the server should get an error.
         channel.close();
         //Make a channel with queue size 10
-        final String clientId = Id.random();
-        channel = new MsgChannel(new MqttChannelMessageProvider(serverMqtt, SERVER, clientId), clientId, 10);
-        channel.init();
+        channel = new MessageChannel(new MqttChannelMessageTransport(serverMqtt, SERVER), 10);
+        channel.start();
 
         final CountDownLatch serverCancelledLatch = new CountDownLatch(1);
         class BlockingListenForCancel extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {

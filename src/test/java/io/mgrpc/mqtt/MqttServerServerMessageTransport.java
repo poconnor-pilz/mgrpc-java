@@ -2,9 +2,9 @@ package io.mgrpc.mqtt;
 
 import io.mgrpc.*;
 import io.mgrpc.messaging.MessagingException;
-import io.mgrpc.messaging.MessagingListener;
-import io.mgrpc.messaging.MessagingProvider;
-import io.mgrpc.messaging.pubsub.MessagingPublisher;
+import io.mgrpc.messaging.ServerMessageListener;
+import io.mgrpc.messaging.ServerMessageTransport;
+import io.mgrpc.messaging.pubsub.MessagePublisher;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
@@ -13,7 +13,7 @@ import org.slf4j.LoggerFactory;
 
 import java.lang.invoke.MethodHandles;
 
-public class MqttServerMessageProvider implements MessagingProvider, MessagingPublisher {
+public class MqttServerServerMessageTransport implements ServerMessageTransport, MessagePublisher {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -25,7 +25,7 @@ public class MqttServerMessageProvider implements MessagingProvider, MessagingPu
     private final ServerTopics serverTopics;
 
 
-    private MessagingListener messagingListener;
+    private ServerMessageListener server;
 
     /**
      * @param client
@@ -36,25 +36,22 @@ public class MqttServerMessageProvider implements MessagingProvider, MessagingPu
      *                          This will normally be:
      *                          {serverTopic}/o/svc/{clientId}/{service}/{method}/{callId}
      */
-    public MqttServerMessageProvider(MqttAsyncClient client, String serverTopic) {
+    public MqttServerServerMessageTransport(MqttAsyncClient client, String serverTopic) {
         this.client = client;
         this.serverTopics = new ServerTopics(serverTopic, TOPIC_SEPARATOR);
     }
 
 
-    public void close() throws MqttException {
-        this.client.close();
-    }
 
     @Override
-    public void connectListener(MessagingListener listener) throws MessagingException {
-        if (this.messagingListener != null) {
+    public void start(ServerMessageListener server) throws MessagingException {
+        if (this.server != null) {
             throw new MessagingException("Listener already connected");
         }
-        this.messagingListener = listener;
+        this.server = server;
         try {
             client.subscribe(serverTopics.servicesIn + "/#", 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
-                listener.onMessage(mqttMessage.getPayload());
+                server.onMessage(mqttMessage.getPayload());
             })).waitForCompletion(SUBSCRIBE_TIMEOUT_MILLIS);
 
             client.subscribe(serverTopics.statusClients + "/#", 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
@@ -66,7 +63,7 @@ public class MqttServerMessageProvider implements MessagingProvider, MessagingPu
                 String clientId = topic.substring(topic.lastIndexOf(TOPIC_SEPARATOR) + TOPIC_SEPARATOR.length());
                 log.debug("Received client connected status = " + connected + " on " + topic + " for client " + clientId);
                 if(!connected) {
-                    listener.onCounterpartDisconnected(clientId);
+                    server.onChannelDisconnected(clientId);
                 }
             })).waitForCompletion(SUBSCRIBE_TIMEOUT_MILLIS);
 
@@ -82,7 +79,7 @@ public class MqttServerMessageProvider implements MessagingProvider, MessagingPu
     }
 
     @Override
-    public void disconnectListener(){
+    public void close(){
         try {
             notifyConnected(false);
             client.unsubscribe(serverTopics.servicesIn + "/#");
@@ -94,10 +91,9 @@ public class MqttServerMessageProvider implements MessagingProvider, MessagingPu
     }
 
     @Override
-    public void send(String clientId, String methodName, byte[] buffer) throws MessagingException {
+    public void send(String channelId, String methodName, byte[] buffer) throws MessagingException {
 
-        //TODO: make replyTopicPrefix for a client something that can be received on a back channel from the client
-        final String replyTopicPrefix = serverTopics.servicesOutForClient(clientId);
+        final String replyTopicPrefix = serverTopics.servicesOutForChannel(channelId);
         final String topic = ServerTopics.replyTopic(replyTopicPrefix, TOPIC_SEPARATOR, methodName);
         try {
             client.publish(topic, new MqttMessage(buffer));

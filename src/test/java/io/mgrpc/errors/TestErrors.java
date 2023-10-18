@@ -13,8 +13,8 @@ import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.protobuf.StatusProto;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
-import io.mgrpc.mqtt.MqttChannelMessageProvider;
-import io.mgrpc.mqtt.MqttServerMessageProvider;
+import io.mgrpc.mqtt.MqttChannelMessageTransport;
+import io.mgrpc.mqtt.MqttServerServerMessageTransport;
 import io.mgrpc.utils.MqttUtils;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
@@ -36,8 +36,8 @@ public class TestErrors {
     private static MqttAsyncClient serverMqtt;
     private static MqttAsyncClient clientMqtt;
 
-    private MsgChannel channel;
-    private MsgServer server;
+    private MessageChannel channel;
+    private MessageServer server;
 
 
     //Make server name short but random to prevent stray status messages from previous tests affecting this test
@@ -66,11 +66,10 @@ public class TestErrors {
     void setup() throws Exception {
 
         //Set up the server
-        server = new MsgServer(new MqttServerMessageProvider(serverMqtt, SERVER));
-        server.init();
-        final String clientId = Id.random();
-        channel = new MsgChannel(new MqttChannelMessageProvider(clientMqtt, SERVER, clientId), clientId);
-        channel.init();
+        server = new MessageServer(new MqttServerServerMessageTransport(serverMqtt, SERVER));
+        server.start();
+        channel = new MessageChannel(new MqttChannelMessageTransport(clientMqtt, SERVER));
+        channel.start();
     }
 
     @AfterEach

@@ -8,9 +8,9 @@ import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
-import io.mgrpc.mqtt.MqttChannelMessageProvider;
+import io.mgrpc.mqtt.MqttChannelMessageTransport;
 import io.mgrpc.mqtt.MqttExceptionLogger;
-import io.mgrpc.mqtt.MqttServerMessageProvider;
+import io.mgrpc.mqtt.MqttServerServerMessageTransport;
 import io.mgrpc.utils.MqttUtils;
 import io.mgrpc.utils.RpcMessageBuilder;
 import io.mgrpc.utils.ToList;
@@ -88,17 +88,17 @@ public class TestOrderAndDuplicates {
 
 
         final Accumulator accumulator = new Accumulator();
-        MsgServer server = new MsgServer(new MqttServerMessageProvider(serverMqtt, SERVER));
-        server.init();
+        MessageServer server = new MessageServer(new MqttServerServerMessageTransport(serverMqtt, SERVER));
+        server.start();
         server.addService(accumulator);
 
         String fullMethodName = "helloworld.ExampleHelloService/LotsOfGreetings";
         String callId = Id.random();
-        String clientId = Id.random();
+        String channelId = Id.random();
         ServerTopics serverTopics = new ServerTopics(SERVER, "/");
         String topic = serverTopics.methodIn(fullMethodName);
         log.debug(topic);
-        String replyTo = ServerTopics.replyTopic(serverTopics.servicesOutForClient(clientId), "/", fullMethodName);
+        String replyTo = ServerTopics.replyTopic(serverTopics.servicesOutForChannel(channelId), "/", fullMethodName);
         log.debug(replyTo);
         publishAndPause(clientMqtt, topic, RpcMessageBuilder.makeStartRequest(fullMethodName, callId, 1, replyTo));
         publishAndPause(clientMqtt, topic, RpcMessageBuilder.makeValueRequest(callId, 5));
@@ -142,16 +142,16 @@ public class TestOrderAndDuplicates {
         //Then verify that the MqttServer puts re-orders the requests correctly.
 
         final Accumulator accumulator = new Accumulator();
-        MsgServer server = new MsgServer(new MqttServerMessageProvider(serverMqtt, SERVER));
-        server.init();
+        MessageServer server = new MessageServer(new MqttServerServerMessageTransport(serverMqtt, SERVER));
+        server.start();
         server.addService(accumulator);
 
         String fullMethodName = "helloworld.ExampleHelloService/LotsOfGreetings";
         String callId = Id.random();
-        String clientId = Id.random();
+        String channelId = Id.random();
         ServerTopics serverTopics = new ServerTopics(SERVER, "/");
         String topic = serverTopics.methodIn(fullMethodName);
-        String replyTo = ServerTopics.replyTopic(serverTopics.servicesOutForClient(clientId), "/", fullMethodName);
+        String replyTo = ServerTopics.replyTopic(serverTopics.servicesOutForChannel(channelId), "/", fullMethodName);
         publishAndPause(clientMqtt, topic, RpcMessageBuilder.makeValueRequest(callId, 5));
         publishAndPause(clientMqtt, topic, RpcMessageBuilder.makeValueRequest(callId, 5));
         publishAndPause(clientMqtt, topic, RpcMessageBuilder.makeValueRequest(callId, 2));
@@ -185,7 +185,7 @@ public class TestOrderAndDuplicates {
         String servicesInFilter = new ServerTopics(SERVER, "/").servicesIn + "/#";
         log.debug("subscribe server at: " + servicesInFilter);
 
-        final String clientId = Id.random();
+        final String channelId = Id.random();
 
         serverMqtt.subscribe(servicesInFilter, 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
             final RpcMessage message;
@@ -196,7 +196,7 @@ public class TestOrderAndDuplicates {
             }
             log.debug("Received {} with sequence {} message on : {}", new Object[]{message.getMessageCase(), message.getSequence(), topic});
             final String callId = message.getCallId();
-            final String replyTopicPrefix = new ServerTopics(SERVER, TOPIC_SEPARATOR).servicesOutForClient(clientId);
+            final String replyTopicPrefix = new ServerTopics(SERVER, TOPIC_SEPARATOR).servicesOutForChannel(channelId);
             String methodName = "helloworld.ExampleHelloService/LotsOfReplies";
             final String replyTo = ServerTopics.replyTopic(replyTopicPrefix, TOPIC_SEPARATOR, methodName);
             publishAndPause(serverMqtt, replyTo, RpcMessageBuilder.makeValueResponse(callId, 5));
@@ -209,10 +209,10 @@ public class TestOrderAndDuplicates {
             publishAndPause(serverMqtt, replyTo, RpcMessageBuilder.makeValueResponse(callId, 4));
         }));
 
-        final MqttChannelMessageProvider mqttChannelMessageProvider = new MqttChannelMessageProvider(clientMqtt, SERVER, clientId);
+        final MqttChannelMessageTransport mqttChannelMessageProvider = new MqttChannelMessageTransport(clientMqtt, SERVER);
         mqttChannelMessageProvider.fakeServerConnectedForTests();
-        MsgChannel channel = new MsgChannel(mqttChannelMessageProvider, clientId);
-        channel.init();
+        MessageChannel channel = new MessageChannel(mqttChannelMessageProvider, channelId);
+        channel.start();
 
 
         final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub stub = ExampleHelloServiceGrpc.newBlockingStub(channel);

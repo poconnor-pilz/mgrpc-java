@@ -1,15 +1,13 @@
 package io.mgrpc.examples.hello;
 
-import io.grpc.Status;
-import io.grpc.StatusRuntimeException;
 import io.grpc.examples.helloworld.ExampleHelloServiceGrpc;
 import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
 import io.mgrpc.messaging.MessagingException;
-import io.mgrpc.mqtt.MqttChannelMessageProvider;
-import io.mgrpc.mqtt.MqttServerMessageProvider;
+import io.mgrpc.mqtt.MqttChannelMessageTransport;
+import io.mgrpc.mqtt.MqttServerServerMessageTransport;
 import io.mgrpc.utils.MqttUtils;
 import io.mgrpc.utils.ToList;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
@@ -34,10 +32,10 @@ public class TestSubscription {
     private static MqttAsyncClient serverMqtt;
     private static MqttAsyncClient clientMqtt;
 
-    private MsgChannel channel;
-    private MsgServer server;
+    private MessageChannel channel;
+    private MessageServer server;
 
-    private MqttChannelMessageProvider channelProvider;
+    private MqttChannelMessageTransport channelProvider;
 
     //Make server name short but random to prevent stray status messages from previous tests affecting this test
     private static final String SERVER = Id.shrt(Id.random());
@@ -64,13 +62,12 @@ public class TestSubscription {
     void setup() throws Exception{
 
         //Set up the serverb
-        server = new MsgServer(new MqttServerMessageProvider(serverMqtt, SERVER));
-        server.init();
+        server = new MessageServer(new MqttServerServerMessageTransport(serverMqtt, SERVER));
+        server.start();
         server.addService(new HelloServiceForTest());
-        final String clientId = Id.random();
-        channelProvider = new MqttChannelMessageProvider(clientMqtt, SERVER, clientId);
-        channel = new MsgChannel(channelProvider, clientId);
-        channel.init();
+        channelProvider = new MqttChannelMessageTransport(clientMqtt, SERVER);
+        channel = new MessageChannel(channelProvider);
+        channel.start();
     }
 
     @AfterEach
@@ -147,7 +144,7 @@ public class TestSubscription {
         //Send two requests each with a different responseTopic
         final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub blockingStub1 =
                 ExampleHelloServiceGrpc.newBlockingStub(channel)
-                        .withOption(MsgChannel.RESPONSE_TOPIC, responseTopic1);
+                        .withOption(MessageChannel.RESPONSE_TOPIC, responseTopic1);
 
         HelloRequest request1 = HelloRequest.newBuilder().setName("2").build();
         final Iterator<HelloReply> helloReplyIterator = blockingStub1.lotsOfReplies(request1);
@@ -157,7 +154,7 @@ public class TestSubscription {
 
         final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub blockingStub2 =
                 ExampleHelloServiceGrpc.newBlockingStub(channel)
-                        .withOption(MsgChannel.RESPONSE_TOPIC, responseTopic2);
+                        .withOption(MessageChannel.RESPONSE_TOPIC, responseTopic2);
         HelloRequest request2 = HelloRequest.newBuilder().setName("3").build();
         blockingStub2.lotsOfReplies(request2);
 
