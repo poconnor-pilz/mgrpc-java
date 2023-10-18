@@ -1,8 +1,11 @@
-package io.mgrpc.messaging;
+package io.mgrpc.messaging.pubsub;
 
 
 import com.google.protobuf.Parser;
 import io.grpc.stub.StreamObserver;
+import io.mgrpc.messaging.MessagingException;
+import io.mgrpc.messaging.MessagingProvider;
+import io.mgrpc.messaging.pubsub.MessagingPublisher;
 
 /**
  * Some channel {@link MessagingProvider}s may implement this interface if they want to support pub/sub

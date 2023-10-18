@@ -9,6 +9,52 @@ https://stackoverflow.com/questions/65804270/how-to-create-and-use-a-custom-tran
 
 There was some other answer saying that the transport is tied to the semantics of http/2 and is byte based not message based. So if your underlying protocol does not match this then don't use transport.
 
+
+Also:
+
+So transport is pluggable in two ways: 1) you can implement ManagedChannel
+and Server directly or 2) you can use ManagedChannelImpl and ServerImpl as
+utilities and then implement the transport that they expect. (1) basically
+implements "all the hard parts of gRPC". (2) is still involved, but some
+things like load balancing and service config would be handled for you. (2)
+is typically what we mean by "implementing a transport".
+
+https://groups.google.com/g/grpc-io/c/X6IVEKwrafo/m/VkfWwJXmBwAJ
+
+But note that where ManagedChannel and things like ServerCall are in io.grpc classes like ManagedChannelImpl and 
+ServerTransport are in io.grpc.internal so these are clearly not meant to be used (may be subject to change?)
+
+Note that if we were to try the transport route the place to start would be to change the ClientTransportFactory passed to the
+ManagedChannelImpl constructor.
+Then that factory would need to create a new transport which in turn can create a new stream.
+Then in the stream.flush() you would send the accumulated bytes to some topic. Then at that topic the inverse would send a response to some 
+other topic. The ClientTransport.newStream gets  (MethodDescriptor<?, ?> method, Metadata headers, CallOptions callOptions) so this 
+could be used for topics and to encode the headers etc.
+ServerCallImpl shows how the stream is used. Note that Stream is not a java stream. It's a custom interface that looks easyish to implement.
+The framework calls flush() is so the message could be sent over mqtt at that point.
+Could make a messaging transport that in turn wraps a particular impl like mqtt but maybe just start with pure mqtt one.
+The plugging in of different transports seems to start at ManagedChannelProvider.getDefaultRegistry()
+This uses the java serviceloader mechanism to populate a registry with implementations of ManagedChannelProvider.class
+See the comment on top of ManagedChannelProvider.class for how to plug it in.
+Basically the user includes the jar that contains the impl of ManagedChannelProvider and it has a meta-inf that points to the
+ManagedChannelProvider class which is then the default provider. After that you can do what you like but you could look at the 
+Netty provider and copy that.
+Then it should be possible to build it with forTarget("mgrpc://device1")
+Should do this for the existing channel implementation anyway. 
+To do transport then create an instance of ManagedChannelImpl but pass it your own ClientTransportFactory in its constructor
+
+On the server side see the comment on ServerProvider class which works in a similar way.
+The server provider only has a forPort(int port) method so we would need something else to set the root topic. (could use the port number as a string topic to start)
+Then there is ServerImpl which we could re-use by passing our own impl of InternalServer to it.
+InternalServer has a start(ServerListener listener)
+and ServerListener has a
+ServerTransportListener transportCreated(ServerTransport transport);
+See also InProcessTransport and InProcessStream
+Could start by just copying all the InProcess classes and modifying them. 
+
+Could debug the in process server flow from channel to server to see a simple implementation of all of this.
+
+
 The value level up is to use the Channel interface
 
 ## Protcol buffers RPC

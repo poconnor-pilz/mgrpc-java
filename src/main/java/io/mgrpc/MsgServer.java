@@ -8,7 +8,7 @@ import io.grpc.protobuf.StatusProto;
 import io.mgrpc.messaging.MessagingException;
 import io.mgrpc.messaging.MessagingListener;
 import io.mgrpc.messaging.MessagingProvider;
-import io.mgrpc.messaging.MessagingPublisher;
+import io.mgrpc.messaging.pubsub.MessagingPublisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -120,7 +120,7 @@ public class MsgServer implements MessagingListener {
     }
 
     @Override
-    public void onMessage(String topic, byte[] buffer) throws Exception {
+    public void onMessage(byte[] buffer) {
         final RpcMessage message;
         try {
             message = RpcMessage.parseFrom(buffer);
@@ -128,8 +128,8 @@ public class MsgServer implements MessagingListener {
             log.error("Failed to parse RpcMessage", e);
             return;
         }
-        log.debug("Received {} {} {} on : {}", new Object[]{message.getMessageCase(),
-                message.getSequence(), Id.shrt(message.getCallId()), topic});
+        log.debug("Received {} {} {} ", new Object[]{message.getMessageCase(),
+                message.getSequence(), Id.shrt(message.getCallId())});
         final String callId = message.getCallId();
         if (callId.isEmpty()) {
             log.error("Every message sent from the client must have a callId");

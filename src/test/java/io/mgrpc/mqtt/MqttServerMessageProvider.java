@@ -4,7 +4,7 @@ import io.mgrpc.*;
 import io.mgrpc.messaging.MessagingException;
 import io.mgrpc.messaging.MessagingListener;
 import io.mgrpc.messaging.MessagingProvider;
-import io.mgrpc.messaging.MessagingPublisher;
+import io.mgrpc.messaging.pubsub.MessagingPublisher;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
@@ -54,7 +54,7 @@ public class MqttServerMessageProvider implements MessagingProvider, MessagingPu
         this.messagingListener = listener;
         try {
             client.subscribe(serverTopics.servicesIn + "/#", 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
-                listener.onMessage(topic, mqttMessage.getPayload());
+                listener.onMessage(mqttMessage.getPayload());
             })).waitForCompletion(SUBSCRIBE_TIMEOUT_MILLIS);
 
             client.subscribe(serverTopics.statusClients + "/#", 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {

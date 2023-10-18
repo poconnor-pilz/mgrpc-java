@@ -1,4 +1,7 @@
-package io.mgrpc.messaging;
+package io.mgrpc.messaging.pubsub;
+
+import io.mgrpc.messaging.MessagingException;
+import io.mgrpc.messaging.MessagingProvider;
 
 /**
  * Some server {@link MessagingProvider}s may implement this interface if they want to support pub/sub

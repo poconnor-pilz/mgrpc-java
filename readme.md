@@ -6,7 +6,12 @@ See also transport.md for stuff about the transport
 We should try for smart endpoints, dumb pipes. So let the final user client code deal with exceptions and lost connections and re-connecting etc.
 Responsibility of proxy and stub classes is just to map method names and protobufs to actual methods and typed messages.
 
-
+Why not use a reverse proxy? For the same reason that we don't use a VPN. Some customers will not want any inbound port open on their network.
+See also this article: 
+https://www.automation.com/en-us/articles/2016-2/making-opc-ua-secure-for-the-industrial-iot
+(AWS also have a secure tunnel which works by having a proxy either side where the factory side only makes an outbound connection.
+The client then connects to a proxy instead of the device. But there is one tunnel and proxy per device and the tunnel only stays open for 
+12 hours max. It looks like it is primarily for use for troubleshooting particular devices in a single session. Not for ongoing cloud stuff.)
 ## Ordering
 We should probably support a counter based id for this. It can be per stream as the stream will be distinguished by topid or if there is a shared topic then by something like a watchId or requestId. For request response ('unary' in grpc terms) can just set it to zero. Ordering will have to be managed as for services it will be important. For example a service that streams a project down to a device. So ordering should be built in. Look at the google mqtt javascript client code for this.
 For google iot the suggestion for ordering is here:

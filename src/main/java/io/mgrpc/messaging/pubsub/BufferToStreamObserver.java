@@ -1,4 +1,4 @@
-package io.mgrpc.messaging;
+package io.mgrpc.messaging.pubsub;
 
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.protobuf.Parser;
@@ -6,6 +6,7 @@ import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.RpcMessage;
+import io.mgrpc.messaging.MessagingException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

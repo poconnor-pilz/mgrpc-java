@@ -2,10 +2,11 @@ package io.mgrpc.mqtt;
 
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.protobuf.Parser;
-import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
 import io.mgrpc.messaging.*;
+import io.mgrpc.messaging.pubsub.BufferToStreamObserver;
+import io.mgrpc.messaging.pubsub.MessagingSubscriber;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
@@ -85,7 +86,7 @@ public class MqttChannelMessageProvider implements MessagingProvider, MessagingS
             final String replyTopicPrefix = serverTopics.servicesOutForClient(clientId) + "/#";
             log.debug("Subscribing for responses on: " + replyTopicPrefix);
             client.subscribe(replyTopicPrefix, 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
-                listener.onMessage(topic, mqttMessage.getPayload());
+                listener.onMessage(mqttMessage.getPayload());
             })).waitForCompletion(SUBSCRIBE_TIMEOUT_MILLIS);
 
             client.subscribe(serverTopics.status, 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {

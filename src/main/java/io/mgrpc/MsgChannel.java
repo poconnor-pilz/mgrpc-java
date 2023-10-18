@@ -103,7 +103,7 @@ public class MsgChannel extends Channel implements MessagingListener {
     }
 
     @Override
-    public void onMessage(String topic, byte[] buffer) throws Exception {
+    public void onMessage(byte[] buffer)  {
         final RpcMessage message;
         try {
             message = RpcMessage.parseFrom(buffer);
