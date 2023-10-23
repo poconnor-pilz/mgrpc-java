@@ -5,9 +5,16 @@ package io.mgrpc.messaging;
  */
 public interface ChannelMessageTransport {
 
+    /**
+     * Called by the channel when it starts
+     * @param channel The channel
+     * @throws MessagingException
+     */
+    void start(ChannelMessageListener channel) throws MessagingException;
 
-    void start(ChannelMessageListener listener) throws MessagingException;
-
+    /**
+     * Called by the channel when the channel closes. The transport should release any resources here.
+     */
     void close();
 
     /**

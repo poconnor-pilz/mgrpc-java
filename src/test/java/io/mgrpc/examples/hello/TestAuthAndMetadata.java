@@ -14,8 +14,8 @@ import io.mgrpc.EmbeddedBroker;
 import io.mgrpc.Id;
 import io.mgrpc.MessageChannel;
 import io.mgrpc.MessageServer;
-import io.mgrpc.mqtt.MqttChannelMessageTransport;
-import io.mgrpc.mqtt.MqttServerServerMessageTransport;
+import io.mgrpc.mqtt.MqttChannelTransport;
+import io.mgrpc.mqtt.MqttServerTransport;
 import io.mgrpc.utils.MqttUtils;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
@@ -56,7 +56,7 @@ public class TestAuthAndMetadata {
 
         //Make server name short but random to prevent stray status messages from previous tests affecting this test
         final String SERVER = Id.shrt(Id.random());
-        MessageServer server = new MessageServer(new MqttServerServerMessageTransport(MqttUtils.makeClient(), SERVER));
+        MessageServer server = new MessageServer(new MqttServerTransport(MqttUtils.makeClient(), SERVER));
 
         server.start();
 
@@ -64,7 +64,7 @@ public class TestAuthAndMetadata {
                 new ListenForHello(),
                 new ServerAuthInterceptor());
         server.addService(serviceWithIntercept);
-        MessageChannel channel = new MessageChannel(new MqttChannelMessageTransport(MqttUtils.makeClient(), SERVER));
+        MessageChannel channel = new MessageChannel(new MqttChannelTransport(MqttUtils.makeClient(), SERVER));
         channel.start();
 
 

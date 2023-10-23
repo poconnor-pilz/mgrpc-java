@@ -8,8 +8,8 @@ import io.grpc.stub.StreamObserver;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
 import io.mgrpc.*;
-import io.mgrpc.mqtt.MqttChannelMessageTransport;
-import io.mgrpc.mqtt.MqttServerServerMessageTransport;
+import io.mgrpc.mqtt.MqttChannelTransport;
+import io.mgrpc.mqtt.MqttServerTransport;
 import io.mgrpc.utils.MqttUtils;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.junit.jupiter.api.BeforeAll;
@@ -55,7 +55,7 @@ public class TestProxy {
                 .usePlaintext().build();
 
         final MqttAsyncClient clientMqttConnection = MqttUtils.makeClient(null);
-        MessageChannel messageChannel = new MessageChannel(new MqttChannelMessageTransport(clientMqttConnection, SERVER));
+        MessageChannel messageChannel = new MessageChannel(new MqttChannelTransport(clientMqttConnection, SERVER));
         messageChannel.start();
 
         GrpcProxy<byte[], byte[]> proxy = new GrpcProxy<>(messageChannel);
@@ -69,7 +69,7 @@ public class TestProxy {
                 new ServerAuthInterceptor());
 
         final MqttAsyncClient serverMqttConnection = MqttUtils.makeClient(null);
-        MessageServer messageServer = new MessageServer(new MqttServerServerMessageTransport(serverMqttConnection, SERVER));
+        MessageServer messageServer = new MessageServer(new MqttServerTransport(serverMqttConnection, SERVER));
         messageServer.addService(serviceWithIntercept);
         messageServer.start();
 
@@ -116,7 +116,7 @@ public class TestProxy {
         final String SERVER = Id.shrt(Id.random());
 
         final MqttAsyncClient clientMqttConnection = MqttUtils.makeClient(null);
-        MessageChannel messageChannel = new MessageChannel(new MqttChannelMessageTransport(clientMqttConnection, SERVER));
+        MessageChannel messageChannel = new MessageChannel(new MqttChannelTransport(clientMqttConnection, SERVER));
         messageChannel.start();
 
 
@@ -134,7 +134,7 @@ public class TestProxy {
         final GrpcProxy<byte[], byte[]> proxy = new GrpcProxy<>(httpChannel);
 
         final MqttAsyncClient serverMqttConnection = MqttUtils.makeClient(null);
-        MessageServer messageServer = new MessageServer(new MqttServerServerMessageTransport(serverMqttConnection, SERVER));
+        MessageServer messageServer = new MessageServer(new MqttServerTransport(serverMqttConnection, SERVER));
         messageServer.setFallBackRegistry(new GrpcProxy.Registry(proxy));
         messageServer.start();
 

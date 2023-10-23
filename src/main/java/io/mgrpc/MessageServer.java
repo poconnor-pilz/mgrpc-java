@@ -361,7 +361,7 @@ public class MessageServer implements ServerMessageListener {
                 serverCall = new MsgServerCall<>(serverMethodDefinition.getMethodDescriptor(),
                         header, callId);
 
-                //Extract the clientId from the header. It may be used later to find calls for a
+                //Extract the channelId from the header. It may be used later to find calls for a
                 //particular client that need to be cleaned up because the client has disconnected.
                 this.channelId = header.getChannelId();
 

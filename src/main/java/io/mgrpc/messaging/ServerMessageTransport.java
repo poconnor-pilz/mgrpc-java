@@ -6,13 +6,21 @@ package io.mgrpc.messaging;
 public interface ServerMessageTransport {
 
 
-    void start(ServerMessageListener listener) throws MessagingException;
+    /**
+     * Called by the server when the server starts
+     * @param server The server
+     * @throws MessagingException
+     */
+    void start(ServerMessageListener server) throws MessagingException;
 
+    /**
+     * Called by the server when the server closes. The transport should release any resources here.
+     */
     void close();
 
     /**
      * Send a message reply to a channel.
-     * @param channelId The id of the client.
+     * @param channelId The id of the channel.
      * @param methodName The full method name of the gRPC service method e.g.
      *                   helloworld.ExampleHelloService/SayHello
      * @param buffer The payload of the message to send

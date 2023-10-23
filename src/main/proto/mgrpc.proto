@@ -95,42 +95,7 @@ message MetadataEntry{
   string value = 2;
 }
 
-//  Topics and connection status:
 
-//  The general topic structure is:
-//  {server}/i|o/svc/{clientId}/{service}/{method}/{callId}
-
-//  The client sends RpcMessage requests to:
-//
-//  device1/i/svc/helloworld/ExampleHelloService/SayHello
-//
-//  The server sends RpcMessage replies to:
-//
-//  device1/o/svc/l2zb6li45zy7ilso/helloworld/ExampleHelloService/SayHello/2wded6fbtekgll6b
-//
-//    where,
-//      clientId = l2zb6li45zy7ilso
-//      callId   = 2wded6fbtekgll6b
-//      gRPC full method name = helloworld.ExampleHelloService/SayHello
-
-
-
-//Status topics
-//The server status topic will be
-//  server/o/sys/status
-//The server will send a connected=true message to this when it starts up or when a client sends it a message on
-//  server/i/sys/status/prompt
-//The server will send a connected=false message to server/o/sys/status when it shuts down normally or when it shuts down
-//abnormally via its LWT
-//The client status topic will be
-//  server/i/sys/status/client/{channelId}
-//so that clients can have restrictive policies. But the server will subscribe to
-//  server/i/sys/status/#
-//The client will send a connected=false message to server/i/sys/status/client/{clientId} when it shuts down normally
-//(or when it shuts down abnormally LWT or some kind of watchdog). The server will then release any resources it
-// has for {channelId}.
-// The Channel will have a waitForServer method which a client can use to determine if a sever is up.
-// This will method will subscribe to server/o/sys/status and send a prompt to server/i/sys/status/prompt
 message ConnectionStatus{
   bool connected = 1;
 }

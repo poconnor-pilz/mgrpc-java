@@ -9,12 +9,7 @@ import io.grpc.inprocess.InProcessChannelBuilder;
 import io.grpc.inprocess.InProcessServerBuilder;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
-import io.mgrpc.mqtt.MqttChannelMessageTransport;
-import io.mgrpc.mqtt.MqttServerServerMessageTransport;
-import io.mgrpc.utils.MqttUtils;
 import io.mgrpc.utils.ToList;
-import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
-import org.eclipse.paho.client.mqttv3.MqttException;
 import org.junit.jupiter.api.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,54 +23,16 @@ import static java.lang.Thread.sleep;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 
-public class TestHello {
+public abstract class TestHelloBase {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-    private static MqttAsyncClient serverMqtt;
-    private static MqttAsyncClient clientMqtt;
-
-    private MessageChannel channel;
-    private MessageServer server;
 
     //Make server name short but random to prevent stray status messages from previous tests affecting this test
     private static final String SERVER = Id.shrt(Id.random());
 
     private static final long REQUEST_TIMEOUT = 2000;
 
-    @BeforeAll
-    public static void startClients() throws Exception {
-        EmbeddedBroker.start();
-        serverMqtt = MqttUtils.makeClient();
-        clientMqtt = MqttUtils.makeClient(null);
-    }
-
-    @AfterAll
-    public static void stopClients() throws MqttException {
-        serverMqtt.disconnect();
-        serverMqtt.close();
-        serverMqtt = null;
-        clientMqtt.disconnect();
-        clientMqtt.close();
-        clientMqtt = null;
-    }
-
-    @BeforeEach
-    void setup() throws Exception{
-
-        //Set up the serverb
-        server = new MessageServer(new MqttServerServerMessageTransport(serverMqtt, SERVER));
-        server.start();
-        server.addService(new HelloServiceForTest());
-        channel = new MessageChannel(new MqttChannelMessageTransport(clientMqtt, SERVER));
-        channel.start();
-    }
-
-    @AfterEach
-    void tearDown() throws Exception{
-        server.close();
-        channel.close();
-    }
 
     public void checkForLeaks(int numActiveCalls){
         try {
@@ -84,13 +41,17 @@ public class TestHello {
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }
-        assertEquals(numActiveCalls, channel.getStats().getActiveCalls());
-        assertEquals(numActiveCalls, server.getStats().getActiveCalls());
+        assertEquals(numActiveCalls, getChannel().getStats().getActiveCalls());
+        assertEquals(numActiveCalls, getServer().getStats().getActiveCalls());
     }
+
+    public abstract MessageChannel getChannel();
+
+    public abstract MessageServer getServer();
 
     @Test
     public void testSayHello() {
-        final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub blockingStub = ExampleHelloServiceGrpc.newBlockingStub(channel);
+        final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub blockingStub = ExampleHelloServiceGrpc.newBlockingStub(getChannel());
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
         final HelloReply helloReply = blockingStub.sayHello(joe);
         assertEquals("Hello joe", helloReply.getMessage());
@@ -102,7 +63,7 @@ public class TestHello {
     public void testLotsOfReplies() throws Throwable{
 
         final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub stub = ExampleHelloServiceGrpc
-                .newBlockingStub(channel)
+                .newBlockingStub(getChannel())
                 .withDeadlineAfter(REQUEST_TIMEOUT, TimeUnit.MILLISECONDS);
         HelloRequest joe = HelloRequest.newBuilder().setName("2").build();
         List<HelloReply> responseList = ToList.toList(stub.lotsOfReplies(joe));
@@ -115,7 +76,7 @@ public class TestHello {
     @Test
     public void testParallelReplies() throws Throwable{
 
-        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
+        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(getChannel());
         HelloRequest joe = HelloRequest.newBuilder().setName("10").build();
         int numRequests = 100;
         final CountDownLatch latch = new CountDownLatch(numRequests);
@@ -147,7 +108,7 @@ public class TestHello {
     public void testLotsOfGreetings(){
 
         log.debug("testLotsOfGreetings");
-        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
+        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(getChannel());
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
         HelloRequest jane = HelloRequest.newBuilder().setName("jane").build();
         StreamWaiter<HelloReply> waiter = new StreamWaiter<>(REQUEST_TIMEOUT);
@@ -164,7 +125,7 @@ public class TestHello {
     @Test
     public void testBidiHello() throws Throwable{
 
-        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
+        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(getChannel());
 
         class TestHelloReplyObserver implements StreamObserver<HelloReply> {
             public HelloReply lastReply;

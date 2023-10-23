@@ -5,7 +5,9 @@ import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.protobuf.MessageLite;
 import io.grpc.*;
 import io.grpc.protobuf.StatusProto;
-import io.mgrpc.messaging.*;
+import io.mgrpc.messaging.ChannelMessageListener;
+import io.mgrpc.messaging.ChannelMessageTransport;
+import io.mgrpc.messaging.MessagingException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

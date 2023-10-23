@@ -29,7 +29,7 @@ public class ServerTopics {
      */
     public final String statusPrompt;
     /**
-     * Clients should send status message to this topic postfixed with clientId
+     * Clients should send status message to this topic postfixed with channelId
      * Has the form {root}/i/sys/status/client
      */
     public final String statusClients;
@@ -83,7 +83,7 @@ public class ServerTopics {
 
     /**
      * Return the replyTopic for a method call. Dots in fullMethodName will be replaced with slashes.
-     * @param replyTopicPrefix e.g. "myServer/o/svc/dlfxl55d7hsn6lwl" (where "dlfxl55d7hsn6lwl" is clientId)
+     * @param replyTopicPrefix e.g. "myServer/o/svc/dlfxl55d7hsn6lwl" (where "dlfxl55d7hsn6lwl" is channelId)
      * @param fullMethodName e.g. "helloworld.ExampleHelloService/LotsOfReplies"
      * @return e.g "myServer/helloworld/ExampleHelloService/LotsOfReplies/ppjupponvo5vtpzt"
      */

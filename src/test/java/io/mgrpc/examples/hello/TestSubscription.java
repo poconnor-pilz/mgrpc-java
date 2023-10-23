@@ -6,8 +6,8 @@ import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
 import io.mgrpc.messaging.MessagingException;
-import io.mgrpc.mqtt.MqttChannelMessageTransport;
-import io.mgrpc.mqtt.MqttServerServerMessageTransport;
+import io.mgrpc.mqtt.MqttChannelTransport;
+import io.mgrpc.mqtt.MqttServerTransport;
 import io.mgrpc.utils.MqttUtils;
 import io.mgrpc.utils.ToList;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
@@ -22,7 +22,6 @@ import java.util.List;
 import java.util.concurrent.CountDownLatch;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 
 public class TestSubscription {
@@ -35,7 +34,7 @@ public class TestSubscription {
     private MessageChannel channel;
     private MessageServer server;
 
-    private MqttChannelMessageTransport channelProvider;
+    private MqttChannelTransport channelProvider;
 
     //Make server name short but random to prevent stray status messages from previous tests affecting this test
     private static final String SERVER = Id.shrt(Id.random());
@@ -62,10 +61,10 @@ public class TestSubscription {
     void setup() throws Exception{
 
         //Set up the serverb
-        server = new MessageServer(new MqttServerServerMessageTransport(serverMqtt, SERVER));
+        server = new MessageServer(new MqttServerTransport(serverMqtt, SERVER));
         server.start();
         server.addService(new HelloServiceForTest());
-        channelProvider = new MqttChannelMessageTransport(clientMqtt, SERVER);
+        channelProvider = new MqttChannelTransport(clientMqtt, SERVER);
         channel = new MessageChannel(channelProvider);
         channel.start();
     }

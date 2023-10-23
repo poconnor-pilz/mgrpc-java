@@ -3,8 +3,11 @@ package io.mgrpc.mqtt;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.protobuf.Parser;
 import io.grpc.stub.StreamObserver;
-import io.mgrpc.*;
-import io.mgrpc.messaging.*;
+import io.mgrpc.ConnectionStatus;
+import io.mgrpc.ServerTopics;
+import io.mgrpc.messaging.ChannelMessageListener;
+import io.mgrpc.messaging.ChannelMessageTransport;
+import io.mgrpc.messaging.MessagingException;
 import io.mgrpc.messaging.pubsub.BufferToStreamObserver;
 import io.mgrpc.messaging.pubsub.MessageSubscriber;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
@@ -22,7 +25,44 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
-public class MqttChannelMessageTransport implements ChannelMessageTransport, MessageSubscriber {
+//  Topics and connection status:
+
+//  The general topic structure is:
+//  {server}/i|o/svc/{clientId}/{service}/{method}/{callId}
+
+//  The client sends RpcMessage requests to:
+//
+//  device1/i/svc/helloworld/ExampleHelloService/SayHello
+//
+//  The server sends RpcMessage replies to:
+//
+//  device1/o/svc/l2zb6li45zy7ilso/helloworld/ExampleHelloService/SayHello/2wded6fbtekgll6b
+//
+//    where,
+//      clientId = l2zb6li45zy7ilso
+//      callId   = 2wded6fbtekgll6b
+//      gRPC full method name = helloworld.ExampleHelloService/SayHello
+
+
+
+//Status topics
+//The server status topic will be
+//  server/o/sys/status
+//The server will send a connected=true message to this when it starts up or when a client sends it a message on
+//  server/i/sys/status/prompt
+//The server will send a connected=false message to server/o/sys/status when it shuts down normally or when it shuts down
+//abnormally via its LWT
+//The client status topic will be
+//  server/i/sys/status/client/{channelId}
+//so that clients can have restrictive policies. But the server will subscribe to
+//  server/i/sys/status/#
+//The client will send a connected=false message to server/i/sys/status/client/{clientId} when it shuts down normally
+//(or when it shuts down abnormally LWT or some kind of watchdog). The server will then release any resources it
+// has for {channelId}.
+// The Channel will have a waitForServer method which a client can use to determine if a sever is up.
+// This will method will subscribe to server/o/sys/status and send a prompt to server/i/sys/status/prompt
+
+public class MqttChannelTransport implements ChannelMessageTransport, MessageSubscriber {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -59,11 +99,11 @@ public class MqttChannelMessageTransport implements ChannelMessageTransport, Mes
      * @param client
      * @param serverTopic The root topic of the server to connect to e.g. "tenant1/device1"
      *                    Requests will be sent to {serverTopic}/i/svc/{service}/{method}
-     *                    The channel will subscribe for replies on {serverTopic}/o/svc/{clientId}/#
+     *                    The channel will subscribe for replies on {serverTopic}/o/svc/{channelId}/#
      *                    The channel will receive replies to a specific call on
-     *                    {serverTopic}/o/svc/{clientId}/{service}/{method}/{callId}
+     *                    {serverTopic}/o/svc/{channelId}/{service}/{method}/{callId}
      */
-    public MqttChannelMessageTransport(MqttAsyncClient client, String serverTopic) {
+    public MqttChannelTransport(MqttAsyncClient client, String serverTopic) {
         this.client = client;
         this.serverTopics = new ServerTopics(serverTopic, TOPIC_SEPARATOR);
     }
@@ -121,6 +161,14 @@ public class MqttChannelMessageTransport implements ChannelMessageTransport, Mes
             log.error("Exception closing " + exception);
         }
     }
+
+    /**
+     * @return The MQTT last will and testament topic. This topic should be used to configure the MQTT connection
+     */
+    public static String getLWTTopic(String serverTopic, String channelId){
+        return new ServerTopics(serverTopic, TOPIC_SEPARATOR).statusClients + TOPIC_SEPARATOR + channelId;
+    }
+
 
     @Override
     public void send(String methodName, byte[] buffer) throws MessagingException {

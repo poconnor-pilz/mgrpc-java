@@ -8,9 +8,9 @@ import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
-import io.mgrpc.mqtt.MqttChannelMessageTransport;
+import io.mgrpc.mqtt.MqttChannelTransport;
 import io.mgrpc.mqtt.MqttExceptionLogger;
-import io.mgrpc.mqtt.MqttServerServerMessageTransport;
+import io.mgrpc.mqtt.MqttServerTransport;
 import io.mgrpc.utils.MqttUtils;
 import io.mgrpc.utils.RpcMessageBuilder;
 import io.mgrpc.utils.ToList;
@@ -88,7 +88,7 @@ public class TestOrderAndDuplicates {
 
 
         final Accumulator accumulator = new Accumulator();
-        MessageServer server = new MessageServer(new MqttServerServerMessageTransport(serverMqtt, SERVER));
+        MessageServer server = new MessageServer(new MqttServerTransport(serverMqtt, SERVER));
         server.start();
         server.addService(accumulator);
 
@@ -142,7 +142,7 @@ public class TestOrderAndDuplicates {
         //Then verify that the MqttServer puts re-orders the requests correctly.
 
         final Accumulator accumulator = new Accumulator();
-        MessageServer server = new MessageServer(new MqttServerServerMessageTransport(serverMqtt, SERVER));
+        MessageServer server = new MessageServer(new MqttServerTransport(serverMqtt, SERVER));
         server.start();
         server.addService(accumulator);
 
@@ -209,7 +209,7 @@ public class TestOrderAndDuplicates {
             publishAndPause(serverMqtt, replyTo, RpcMessageBuilder.makeValueResponse(callId, 4));
         }));
 
-        final MqttChannelMessageTransport mqttChannelMessageProvider = new MqttChannelMessageTransport(clientMqtt, SERVER);
+        final MqttChannelTransport mqttChannelMessageProvider = new MqttChannelTransport(clientMqtt, SERVER);
         mqttChannelMessageProvider.fakeServerConnectedForTests();
         MessageChannel channel = new MessageChannel(mqttChannelMessageProvider, channelId);
         channel.start();

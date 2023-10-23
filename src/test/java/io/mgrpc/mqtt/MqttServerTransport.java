@@ -1,6 +1,7 @@
 package io.mgrpc.mqtt;
 
-import io.mgrpc.*;
+import io.mgrpc.ConnectionStatus;
+import io.mgrpc.ServerTopics;
 import io.mgrpc.messaging.MessagingException;
 import io.mgrpc.messaging.ServerMessageListener;
 import io.mgrpc.messaging.ServerMessageTransport;
@@ -13,7 +14,7 @@ import org.slf4j.LoggerFactory;
 
 import java.lang.invoke.MethodHandles;
 
-public class MqttServerServerMessageTransport implements ServerMessageTransport, MessagePublisher {
+public class MqttServerTransport implements ServerMessageTransport, MessagePublisher {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -34,9 +35,9 @@ public class MqttServerServerMessageTransport implements ServerMessageTransport,
      *                          A request for a method should be sent to sent to {serverTopic}/i/svc/{service}/{method}
      *                          Replies will be sent to whatever the client specifies in the message header's replyTo
      *                          This will normally be:
-     *                          {serverTopic}/o/svc/{clientId}/{service}/{method}/{callId}
+     *                          {serverTopic}/o/svc/{channelId}/{service}/{method}/{callId}
      */
-    public MqttServerServerMessageTransport(MqttAsyncClient client, String serverTopic) {
+    public MqttServerTransport(MqttAsyncClient client, String serverTopic) {
         this.client = client;
         this.serverTopics = new ServerTopics(serverTopic, TOPIC_SEPARATOR);
     }
@@ -56,14 +57,14 @@ public class MqttServerServerMessageTransport implements ServerMessageTransport,
 
             client.subscribe(serverTopics.statusClients + "/#", 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
                 //If the client sends any message to this topic it means that it has disconnected
-                //The client will send the message to {serverTopic}/in/sys/status/client/{clientId}
-                //So we need to parse the clientId from the topic
+                //The client will send the message to {serverTopic}/in/sys/status/client/{channelId}
+                //So we need to parse the channelId from the topic
                 log.debug("Received client connected status on " + topic);
                 boolean connected = ConnectionStatus.parseFrom(mqttMessage.getPayload()).getConnected();
-                String clientId = topic.substring(topic.lastIndexOf(TOPIC_SEPARATOR) + TOPIC_SEPARATOR.length());
-                log.debug("Received client connected status = " + connected + " on " + topic + " for client " + clientId);
+                String channelId = topic.substring(topic.lastIndexOf(TOPIC_SEPARATOR) + TOPIC_SEPARATOR.length());
+                log.debug("Received client connected status = " + connected + " on " + topic + " for client " + channelId);
                 if(!connected) {
-                    server.onChannelDisconnected(clientId);
+                    server.onChannelDisconnected(channelId);
                 }
             })).waitForCompletion(SUBSCRIBE_TIMEOUT_MILLIS);
 
@@ -88,6 +89,13 @@ public class MqttServerServerMessageTransport implements ServerMessageTransport,
         } catch (MqttException exception) {
             log.error("Exception closing " + exception);
         }
+    }
+
+    /**
+     * @return The MQTT last will and testament topic. This topic should be used to configure the MQTT connection
+     */
+    public static String getLWTTopic(String serverTopic){
+        return new ServerTopics(serverTopic, TOPIC_SEPARATOR).status;
     }
 
     @Override
