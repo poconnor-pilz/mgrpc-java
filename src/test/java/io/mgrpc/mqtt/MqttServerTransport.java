@@ -1,6 +1,7 @@
 package io.mgrpc.mqtt;
 
 import io.mgrpc.ConnectionStatus;
+import io.mgrpc.MessageServer;
 import io.mgrpc.ServerTopics;
 import io.mgrpc.messaging.MessagingException;
 import io.mgrpc.messaging.ServerMessageListener;
@@ -13,6 +14,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.lang.invoke.MethodHandles;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 
 public class MqttServerTransport implements ServerMessageTransport, MessagePublisher {
 
@@ -25,6 +28,7 @@ public class MqttServerTransport implements ServerMessageTransport, MessagePubli
 
     private final ServerTopics serverTopics;
 
+    private static volatile Executor executorSingleton;
 
     private ServerMessageListener server;
 
@@ -89,6 +93,24 @@ public class MqttServerTransport implements ServerMessageTransport, MessagePubli
         } catch (MqttException exception) {
             log.error("Exception closing " + exception);
         }
+    }
+
+    @Override
+    public Executor getExecutor() {
+        return getExecutorInstance();
+    }
+
+
+    private static Executor getExecutorInstance() {
+        if (executorSingleton == null) {
+            synchronized (MessageServer.class) {
+                if (executorSingleton == null) {
+                    //TODO: What kind of thread pool should we use here. It should probably be limited to a fixed maximum or maybe it should be passed as a constructor parameter?
+                    executorSingleton = Executors.newCachedThreadPool();
+                }
+            }
+        }
+        return executorSingleton;
     }
 
     /**

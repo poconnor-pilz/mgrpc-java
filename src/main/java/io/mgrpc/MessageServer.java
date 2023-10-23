@@ -33,17 +33,6 @@ public class MessageServer implements ServerMessageListener {
 
     private static volatile Executor executorSingleton;
 
-    private static Executor getExecutorInstance() {
-        if (executorSingleton == null) {
-            synchronized (MessageServer.class) {
-                if (executorSingleton == null) {
-                    //TODO: What kind of thread pool should we use here. It should probably be limited to a fixed maximum or maybe it should be passed as a constructor parameter?
-                    executorSingleton = Executors.newCachedThreadPool();
-                }
-            }
-        }
-        return executorSingleton;
-    }
 
     private final ServerMessageTransport transport;
 
@@ -61,7 +50,6 @@ public class MessageServer implements ServerMessageListener {
      */
     final ConcurrentHashMap<String, Long> recentlyRemovedCallIds = new ConcurrentHashMap<>();
 
-    private final Executor executor;
     private static final int DEFAULT_QUEUE_SIZE = 100;
     private final int queueSize;
 
@@ -72,20 +60,15 @@ public class MessageServer implements ServerMessageListener {
     /**
      * @param transport PubsubClient
      * @param queueSize         The size of the incoming message queue for each call
-     * @param executor          Executor which will process incoming message queues.
      */
-    public MessageServer(ServerMessageTransport transport, int queueSize, Executor executor) {
+    public MessageServer(ServerMessageTransport transport, int queueSize) {
         this.transport = transport;
-        this.executor = executor;
         this.queueSize = queueSize;
     }
 
-    public MessageServer(ServerMessageTransport transport, int queueSize) {
-        this(transport, queueSize, getExecutorInstance());
-    }
 
     public MessageServer(ServerMessageTransport transport) {
-        this(transport, DEFAULT_QUEUE_SIZE, getExecutorInstance());
+        this(transport, DEFAULT_QUEUE_SIZE);
     }
 
 
@@ -159,7 +142,7 @@ public class MessageServer implements ServerMessageListener {
 
         MgMessageHandler handler = handlersByCallId.get(callId);
         if (handler == null) {
-            handler = new MgMessageHandler(callId, executor, queueSize);
+            handler = new MgMessageHandler(callId, transport.getExecutor(), queueSize);
             handlersByCallId.put(callId, handler);
         }
         //put the message on the handler's queue
@@ -290,7 +273,7 @@ public class MessageServer implements ServerMessageListener {
             if (message.hasStatus()) {
                 if (message.getStatus().getCode() == CANCELLED_CODE) {
                     //Don't run the cancel on the mqtt message thread
-                    executor.execute(() -> {
+                    transport.getExecutor().execute(() -> {
                         log.debug("Canceling");
                         //If the call was constructed, cancel it.
                         if (serverCall != null) {

@@ -7,6 +7,8 @@ import org.slf4j.LoggerFactory;
 import java.lang.invoke.MethodHandles;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 
 /**
  * Class providing server and channel transports that runs in process. Useful for unit testing mgrpc.
@@ -22,6 +24,9 @@ public class InProcessMessageTransport {
 
     private final ServerMessageTransport serverTransport = new InprocServerTransport();
 
+    private static volatile Executor executorSingleton;
+
+
     public ChannelMessageTransport getChannelTransport(){
         return new InprocChannelTransport();
     }
@@ -30,6 +35,17 @@ public class InProcessMessageTransport {
         return serverTransport;
     }
 
+    private static Executor getExecutorInstance() {
+        if (executorSingleton == null) {
+            synchronized (MessageServer.class) {
+                if (executorSingleton == null) {
+                    //TODO: What kind of thread pool should we use here. It should probably be limited to a fixed maximum or maybe it should be passed as a constructor parameter?
+                    executorSingleton = Executors.newCachedThreadPool();
+                }
+            }
+        }
+        return executorSingleton;
+    }
 
     private class InprocServerTransport implements ServerMessageTransport {
 
@@ -59,6 +75,12 @@ public class InProcessMessageTransport {
             }
             channel.onMessage(buffer);
         }
+
+        @Override
+        public Executor getExecutor() {
+            return getExecutorInstance();
+        }
+
     }
 
     private class InprocChannelTransport implements ChannelMessageTransport {
@@ -80,6 +102,12 @@ public class InProcessMessageTransport {
         public void send(String methodName, byte[] buffer) throws MessagingException {
             server.onMessage(buffer);
         }
+
+        @Override
+        public Executor getExecutor() {
+            return getExecutorInstance();
+        }
+
     }
 
 }

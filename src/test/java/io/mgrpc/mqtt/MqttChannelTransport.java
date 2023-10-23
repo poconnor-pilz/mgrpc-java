@@ -4,6 +4,7 @@ import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.protobuf.Parser;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.ConnectionStatus;
+import io.mgrpc.MessageServer;
 import io.mgrpc.ServerTopics;
 import io.mgrpc.messaging.ChannelMessageListener;
 import io.mgrpc.messaging.ChannelMessageTransport;
@@ -21,9 +22,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
 //  Topics and connection status:
 
@@ -78,6 +77,8 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
     private boolean serverConnected = false;
 
     private ChannelMessageListener channel;
+
+    private static volatile Executor executorSingleton;
 
     private final Map<String, List<StreamObserver>> subscribersByTopic = new ConcurrentHashMap<>();
 
@@ -162,6 +163,25 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
         }
     }
 
+
+    @Override
+    public Executor getExecutor() {
+        return getExecutorInstance();
+    }
+
+
+    private static Executor getExecutorInstance() {
+        if (executorSingleton == null) {
+            synchronized (MessageServer.class) {
+                if (executorSingleton == null) {
+                    //TODO: What kind of thread pool should we use here. It should probably be limited to a fixed maximum or maybe it should be passed as a constructor parameter?
+                    executorSingleton = Executors.newCachedThreadPool();
+                }
+            }
+        }
+        return executorSingleton;
+    }
+
     /**
      * @return The MQTT last will and testament topic. This topic should be used to configure the MQTT connection
      */
@@ -194,6 +214,7 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
             throw new MessagingException(e);
         }
     }
+
 
     /**
      * Send the server an empty message to the prompt topic to prompt it so send back its status

@@ -30,18 +30,6 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
 
     private static volatile Executor executorSingleton;
 
-    public static Executor getExecutorInstance() {
-        if (executorSingleton == null) {
-            synchronized (MessageChannel.class) {
-                if (executorSingleton == null) {
-                    //TODO: What kind of thread pool should we use here. It should probably be limited to a fixed maximum
-                    executorSingleton = Executors.newCachedThreadPool();
-                }
-            }
-        }
-        return executorSingleton;
-    }
-
 
     private final ChannelMessageTransport transport;
 
@@ -55,7 +43,6 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
 
     private static final int SINGLE_MESSAGE_STREAM = 0;
 
-    private final Executor executor;
     public static final int DEFAULT_QUEUE_SIZE = 100;
     private final int queueSize;
 
@@ -64,12 +51,10 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
      * @param transport           PubsubClient
      * @param channelId         The client id for the channel. Should be unique.
      * @param queueSize        The size of the message queue for each call's replies
-     * @param executor         Executor on which replies will be processed.
      */
-    public MessageChannel(ChannelMessageTransport transport, String channelId, int queueSize, Executor executor) {
+    public MessageChannel(ChannelMessageTransport transport, String channelId, int queueSize) {
         this.transport = transport;
         this.channelId = channelId;
-        this.executor = executor;
         this.queueSize = queueSize;
     }
 
@@ -78,7 +63,7 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
      * @param queueSize   The size of the message queue for each call's replies
      */
     public MessageChannel(ChannelMessageTransport transport, int queueSize) {
-        this(transport, Id.random(), queueSize, getExecutorInstance());
+        this(transport, Id.random(), queueSize);
     }
 
 
@@ -87,7 +72,7 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
      * @param channelId    The client id for the channel. Should be unique.
      */
     public MessageChannel(ChannelMessageTransport transport, String channelId) {
-        this(transport, channelId, DEFAULT_QUEUE_SIZE, getExecutorInstance());
+        this(transport, channelId, DEFAULT_QUEUE_SIZE);
     }
 
     /**
@@ -159,7 +144,7 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
 
     @Override
     public <RequestT, ResponseT> ClientCall newCall(MethodDescriptor<RequestT, ResponseT> methodDescriptor, CallOptions callOptions) {
-        MsgClientCall call = new MsgClientCall<>(methodDescriptor, callOptions, executor, queueSize);
+        MsgClientCall call = new MsgClientCall<>(methodDescriptor, callOptions, transport.getExecutor(), queueSize);
         clientCallsById.put(call.getCallId(), call);
         return call;
     }

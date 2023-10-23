@@ -1,5 +1,7 @@
 package io.mgrpc.messaging;
 
+import java.util.concurrent.Executor;
+
 /**
  * Interface to messaging client. Adapters should implement this to work with different message protocols.
  */
@@ -28,5 +30,8 @@ public interface ServerMessageTransport {
      */
     void send(String channelId, String methodName, byte[] buffer) throws MessagingException;
 
-
+    /**
+     * @return The executor with which to execute calls
+     */
+    Executor getExecutor();
 }
