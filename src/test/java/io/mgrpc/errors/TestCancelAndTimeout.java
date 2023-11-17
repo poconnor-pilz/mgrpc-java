@@ -14,7 +14,7 @@ import io.mgrpc.MessageChannel;
 import io.mgrpc.MessageServer;
 import io.mgrpc.mqtt.MqttChannelTransport;
 import io.mgrpc.mqtt.MqttServerTransport;
-import io.mgrpc.utils.MqttUtils;
+import io.mgrpc.mqtt.MqttUtils;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.junit.jupiter.api.*;
 import org.slf4j.Logger;
@@ -43,14 +43,14 @@ public class TestCancelAndTimeout {
 
 
     //Make server name short but random to prevent stray status messages from previous tests affecting this test
-    private static final String SERVER = Id.shrt(Id.random());
+    private static final String SERVER = Id.shortRandom();
 
 
     @BeforeAll
     public static void startClients() throws Exception {
         EmbeddedBroker.start();
         serverMqtt = MqttUtils.makeClient();
-        clientMqtt = MqttUtils.makeClient(null);
+        clientMqtt = MqttUtils.makeClient();
     }
 
     @AfterAll

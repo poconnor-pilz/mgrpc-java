@@ -98,5 +98,7 @@ message MetadataEntry{
 
 message ConnectionStatus{
   bool connected = 1;
+  //The channel id if this status is for a channel
+  string channelId = 2;
 }
 

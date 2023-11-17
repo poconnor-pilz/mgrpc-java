@@ -8,7 +8,7 @@ import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
 import io.mgrpc.mqtt.MqttChannelTransport;
 import io.mgrpc.mqtt.MqttServerTransport;
-import io.mgrpc.utils.MqttUtils;
+import io.mgrpc.mqtt.MqttUtils;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -25,7 +25,7 @@ public class TestCommsErrors {
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
     //Make server name short but random to prevent stray status messages from previous tests affecting this test
-    private static final String SERVER = Id.shrt(Id.random());
+    private static final String SERVER = Id.shortRandom();
 
 
     private static MqttAsyncClient serverMqtt;
@@ -35,7 +35,7 @@ public class TestCommsErrors {
     public static void startClients() throws Exception {
         EmbeddedBroker.start();
         serverMqtt = MqttUtils.makeClient();
-        clientMqtt = MqttUtils.makeClient(null);
+        clientMqtt = MqttUtils.makeClient();
     }
 
 
@@ -114,8 +114,7 @@ public class TestCommsErrors {
         //In our case the channel will send an error and all client calls will be cleaned up
         MessageChannel channel = new MessageChannel(new MqttChannelTransport(clientMqtt, SERVER));
         channel.start();
-        String lwtTopic = MqttServerTransport.getLWTTopic(SERVER);
-        MqttAsyncClient serverMqttWithLwt = MqttUtils.makeClient(lwtTopic);
+        MqttAsyncClient serverMqttWithLwt = MqttUtils.makeClient();
         MessageServer server = new MessageServer(new MqttServerTransport(serverMqttWithLwt, SERVER));
         server.start();
         server.addService(new HelloService());
@@ -148,9 +147,9 @@ public class TestCommsErrors {
         //In our case the channel will send an error and all client calls will be cleaned up
         MessageChannel channel = new MessageChannel(new MqttChannelTransport(clientMqtt, SERVER));
         channel.start();
-        final String statusTopic = new ServerTopics(SERVER, "/").status;
+        final String statusTopic = new ServerTopics(SERVER).status;
         CloseableSocketFactory sf = new CloseableSocketFactory();
-        MqttAsyncClient serverMqttWithLwt = MqttUtils.makeClient(statusTopic, sf);
+        MqttAsyncClient serverMqttWithLwt = MqttUtils.makeClient(statusTopic, null, sf);
         MessageServer server = new MessageServer(new MqttServerTransport(serverMqttWithLwt, SERVER));
         server.start();
         server.addService(new HelloService());
@@ -235,8 +234,8 @@ public class TestCommsErrors {
 
         CloseableSocketFactory sf = new CloseableSocketFactory();
         String channelId = Id.random();
-        String clientStatusTopic = MqttChannelTransport.getLWTTopic(SERVER, channelId);
-        MqttAsyncClient clientMqttWithLwt = MqttUtils.makeClient(clientStatusTopic, sf);
+        String clientStatusTopic = new ServerTopics(SERVER).statusClients;
+        MqttAsyncClient clientMqttWithLwt = MqttUtils.makeClient(clientStatusTopic, channelId, sf);
         MessageChannel channel = new MessageChannel(new MqttChannelTransport(clientMqttWithLwt, SERVER), channelId);
         channel.start();
 

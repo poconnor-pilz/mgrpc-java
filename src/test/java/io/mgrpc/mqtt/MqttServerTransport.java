@@ -22,7 +22,6 @@ public class MqttServerTransport implements ServerMessageTransport, MessagePubli
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
     private final MqttAsyncClient client;
-    private final static String TOPIC_SEPARATOR = "/";
     private final static long SUBSCRIBE_TIMEOUT_MILLIS = 5000;
 
 
@@ -35,15 +34,17 @@ public class MqttServerTransport implements ServerMessageTransport, MessagePubli
     /**
      * @param client
      * @param serverTopic       The root topic of the server e.g. "tenant1/device1"
+     *                          This topic should be unique to the broker.
      *                          The server will subscribe for requests on subtopics of {serverTopic}/i/svc
-     *                          A request for a method should be sent to sent to {serverTopic}/i/svc/{service}/{method}
-     *                          Replies will be sent to whatever the client specifies in the message header's replyTo
-     *                          This will normally be:
-     *                          {serverTopic}/o/svc/{channelId}/{service}/{method}/{callId}
+     *                          A request for a method should be sent to sent to {serverTopic}/i/svc/{slashedFullMethod}
+     *                          Replies will be sent to {serverTopic}/o/svc/{channelId}/{slashedFullMethod}
+     *                          Where if the gRPC fullMethodName is "helloworld.HelloService/SayHello"
+     *                          then {slashedFullMethod} is "helloworld/HelloService/SayHello"
+     *
      */
     public MqttServerTransport(MqttAsyncClient client, String serverTopic) {
         this.client = client;
-        this.serverTopics = new ServerTopics(serverTopic, TOPIC_SEPARATOR);
+        this.serverTopics = new ServerTopics(serverTopic);
     }
 
 
@@ -55,24 +56,26 @@ public class MqttServerTransport implements ServerMessageTransport, MessagePubli
         }
         this.server = server;
         try {
-            client.subscribe(serverTopics.servicesIn + "/#", 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
+            //Subscribe for gRPC messages
+            String inTopicFilter = serverTopics.servicesIn + "/#";
+            log.debug("Subscribing for requests on " + inTopicFilter);
+            client.subscribe(inTopicFilter, 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
                 server.onMessage(mqttMessage.getPayload());
             })).waitForCompletion(SUBSCRIBE_TIMEOUT_MILLIS);
 
-            client.subscribe(serverTopics.statusClients + "/#", 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
-                //If the client sends any message to this topic it means that it has disconnected
-                //The client will send the message to {serverTopic}/in/sys/status/client/{channelId}
-                //So we need to parse the channelId from the topic
-                log.debug("Received client connected status on " + topic);
-                boolean connected = ConnectionStatus.parseFrom(mqttMessage.getPayload()).getConnected();
-                String channelId = topic.substring(topic.lastIndexOf(TOPIC_SEPARATOR) + TOPIC_SEPARATOR.length());
-                log.debug("Received client connected status = " + connected + " on " + topic + " for client " + channelId);
-                if(!connected) {
-                    server.onChannelDisconnected(channelId);
+
+            //Subscribe for channel status messages
+            log.debug("Subscribing for client status on " + serverTopics.statusClients);
+            client.subscribe(serverTopics.statusClients, 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
+                ConnectionStatus connectionStatus = ConnectionStatus.parseFrom(mqttMessage.getPayload());
+                log.debug("Received client connected status = " + connectionStatus.getConnected() + " on " + topic + " for channel " + connectionStatus.getChannelId());
+                if(!connectionStatus.getConnected()) {
+                    server.onChannelDisconnected(connectionStatus.getChannelId());
                 }
             })).waitForCompletion(SUBSCRIBE_TIMEOUT_MILLIS);
 
             //If this receives a ping from a client then send a notification that we are connected
+            log.debug("Subscribing for client pings on " + serverTopics.statusPrompt);
             client.subscribe(serverTopics.statusPrompt, 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
                notifyConnected(true);
             })).waitForCompletion(SUBSCRIBE_TIMEOUT_MILLIS);
@@ -113,20 +116,12 @@ public class MqttServerTransport implements ServerMessageTransport, MessagePubli
         return executorSingleton;
     }
 
-    /**
-     * @return The MQTT last will and testament topic. This topic should be used to configure the MQTT connection
-     */
-    public static String getLWTTopic(String serverTopic){
-        return new ServerTopics(serverTopic, TOPIC_SEPARATOR).status;
-    }
 
     @Override
     public void send(String channelId, String methodName, byte[] buffer) throws MessagingException {
 
-        final String replyTopicPrefix = serverTopics.servicesOutForChannel(channelId);
-        final String topic = ServerTopics.replyTopic(replyTopicPrefix, TOPIC_SEPARATOR, methodName);
         try {
-            client.publish(topic, new MqttMessage(buffer));
+            client.publish(serverTopics.replyTopic(channelId, methodName), new MqttMessage(buffer));
         } catch (MqttException e) {
             log.error("Failed to send mqtt message", e);
             throw new MessagingException(e);

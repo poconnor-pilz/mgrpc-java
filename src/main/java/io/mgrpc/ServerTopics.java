@@ -48,6 +48,9 @@ public class ServerTopics {
         this.servicesIn = make(sep, root, IN , SVC);
     }
 
+    public ServerTopics(String root) {
+        this(root, "/");
+    }
 
     /**
      * Given a fullMethodName return the topic on which to send messages for that method.
@@ -83,12 +86,12 @@ public class ServerTopics {
 
     /**
      * Return the replyTopic for a method call. Dots in fullMethodName will be replaced with slashes.
-     * @param replyTopicPrefix e.g. "myServer/o/svc/dlfxl55d7hsn6lwl" (where "dlfxl55d7hsn6lwl" is channelId)
+     * @param channelId
      * @param fullMethodName e.g. "helloworld.ExampleHelloService/LotsOfReplies"
      * @return e.g "myServer/helloworld/ExampleHelloService/LotsOfReplies/ppjupponvo5vtpzt"
      */
-    public static String replyTopic(String replyTopicPrefix, String topicSeparator, String fullMethodName){
-        return make(topicSeparator, replyTopicPrefix, fullMethodName.replace(".", topicSeparator));
+    public String replyTopic(String channelId, String fullMethodName){
+        return make(sep, servicesOutForChannel(channelId), fullMethodName.replace(".", sep));
     }
 
     /**

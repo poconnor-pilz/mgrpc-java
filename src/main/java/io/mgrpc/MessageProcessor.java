@@ -89,7 +89,7 @@ public class MessageProcessor {
             }
             if ((messageQueue.size() + 1) > queueSize) {
                 log.error("Queue capacity ({}) exceeded for call {}",
-                        queueSize, Id.shrt(message.getCallId()));
+                        queueSize, message.getCallId());
                 this.messageHandler.onQueueCapacityExceeded();
                 queueCapacityExceeded = true;
                 return;
@@ -140,7 +140,7 @@ public class MessageProcessor {
                 }
 
                 log.debug("Handling {} {} {}", new Object[]{message.getMessageCase(), message.getSequence(),
-                        Id.shrt(message.getCallId())});
+                        message.getCallId()});
                 try {
                     this.messageHandler.onProviderMessage(message);
                 } catch (Exception ex){

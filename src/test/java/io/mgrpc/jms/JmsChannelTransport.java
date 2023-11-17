@@ -1,0 +1,244 @@
+package io.mgrpc.jms;
+
+import io.mgrpc.ConnectionStatus;
+import io.mgrpc.MessageServer;
+import io.mgrpc.ServerTopics;
+import io.mgrpc.messaging.ChannelMessageListener;
+import io.mgrpc.messaging.ChannelMessageTransport;
+import io.mgrpc.messaging.MessagingException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import javax.jms.*;
+import java.lang.invoke.MethodHandles;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+
+//  Topics and connection status:
+
+//  The general topic structure is:
+//  {server}/i|o/svc/{clientId}
+
+//  The client sends RpcMessage requests to:
+//
+//  device1/i/svc
+//
+//  The server sends RpcMessage replies to:
+//
+//  device1/o/svc/l2zb6li45zy7ilso
+//
+
+
+
+
+//Status topics
+//The server status topic will be
+//  server/o/sys/status
+//The server will send a connected=true message to this when it starts up or when a client sends it a message on
+//  server/i/sys/status/prompt
+//The server will send a connected=false message to server/o/sys/status when it shuts down normally or when it shuts down
+//abnormally via its LWT
+//The client status topic will be
+//  server/i/sys/status/client
+//The client will send a connected=false message to server/i/sys/status/client when it shuts down normally
+//(or when it shuts down abnormally LWT or some kind of watchdog). The server will then release any resources it
+// has for {channelId}.
+// The Channel will have a waitForServer method which a client can use to determine if a sever is up.
+// This will method will subscribe to server/o/sys/status and send a prompt to server/i/sys/status/prompt
+
+public class JmsChannelTransport implements ChannelMessageTransport {
+
+    private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
+
+    private final Connection client;
+    private Session session;
+
+    private MessageProducer requestProducer;
+    private MessageProducer pingProducer;
+    private final static String TOPIC_SEPARATOR = "/";
+    private final static long SUBSCRIBE_TIMEOUT_MILLIS = 5000;
+
+    private String clientId;
+
+    private final ServerTopics serverTopics;
+
+    private CountDownLatch serverConnectedLatch;
+    private boolean serverConnected = false;
+
+    private ChannelMessageListener channel;
+
+    private static volatile Executor executorSingleton;
+
+
+    /**
+     * @param client
+     * @param serverTopic The root topic of the server to connect to e.g. "tenant1/device1"
+     *                    This topic should be unique to the broker.
+     *                    Requests will be sent to {serverTopic}/i/svc
+     *                    The channel will subscribe for replies on {serverTopic}/o/svc/{channelId}
+     */
+    public JmsChannelTransport(Connection client, String serverTopic) {
+        this.client = client;
+        this.serverTopics = new ServerTopics(serverTopic, TOPIC_SEPARATOR);
+    }
+
+
+    @Override
+    public void start(ChannelMessageListener channel) throws MessagingException {
+
+        if (this.channel != null) {
+            throw new MessagingException("Listener already connected");
+        }
+        this.channel = channel;
+        try {
+
+            session = client.createSession();
+
+            Topic sendTopic = session.createTopic(serverTopics.servicesIn);
+            log.debug("Will send requests to : " + sendTopic.getTopicName());
+            requestProducer = session.createProducer(sendTopic);
+
+            Topic pingTopic = session.createTopic(serverTopics.statusPrompt);
+            log.debug("Will send pings to : " + pingTopic.getTopicName());
+            pingProducer = session.createProducer(pingTopic);
+
+            Topic replyTopic = session.createTopic(serverTopics.servicesOutForChannel(this.channel.getChannelId()));
+            log.debug("Subscribing for responses on: " + replyTopic.getTopicName());
+            MessageConsumer consumer = session.createConsumer(replyTopic);
+            consumer.setMessageListener(new MessageListener() {
+                @Override
+                public void onMessage(Message message) {
+                    try {
+                        channel.onMessage(JmsUtils.byteArrayFromMessage(session, message));
+                    } catch (Exception ex){
+                        log.error("Failed to process reply", ex);
+                    }
+                }
+            });
+
+            Topic statusTopic = session.createTopic(serverTopics.status);
+            log.debug("Subscribing for server status on: " + statusTopic.getTopicName());
+            MessageConsumer statusConsumer = session.createConsumer(statusTopic);
+            statusConsumer.setMessageListener(new MessageListener() {
+                @Override
+                public void onMessage(Message message) {
+                    try {
+                        serverConnected = ConnectionStatus.parseFrom(JmsUtils.byteArrayFromMessage(session, message)).getConnected();
+                        log.debug("Server connected status = " + serverConnected);
+                        serverConnectedLatch.countDown();
+                        if (!serverConnected) {
+                            channel.onServerDisconnected();
+                        }
+                    } catch (Exception ex){
+                        log.error("Failed to process status reply", ex);
+                    }
+                }
+            });
+
+            pingServer();
+
+        } catch (JMSException ex) {
+            throw new MessagingException(ex);
+        }
+
+    }
+
+
+    @Override
+    public void close() {
+        try {
+            //Notify that this client has been closed so that any server with ongoing calls can cancel them and
+            //release resources.
+            String statusTopic = serverTopics.statusClients;
+            log.debug("Closing channel. Sending notification on " + statusTopic);
+            final byte[] connectedMsg = ConnectionStatus.newBuilder()
+                    .setConnected(false)
+                    .setChannelId(channel.getChannelId())
+                    .build().toByteArray();
+            Topic topic = session.createTopic(statusTopic);
+            MessageProducer producer = session.createProducer(topic);
+            BytesMessage bytesMessage = session.createBytesMessage();
+            bytesMessage.writeBytes(connectedMsg);
+            producer.send(bytesMessage);
+            session.close();
+        } catch (JMSException e) {
+            log.error("Exception closing " + e);
+        }
+    }
+
+
+    @Override
+    public Executor getExecutor() {
+        return getExecutorInstance();
+    }
+
+
+    private static Executor getExecutorInstance() {
+        if (executorSingleton == null) {
+            synchronized (MessageServer.class) {
+                if (executorSingleton == null) {
+                    //TODO: What kind of thread pool should we use here. It should probably be limited to a fixed maximum or maybe it should be passed as a constructor parameter?
+                    executorSingleton = Executors.newCachedThreadPool();
+                }
+            }
+        }
+        return executorSingleton;
+    }
+
+
+
+    @Override
+    public void send(String methodName, byte[] buffer) throws MessagingException {
+        if (!serverConnected) {
+            //The server should have an mqtt LWT that reliably sends a message when it is disconnected.
+            //Nevertheless send it a ping to make double sure that it is definitely not connected.
+            pingServer();
+            try {
+                serverConnectedLatch.await(2, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                log.error("", e);
+            }
+            if (!serverConnected) {
+                log.warn("Tried to send message but server is not connected");
+                throw new MessagingException("Server is not connected");
+            }
+        }
+        try {
+            requestProducer.send(JmsUtils.messageFromByteArray(session, buffer));
+        } catch (JMSException e) {
+            log.error("Failed to send request", e);
+            throw new MessagingException(e);
+        }
+    }
+
+
+    /**
+     * Send the server an empty message to the prompt topic to prompt it so send back its status
+     * This will be handled in the client.subscribe(Topics.statusOut(serverTopic) set up in this.start
+     */
+    private void pingServer() {
+        this.serverConnectedLatch = new CountDownLatch(1);
+        //In case the server is already started, prompt it to send its connection status
+        //If it is not started it will send connection status when it does start.
+        try {
+            log.debug("Pinging server for status");
+            pingProducer.send(JmsUtils.messageFromByteArray(session, new byte[1]));
+        } catch (JMSException ex) {
+            log.error("Failed to ping server", ex);
+        }
+    }
+
+    /**
+     * Some tests will not use a real server that responds to pings.
+     * The channel will fail to send messages if it thinks that a server is not connected.
+     * This method will fool the channel into thinking that a real server is connected.
+     */
+    public void fakeServerConnectedForTests() {
+        this.serverConnected = true;
+    }
+
+
+
+}

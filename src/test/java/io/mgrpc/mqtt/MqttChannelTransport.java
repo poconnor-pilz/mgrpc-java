@@ -27,7 +27,7 @@ import java.util.concurrent.*;
 //  Topics and connection status:
 
 //  The general topic structure is:
-//  {server}/i|o/svc/{clientId}/{service}/{method}/{callId}
+//  {server}/i|o/svc/{clientId}/{slashedFullMethodName}
 
 //  The client sends RpcMessage requests to:
 //
@@ -35,7 +35,7 @@ import java.util.concurrent.*;
 //
 //  The server sends RpcMessage replies to:
 //
-//  device1/o/svc/l2zb6li45zy7ilso/helloworld/ExampleHelloService/SayHello/2wded6fbtekgll6b
+//  device1/o/svc/l2zb6li45zy7ilso/helloworld/ExampleHelloService/SayHello
 //
 //    where,
 //      clientId = l2zb6li45zy7ilso
@@ -55,7 +55,7 @@ import java.util.concurrent.*;
 //  server/i/sys/status/client/{channelId}
 //so that clients can have restrictive policies. But the server will subscribe to
 //  server/i/sys/status/#
-//The client will send a connected=false message to server/i/sys/status/client/{clientId} when it shuts down normally
+//The client will send a connected=false message to server/i/sys/status/client when it shuts down normally
 //(or when it shuts down abnormally LWT or some kind of watchdog). The server will then release any resources it
 // has for {channelId}.
 // The Channel will have a waitForServer method which a client can use to determine if a sever is up.
@@ -66,10 +66,7 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
     private final MqttAsyncClient client;
-    private final static String TOPIC_SEPARATOR = "/";
     private final static long SUBSCRIBE_TIMEOUT_MILLIS = 5000;
-
-    private String clientId;
 
     private final ServerTopics serverTopics;
 
@@ -99,14 +96,17 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
     /**
      * @param client
      * @param serverTopic The root topic of the server to connect to e.g. "tenant1/device1"
-     *                    Requests will be sent to {serverTopic}/i/svc/{service}/{method}
+     *                    This topic should be unique to the broker.
+     *                    Requests will be sent to {serverTopic}/i/svc/{slashedFullMethod}
      *                    The channel will subscribe for replies on {serverTopic}/o/svc/{channelId}/#
-     *                    The channel will receive replies to a specific call on
-     *                    {serverTopic}/o/svc/{channelId}/{service}/{method}/{callId}
+     *                    The channel will receive replies to on
+     *                    {serverTopic}/o/svc/{channelId}/{slashedFullMethod}
+     *                    Where if the gRPC fullMethodName is "helloworld.HelloService/SayHello"
+     *                    then {slashedFullMethod} is "helloworld/HelloService/SayHello"
      */
     public MqttChannelTransport(MqttAsyncClient client, String serverTopic) {
         this.client = client;
-        this.serverTopics = new ServerTopics(serverTopic, TOPIC_SEPARATOR);
+        this.serverTopics = new ServerTopics(serverTopic);
     }
 
 
@@ -151,10 +151,10 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
         try {
             //Notify that this client has been closed so that any server with ongoing calls can cancel them and
             //release resources.
-            String statusTopic = ServerTopics.make(TOPIC_SEPARATOR, serverTopics.statusClients, channel.getChannelId());
-            log.debug("Closing channel. Sending notification on " + statusTopic);
-            final byte[] connectedMsg = ConnectionStatus.newBuilder().setConnected(false).build().toByteArray();
-            client.publish(statusTopic, new MqttMessage(connectedMsg));
+            log.debug("Closing channel. Sending notification on " + serverTopics.statusClients);
+            final byte[] connectedMsg = ConnectionStatus.newBuilder().
+                    setConnected(false).setChannelId(channel.getChannelId()).build().toByteArray();
+            client.publish(serverTopics.statusClients, new MqttMessage(connectedMsg));
             final String replyTopicPrefix = serverTopics.servicesOutForChannel(channel.getChannelId()) + "/#";
             client.unsubscribe(replyTopicPrefix);
             client.unsubscribe(serverTopics.status);
@@ -180,13 +180,6 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
             }
         }
         return executorSingleton;
-    }
-
-    /**
-     * @return The MQTT last will and testament topic. This topic should be used to configure the MQTT connection
-     */
-    public static String getLWTTopic(String serverTopic, String channelId){
-        return new ServerTopics(serverTopic, TOPIC_SEPARATOR).statusClients + TOPIC_SEPARATOR + channelId;
     }
 
 

@@ -10,7 +10,7 @@ import io.grpc.inprocess.InProcessServerBuilder;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
 import io.mgrpc.utils.ToList;
-import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -29,7 +29,7 @@ public abstract class TestHelloBase {
 
 
     //Make server name short but random to prevent stray status messages from previous tests affecting this test
-    private static final String SERVER = Id.shrt(Id.random());
+    private static final String SERVER = Id.shortRandom();
 
     private static final long REQUEST_TIMEOUT = 2000;
 

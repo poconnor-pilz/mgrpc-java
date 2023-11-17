@@ -16,7 +16,7 @@ import io.mgrpc.MessageChannel;
 import io.mgrpc.MessageServer;
 import io.mgrpc.mqtt.MqttChannelTransport;
 import io.mgrpc.mqtt.MqttServerTransport;
-import io.mgrpc.utils.MqttUtils;
+import io.mgrpc.mqtt.MqttUtils;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -55,7 +55,7 @@ public class TestAuthAndMetadata {
         }
 
         //Make server name short but random to prevent stray status messages from previous tests affecting this test
-        final String SERVER = Id.shrt(Id.random());
+        final String SERVER = Id.shortRandom();
         MessageServer server = new MessageServer(new MqttServerTransport(MqttUtils.makeClient(), SERVER));
 
         server.start();

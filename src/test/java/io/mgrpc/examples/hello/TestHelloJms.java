@@ -4,11 +4,8 @@ import io.mgrpc.EmbeddedBroker;
 import io.mgrpc.Id;
 import io.mgrpc.MessageChannel;
 import io.mgrpc.MessageServer;
-import io.mgrpc.mqtt.MqttChannelTransport;
-import io.mgrpc.mqtt.MqttServerTransport;
-import io.mgrpc.mqtt.MqttUtils;
-import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
-import org.eclipse.paho.client.mqttv3.MqttException;
+import io.mgrpc.jms.JmsChannelTransport;
+import io.mgrpc.jms.JmsServerTransport;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -16,50 +13,55 @@ import org.junit.jupiter.api.BeforeEach;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.jms.Connection;
+import javax.jms.ConnectionFactory;
+import javax.jms.JMSException;
+import javax.naming.InitialContext;
 import java.lang.invoke.MethodHandles;
 
 
-public class TestHelloMqtt extends TestHelloBase {
+public class TestHelloJms extends TestHelloBase {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-    private static MqttAsyncClient serverMqtt;
-    private static MqttAsyncClient clientMqtt;
+    private static Connection serverConnection;
+    private static Connection clientConnection;
 
     MessageChannel channel;
     MessageServer server;
 
 
     //Make server name short but random to prevent stray status messages from previous tests affecting this test
-    private static final String SERVER = Id.shortRandom();
+    private static final String SERVER = "mgprc/" + Id.shortRandom();
 
-    private static final long REQUEST_TIMEOUT = 2000;
 
     @BeforeAll
     public static void startClients() throws Exception {
         EmbeddedBroker.start();
-        serverMqtt = MqttUtils.makeClient();
-        clientMqtt = MqttUtils.makeClient();
+        InitialContext initialContext = new InitialContext();
+        ConnectionFactory cf = (ConnectionFactory) initialContext.lookup("ConnectionFactory");
+
+        serverConnection = cf.createConnection();
+        serverConnection.start();
+        clientConnection = cf.createConnection();
+        clientConnection.start();
     }
 
     @AfterAll
-    public static void stopClients() throws MqttException {
-        serverMqtt.disconnect();
-        serverMqtt.close();
-        serverMqtt = null;
-        clientMqtt.disconnect();
-        clientMqtt.close();
-        clientMqtt = null;
+    public static void stopClients() throws JMSException {
+        serverConnection.close();
+        clientConnection.close();
     }
 
     @BeforeEach
     void setup() throws Exception{
 
         //Set up the serverb
-        server = new MessageServer(new MqttServerTransport(serverMqtt, SERVER));
+        server = new MessageServer(new JmsServerTransport(serverConnection, SERVER));
         server.start();
         server.addService(new HelloServiceForTest());
-        channel = new MessageChannel(new MqttChannelTransport(clientMqtt, SERVER));
+        Thread.sleep(1000);
+        channel = new MessageChannel(new JmsChannelTransport(clientConnection, SERVER));
         channel.start();
     }
 

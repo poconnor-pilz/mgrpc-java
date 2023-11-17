@@ -12,9 +12,9 @@
         <appender-ref ref="STDOUT"/>
     </root>
 
-    <logger name="org.apache.activemq.artemis" additivity="false" level="info">
-        <appender-ref ref="STDOUT"/>
-    </logger>
+<!--    <logger name="org.apache.activemq.artemis" additivity="false" level="debug">-->
+<!--        <appender-ref ref="STDOUT"/>-->
+<!--    </logger>-->
 
     <logger name="io.mgrpc" additivity="false" level="debug">
         <appender-ref ref="STDOUT"/>

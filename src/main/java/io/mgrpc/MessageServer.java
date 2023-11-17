@@ -15,7 +15,10 @@ import org.slf4j.LoggerFactory;
 import java.lang.invoke.MethodHandles;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 import static io.mgrpc.RpcMessage.MessageCase.START;
 
@@ -123,7 +126,7 @@ public class MessageServer implements ServerMessageListener {
             return;
         }
         log.debug("Received {} {} {} ", new Object[]{message.getMessageCase(),
-                message.getSequence(), Id.shrt(message.getCallId())});
+                message.getSequence(), message.getCallId()});
         final String callId = message.getCallId();
         if (callId.isEmpty()) {
             log.error("Every message sent from the client must have a callId");
@@ -136,7 +139,7 @@ public class MessageServer implements ServerMessageListener {
         //This could also occur when the call's queue has reached its limit but the client hasn't
         //received the error message yet.
         if (recentlyRemovedCallIds.contains(callId)) {
-            log.warn("Message received for removed call {}. Ignoring", Id.shrt(callId));
+            log.warn("Message received for removed call {}. Ignoring", callId);
             return;
         }
 
@@ -203,7 +206,7 @@ public class MessageServer implements ServerMessageListener {
 
         log.debug("Sending {} {} {} for {} on topic {} ",
                 new Object[]{message.getMessageCase(), message.getSequence(),
-                        Id.shrt(message.getCallId()), fullMethodName, topic});
+                        message.getCallId(), fullMethodName, topic});
 
         if (topic != null && !topic.trim().isEmpty()) {
             //The client has overridden the replyTo
@@ -233,7 +236,7 @@ public class MessageServer implements ServerMessageListener {
                 recentlyRemovedCallIds.put(callId, System.currentTimeMillis());
             }
         }
-        log.debug("Call {} removed for client messages", Id.shrt(callId));
+        log.debug("Call {} removed for client messages", callId);
     }
 
 

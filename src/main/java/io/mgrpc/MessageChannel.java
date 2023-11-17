@@ -15,7 +15,10 @@ import javax.annotation.Nullable;
 import java.lang.invoke.MethodHandles;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 public class MessageChannel extends Channel implements ChannelMessageListener {
 
@@ -110,7 +113,7 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
         }
         final MsgClientCall call = clientCallsById.get(message.getCallId());
         if (call == null) {
-            log.error("Could not find call with callId: " + Id.shrt(message.getCallId()) + " for message " + message.getSequence());
+            log.error("Could not find call with callId: " + message.getCallId() + " for message " + message.getSequence());
             return;
         }
         call.queueServerMessage(message);
@@ -416,7 +419,7 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
 
         public void close(Status status) {
             closed = true;
-            log.debug("Closing call {} with status: {} {}", new Object[]{Id.shrt(this.callId), status.getCode(), status.getDescription()});
+            log.debug("Closing call {} with status: {} {}", new Object[]{this.callId, status.getCode(), status.getDescription()});
             context.removeListener(cancellationListener);
             cancelTimeouts();
             clientExec(() -> responseListener.onClose(status, EMPTY_METADATA));
@@ -509,7 +512,7 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
             }
             final RpcMessage message = messageBuilder.build();
             log.debug("Sending {} {} {} ",
-                    new Object[]{message.getMessageCase(), message.getSequence(), Id.shrt(message.getCallId())});
+                    new Object[]{message.getMessageCase(), message.getSequence(), message.getCallId()});
             transport.send(fullMethodName, message.toByteArray());
         }
 

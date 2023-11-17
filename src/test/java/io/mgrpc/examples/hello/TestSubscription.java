@@ -8,7 +8,7 @@ import io.mgrpc.*;
 import io.mgrpc.messaging.MessagingException;
 import io.mgrpc.mqtt.MqttChannelTransport;
 import io.mgrpc.mqtt.MqttServerTransport;
-import io.mgrpc.utils.MqttUtils;
+import io.mgrpc.mqtt.MqttUtils;
 import io.mgrpc.utils.ToList;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
@@ -37,14 +37,14 @@ public class TestSubscription {
     private MqttChannelTransport channelProvider;
 
     //Make server name short but random to prevent stray status messages from previous tests affecting this test
-    private static final String SERVER = Id.shrt(Id.random());
+    private static final String SERVER = Id.shortRandom();
 
 
     @BeforeAll
     public static void startClients() throws Exception {
         EmbeddedBroker.start();
         serverMqtt = MqttUtils.makeClient();
-        clientMqtt = MqttUtils.makeClient(null);
+        clientMqtt = MqttUtils.makeClient();
     }
 
     @AfterAll

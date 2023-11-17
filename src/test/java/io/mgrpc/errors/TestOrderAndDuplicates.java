@@ -11,7 +11,7 @@ import io.mgrpc.*;
 import io.mgrpc.mqtt.MqttChannelTransport;
 import io.mgrpc.mqtt.MqttExceptionLogger;
 import io.mgrpc.mqtt.MqttServerTransport;
-import io.mgrpc.utils.MqttUtils;
+import io.mgrpc.mqtt.MqttUtils;
 import io.mgrpc.utils.RpcMessageBuilder;
 import io.mgrpc.utils.ToList;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
@@ -33,7 +33,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class TestOrderAndDuplicates {
 
-    private final static String TOPIC_SEPARATOR = "/";
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -42,14 +41,14 @@ public class TestOrderAndDuplicates {
 
 
     //Make server name short but random to prevent stray status messages from previous tests affecting this test
-    private static final String SERVER = Id.shrt(Id.random());
+    private static final String SERVER = Id.shortRandom();
 
 
     @BeforeAll
     public static void startClients() throws Exception{
         EmbeddedBroker.start();
         serverMqtt = MqttUtils.makeClient();
-        clientMqtt = MqttUtils.makeClient(null);
+        clientMqtt = MqttUtils.makeClient();
     }
 
     @AfterAll
@@ -95,10 +94,10 @@ public class TestOrderAndDuplicates {
         String fullMethodName = "helloworld.ExampleHelloService/LotsOfGreetings";
         String callId = Id.random();
         String channelId = Id.random();
-        ServerTopics serverTopics = new ServerTopics(SERVER, "/");
+        ServerTopics serverTopics = new ServerTopics(SERVER);
         String topic = serverTopics.methodIn(fullMethodName);
         log.debug(topic);
-        String replyTo = ServerTopics.replyTopic(serverTopics.servicesOutForChannel(channelId), "/", fullMethodName);
+        String replyTo = serverTopics.replyTopic(channelId, fullMethodName);
         log.debug(replyTo);
         publishAndPause(clientMqtt, topic, RpcMessageBuilder.makeStartRequest(fullMethodName, callId, 1, replyTo));
         publishAndPause(clientMqtt, topic, RpcMessageBuilder.makeValueRequest(callId, 5));
@@ -149,9 +148,9 @@ public class TestOrderAndDuplicates {
         String fullMethodName = "helloworld.ExampleHelloService/LotsOfGreetings";
         String callId = Id.random();
         String channelId = Id.random();
-        ServerTopics serverTopics = new ServerTopics(SERVER, "/");
+        ServerTopics serverTopics = new ServerTopics(SERVER);
         String topic = serverTopics.methodIn(fullMethodName);
-        String replyTo = ServerTopics.replyTopic(serverTopics.servicesOutForChannel(channelId), "/", fullMethodName);
+        String replyTo = serverTopics.replyTopic(channelId, fullMethodName);
         publishAndPause(clientMqtt, topic, RpcMessageBuilder.makeValueRequest(callId, 5));
         publishAndPause(clientMqtt, topic, RpcMessageBuilder.makeValueRequest(callId, 5));
         publishAndPause(clientMqtt, topic, RpcMessageBuilder.makeValueRequest(callId, 2));
@@ -182,7 +181,7 @@ public class TestOrderAndDuplicates {
         //Make a mock server that sends back replies out of order when it gets a request
         //Then verify that the MqttChannel will re-order the replies correctly
 
-        String servicesInFilter = new ServerTopics(SERVER, "/").servicesIn + "/#";
+        String servicesInFilter = new ServerTopics(SERVER).servicesIn + "/#";
         log.debug("subscribe server at: " + servicesInFilter);
 
         final String channelId = Id.random();
@@ -196,9 +195,8 @@ public class TestOrderAndDuplicates {
             }
             log.debug("Received {} with sequence {} message on : {}", new Object[]{message.getMessageCase(), message.getSequence(), topic});
             final String callId = message.getCallId();
-            final String replyTopicPrefix = new ServerTopics(SERVER, TOPIC_SEPARATOR).servicesOutForChannel(channelId);
             String methodName = "helloworld.ExampleHelloService/LotsOfReplies";
-            final String replyTo = ServerTopics.replyTopic(replyTopicPrefix, TOPIC_SEPARATOR, methodName);
+            final String replyTo = new ServerTopics(SERVER).replyTopic(channelId, methodName);
             publishAndPause(serverMqtt, replyTo, RpcMessageBuilder.makeValueResponse(callId, 5));
             publishAndPause(serverMqtt, replyTo, RpcMessageBuilder.makeValueResponse(callId, 5));
             publishAndPause(serverMqtt, replyTo, RpcMessageBuilder.makeValueResponse(callId, 2));

@@ -32,8 +32,8 @@ public class Id {
     }
 
     /**
-     * Return a random 10 byte id. It encodes to base32 evenly (16 chars - 5 bits per char). It is valid for topics.
-       It is easier than base64UrlSafe to read in logs and match.
+     * Return a random 10 byte 16 char id. It encodes to base32 evenly (80 bits -> 16 chars - 5 bits per char).
+     * It is valid for topics. It is easier than base64UrlSafe to read in logs and match.
        The probability of collision for 10,000 concurrent calls is zero (for 100,000 it is about 4E-15)
      */
     public static String random(){
@@ -47,14 +47,10 @@ public class Id {
     }
 
     /**
-     * Return the first 7 chars of id for short debug Strings (can't call this method "short" because it's a keyword)
+     * Return short random id (8 chars) for test server names
      */
-    public static String shrt(final String id){
-        final int shortLen = 7;
-        if(id.length() < shortLen){
-            return id;
-        }
-        return id.substring(0, shortLen);
+    public static String shortRandom(){
+        return randomBase32(5);
     }
 
 

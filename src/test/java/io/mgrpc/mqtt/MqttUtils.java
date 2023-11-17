@@ -1,4 +1,4 @@
-package io.mgrpc.utils;
+package io.mgrpc.mqtt;
 
 
 import io.mgrpc.ConnectionStatus;
@@ -31,27 +31,27 @@ public class MqttUtils {
 
     public static MqttAsyncClient makeClient() throws Exception {
         String brokerUrl = (String)getProperties().get("brokerUrl");
-        return makeClient(null, brokerUrl);
+        return makeClient(null, null, brokerUrl);
     }
 
-    public static MqttAsyncClient makeClient(String lwtTopic) throws Exception {
+    public static MqttAsyncClient makeClient(String lwtTopic, String channelId) throws Exception {
         String brokerUrl = (String)getProperties().get("brokerUrl");
-        return makeClient(lwtTopic, brokerUrl);
+        return makeClient(lwtTopic, channelId, brokerUrl);
     }
 
-    public static MqttAsyncClient makeClient(String lwtTopic, String brokerUrl) throws Exception {
+    public static MqttAsyncClient makeClient(String lwtTopic, String channelId, String brokerUrl) throws Exception {
 
-        return makeClient(lwtTopic, brokerUrl, null);
+        return makeClient(lwtTopic, channelId, brokerUrl, null);
     }
 
-    public static MqttAsyncClient makeClient(String lwtTopic, SocketFactory socketFactory) throws Exception {
+    public static MqttAsyncClient makeClient(String lwtTopic, String channelId, SocketFactory socketFactory) throws Exception {
 
         String brokerUrl = (String)getProperties().get("brokerUrl");
-        return makeClient(lwtTopic, brokerUrl, socketFactory);
+        return makeClient(lwtTopic, channelId, brokerUrl, socketFactory);
     }
 
 
-    public static MqttAsyncClient makeClient(String lwtTopic, String brokerUrl, SocketFactory socketFactory) throws Exception {
+    public static MqttAsyncClient makeClient(String lwtTopic, String channelId, String brokerUrl, SocketFactory socketFactory) throws Exception {
         final MqttAsyncClient client;
         client = new MqttAsyncClient(
                 brokerUrl,
@@ -65,8 +65,13 @@ public class MqttUtils {
         }
 
         if(lwtTopic != null){
-            log.debug("Setting LWT to: " + lwtTopic);
-            final byte[] lwtMessage = ConnectionStatus.newBuilder().setConnected(false).build().toByteArray();
+            log.debug("Setting LWT to: " + lwtTopic + " channelId " + channelId);
+            final ConnectionStatus.Builder builder = ConnectionStatus.newBuilder();
+            builder.setConnected(false);
+            if(channelId != null){
+                builder.setChannelId(channelId);
+            }
+            final byte[] lwtMessage = builder.build().toByteArray();
             mqttConnectOptions.setWill(lwtTopic, lwtMessage, 1, true);
         }
         client.connect(mqttConnectOptions).waitForCompletion();
