@@ -1,5 +1,6 @@
 package io.mgrpc;
 
+import io.grpc.MethodDescriptor;
 import io.mgrpc.messaging.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,7 +52,7 @@ public class InProcessMessageTransport {
 
 
         @Override
-        public void start(ServerMessageListener server) throws MessagingException {
+        public void start(MessageServer server) throws MessagingException {
             if(InProcessMessageTransport.this.server != null){
                 String err = "InProcessMessageTransport instance can only be associated with one Server";
                 log.error(err);
@@ -88,7 +89,7 @@ public class InProcessMessageTransport {
         private String channelId;
 
         @Override
-        public void start(ChannelMessageListener channel) throws MessagingException {
+        public void start(MessageChannel channel) throws MessagingException {
             this.channelId = channel.getChannelId();
             channelsById.put(channelId, channel);
         }
@@ -99,7 +100,7 @@ public class InProcessMessageTransport {
         }
 
         @Override
-        public void send(String methodName, byte[] buffer) throws MessagingException {
+        public void send(boolean isStart, String callId, MethodDescriptor methodDescriptor, byte[] buffer) throws MessagingException {
             server.onMessage(buffer);
         }
 

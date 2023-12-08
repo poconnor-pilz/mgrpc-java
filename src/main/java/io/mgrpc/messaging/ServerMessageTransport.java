@@ -1,5 +1,7 @@
 package io.mgrpc.messaging;
 
+import io.mgrpc.MessageServer;
+
 import java.util.concurrent.Executor;
 
 /**
@@ -13,7 +15,7 @@ public interface ServerMessageTransport {
      * @param server The server
      * @throws MessagingException
      */
-    void start(ServerMessageListener server) throws MessagingException;
+    void start(MessageServer server) throws MessagingException;
 
     /**
      * Called by the server when the server closes. The transport should release any resources here.

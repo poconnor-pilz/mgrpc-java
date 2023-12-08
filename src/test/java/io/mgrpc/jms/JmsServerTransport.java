@@ -1,8 +1,8 @@
 package io.mgrpc.jms;
 
-import io.mgrpc.ConnectionStatus;
-import io.mgrpc.MessageServer;
-import io.mgrpc.ServerTopics;
+import com.google.protobuf.Empty;
+import io.grpc.stub.StreamObserver;
+import io.mgrpc.*;
 import io.mgrpc.messaging.MessagingException;
 import io.mgrpc.messaging.ServerMessageListener;
 import io.mgrpc.messaging.ServerMessageTransport;
@@ -29,11 +29,13 @@ public class JmsServerTransport implements ServerMessageTransport {
 
     private final Map<String, MessageProducer> channelProducers = new ConcurrentHashMap<>();
 
+    private Map<String, JmsCallQueues> callQueuesMap = new ConcurrentHashMap<>();
+
     private final ServerTopics serverTopics;
 
     private static volatile Executor executorSingleton;
 
-    private ServerMessageListener server;
+    private MessageServer server;
 
     /**
      * @param client
@@ -51,7 +53,7 @@ public class JmsServerTransport implements ServerMessageTransport {
 
 
     @Override
-    public void start(ServerMessageListener server) throws MessagingException {
+    public void start(MessageServer server) throws MessagingException {
         if (this.server != null) {
             throw new MessagingException("Listener already connected");
         }
@@ -98,6 +100,34 @@ public class JmsServerTransport implements ServerMessageTransport {
                 } catch (Exception ex){
                     log.error("Failed to process status reply", ex);
                 }
+            });
+
+            server.addService(new CallTopicsServiceGrpc.CallTopicsServiceImplBase() {
+                @Override
+                public void setCallTopics(CallTopics request, StreamObserver<Empty> responseObserver) {
+                    JmsCallQueues callQueues = new JmsCallQueues();
+                    callQueuesMap.put(request.getChannelId()+request.getCallId(), callQueues);
+                    if(request.getTopicIn() != null && !request.getTopicIn().isEmpty()){
+                        String inQ = serverTopics.make(serverTopics.servicesIn, request.getChannelId(), request.getCallId());
+                        try {
+                            callQueues.consumerQueue = session.createQueue(inQ);
+                            callQueues.consumer = session.createConsumer(callQueues.consumerQueue);
+                            callQueues.consumer.setMessageListener(message -> {
+                                try {
+                                    server.onMessage(JmsUtils.byteArrayFromMessage(session, message));
+                                } catch (Exception ex) {
+                                    log.error("Failed to process reply", ex);
+                                }
+                            });
+                        } catch(JMSException ex){
+                            responseObserver.onError(ex);
+                            return;
+                        }
+                        responseObserver.onNext(Empty.newBuilder().build());
+                        responseObserver.onCompleted();
+                    }
+                }
+                //TODO: Make the output queue and send to it etc.
             });
 
 

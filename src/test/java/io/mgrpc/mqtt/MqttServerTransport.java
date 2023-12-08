@@ -50,7 +50,7 @@ public class MqttServerTransport implements ServerMessageTransport, MessagePubli
 
 
     @Override
-    public void start(ServerMessageListener server) throws MessagingException {
+    public void start(MessageServer server) throws MessagingException {
         if (this.server != null) {
             throw new MessagingException("Listener already connected");
         }

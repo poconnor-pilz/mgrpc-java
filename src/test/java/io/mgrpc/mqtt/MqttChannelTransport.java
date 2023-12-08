@@ -2,8 +2,10 @@ package io.mgrpc.mqtt;
 
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.protobuf.Parser;
+import io.grpc.MethodDescriptor;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.ConnectionStatus;
+import io.mgrpc.MessageChannel;
 import io.mgrpc.MessageServer;
 import io.mgrpc.ServerTopics;
 import io.mgrpc.messaging.ChannelMessageListener;
@@ -111,7 +113,7 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
 
 
     @Override
-    public void start(ChannelMessageListener channel) throws MessagingException {
+    public void start(MessageChannel channel) throws MessagingException {
 
         if (this.channel != null) {
             throw new MessagingException("Listener already connected");
@@ -184,7 +186,7 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
 
 
     @Override
-    public void send(String methodName, byte[] buffer) throws MessagingException {
+    public void send(boolean isStart, String callId, MethodDescriptor methodDescriptor, byte[] buffer) throws MessagingException {
         if (!serverConnected) {
             //The server should have an mqtt LWT that reliably sends a message when it is disconnected.
             //Nevertheless send it a ping to make double sure that it is definitely not connected.
@@ -199,7 +201,7 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
                 throw new MessagingException("Server is not connected");
             }
         }
-        final String topic = serverTopics.methodIn(methodName);
+        final String topic = serverTopics.methodIn(methodDescriptor.getFullMethodName());
         try {
             client.publish(topic, new MqttMessage(buffer));
         } catch (MqttException e) {

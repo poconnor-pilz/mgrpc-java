@@ -3,6 +3,7 @@ syntax = "proto3";
 package io.mgrpc;
 
 import "google/rpc/status.proto";
+import "google/protobuf/empty.proto";
 
 option java_multiple_files = true;
 option java_package = "io.mgrpc";
@@ -96,9 +97,29 @@ message MetadataEntry{
 }
 
 
+
+service CallTopicsService {
+
+  //A channel transport can inform a server to create special topics or queues for a call
+  //The channel transport should wait until this call has completed so that it knows the
+  //topics/queues have been created before proceeding further.
+  rpc SetCallTopics(CallTopics) returns (google.protobuf.Empty);
+}
+
+message CallTopics {
+  string channelId = 1;
+  string callId = 2;
+  //Topic or queue that should be used by the server for the input stream for this call
+  string topicIn = 3;
+  //Topic or queue that should be used by the server for the output stream for this call
+  string topicOut = 4;
+}
+
+
 message ConnectionStatus{
   bool connected = 1;
   //The channel id if this status is for a channel
   string channelId = 2;
 }
+
 

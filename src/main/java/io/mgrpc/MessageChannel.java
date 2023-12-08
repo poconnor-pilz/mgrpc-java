@@ -334,7 +334,7 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
             msgBuilder.setSequence(sequence);
 
             try {
-                send(methodDescriptor.getFullMethodName(), msgBuilder);
+                send(msgBuilder.hasStart(), callId, methodDescriptor, msgBuilder);
             } catch (MessagingException ex){
                 this.close(Status.UNAVAILABLE.withDescription(ex.getMessage()).withCause(ex));
                 return;
@@ -410,7 +410,7 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
                     .setSequence(sequence)
                     .setStatus(cancelled);
             try {
-                send(methodDescriptor.getFullMethodName(), msgBuilder);
+                send(false, callId, methodDescriptor, msgBuilder);
             } catch (MessagingException e) {
                 log.error("onQueueCapacityExceeded() failed to send cancelled status", e);
             }
@@ -476,7 +476,7 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
                     .setSequence(sequence)
                     .setStatus(cancelled);
             try {
-                send(methodDescriptor.getFullMethodName(), msgBuilder);
+                send(false, callId, methodDescriptor, msgBuilder);
             } catch (MessagingException ex) {
                 throw new StatusRuntimeException(Status.UNAVAILABLE.withDescription(ex.getMessage()).withCause(ex));
             }
@@ -498,14 +498,14 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
                     .setSequence(sequence)
                     .setStatus(ok);
             try {
-                send(methodDescriptor.getFullMethodName(), msgBuilder);
+                send(false, callId, methodDescriptor, msgBuilder);
             } catch (MessagingException ex) {
                 throw new StatusRuntimeException(Status.UNAVAILABLE.withDescription(ex.getMessage()).withCause(ex));
             }
         }
 
 
-        private void send(String fullMethodName, RpcMessage.Builder messageBuilder) throws MessagingException {
+        private void send(boolean isStart, String callId, MethodDescriptor methodDescriptor, RpcMessage.Builder messageBuilder) throws MessagingException {
             //fullMethodName will be e.g. "helloworld.ExampleHelloService/LotsOfReplies"
             if (!initialized) {
                 throw new MessagingException("channel.init() was not called");
@@ -513,7 +513,7 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
             final RpcMessage message = messageBuilder.build();
             log.debug("Sending {} {} {} ",
                     new Object[]{message.getMessageCase(), message.getSequence(), message.getCallId()});
-            transport.send(fullMethodName, message.toByteArray());
+            transport.send(isStart, callId, methodDescriptor, message.toByteArray());
         }
 
 

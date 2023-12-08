@@ -1,5 +1,8 @@
 package io.mgrpc.messaging;
 
+import io.grpc.MethodDescriptor;
+import io.mgrpc.MessageChannel;
+
 import java.util.concurrent.Executor;
 
 /**
@@ -12,7 +15,7 @@ public interface ChannelMessageTransport {
      * @param channel The channel
      * @throws MessagingException
      */
-    void start(ChannelMessageListener channel) throws MessagingException;
+    void start(MessageChannel channel) throws MessagingException;
 
     /**
      * Called by the channel when the channel closes. The transport should release any resources here.
@@ -21,12 +24,13 @@ public interface ChannelMessageTransport {
 
     /**
      * Send a request to a server.
-     * @param methodName The full method name of the gRPC service method e.g.
-     *                   helloworld.ExampleHelloService/SayHello
+     * @param isStart Is a start message.
+     * @param callId The call id
+     * @param methodDescriptor The descriptor of gRPC service method
      * @param buffer The payload of the message to send
      * @exception
      */
-    void send(String methodName, byte[] buffer) throws MessagingException;
+    void send(boolean isStart, String callId, MethodDescriptor methodDescriptor, byte[] buffer) throws MessagingException;
 
     /**
      * @return The executor with which to execute calls

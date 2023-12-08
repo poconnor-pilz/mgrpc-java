@@ -161,11 +161,14 @@ Given this then it looks like the best compromise would be to use the broker to 
 grpc will call e.g. ServerCall.request() when it wants more messages to be pushed to it. So if we have a system with reliable, ordered queues we can pull from the queue when request is called.
 This might still be compatible with the MessageProcessor queue and ordering code. If a message is out of order or duplicate then it should call MessageHandler.request()
 which would call the ServerCall.request(). (note that if a couple of extra messages end up in the MessageProcessor queue because of this it won't take much memory).
-ServerCall.request() would call the transport.request(callId). Even if we have ordered broker queue we might want this anyway so we don't have to worry about thread
+ServerCall.request() would call the transport.request(callId, numMessages). Even if we have ordered broker queue we might want this anyway so we don't have to worry about thread
 pool randomness.
 Then the e.g. JMSQueueProvider would need to detect if a call has a server or client stream. If so it would have to set up a queue for the remaining messages in that stream
 and route the messages through it. It would release the queue when the call is finished. Most of the transport messages would have to be parameterised with callId for this to
-work. The queue would have to have a well known name based on the callId so the server or client knows where to pick it up.
+work. 
+The queue would have to have a well known name based on the callId so the server or client knows where to pick it up. But also we have the problem that the server needs to 
+be subscribed to the queue before the next message comes in. So maybe the client transport needs to tell the server ahead of time to sub to a queue for this call.
+We don't have this problem on the client side because it will know on call start to sub for an output stream.
 The ServerMessageListener.onMessage() would have to return a non-null callId if it wants a queue to be created for further messages.
 None of this would work for mqtt because the mqtt broker doesn't have queues and the paho mqtt client blocks all subscriber if one subscriber blocks anyway.
 So for mqtt transport it would just ignore the call to request() which is just a hint anyway to push more messages. Instead it would just push the messages
