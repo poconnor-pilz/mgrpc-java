@@ -14,7 +14,7 @@ message  RpcMessage{
   //that are ongoing concurrently for a server. The string should be valid for use in mqtt topics.
   string callId = 1;
 
-  //Sequence number. This is required because some brokers do not preserve order (e.g. AWS). Brokers may also send duplicates.
+  //Sequence number. This is required because some brokers do not preserve order (e.g. AWS MQTT). Brokers may also send duplicates.
   //If there is potentially more than one message in a stream then the first message in a stream should
   //have a sequence number 1 and each subsequent message in that stream (including the completed message)
   //should increase the number by 1

@@ -25,12 +25,9 @@ class ListenForCancel extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBas
     public StreamObserver<HelloRequest> bidiHello(StreamObserver<HelloReply> responseObserver) {
 
         final Context current = Context.current();
-        current.addListener(new Context.CancellationListener() {
-            @Override
-            public void cancelled(Context context) {
-                contextListenerCancelled.countDown();
-                log.debug("Context CancellationListener called");
-            }
+        current.addListener(context -> {
+            contextListenerCancelled.countDown();
+            log.debug("Context CancellationListener called");
         }, Executors.newSingleThreadExecutor());
 
 

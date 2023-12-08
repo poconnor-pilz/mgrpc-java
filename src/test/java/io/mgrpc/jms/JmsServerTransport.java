@@ -60,57 +60,51 @@ public class JmsServerTransport implements ServerMessageTransport {
 
             session = client.createSession();
 
-            Topic inTopic = session.createTopic(serverTopics.servicesIn);
-            log.debug("Subscribing for requests on : " + inTopic.getTopicName());
+            Queue inQueue = session.createQueue(serverTopics.servicesIn);
+            log.debug("Subscribing for requests on : " + inQueue.getQueueName());
 
-            MessageConsumer consumer = session.createConsumer(inTopic);
-            consumer.setMessageListener(new MessageListener() {
-                @Override
-                public void onMessage(Message message) {
-                    try {
-                        server.onMessage(JmsUtils.byteArrayFromMessage(session, message));
-                    } catch (Exception ex){
-                        log.error("Failed to process request", ex);
-                    }
+            MessageConsumer consumer = session.createConsumer(inQueue);
+            consumer.setMessageListener(message -> {
+                try {
+                    server.onMessage(JmsUtils.byteArrayFromMessage(session, message));
+                } catch (Exception ex){
+                    log.error("Failed to process request", ex);
                 }
             });
 
-            Topic statusTopic = session.createTopic(serverTopics.statusClients);
-            log.debug("Subscribing for channel status on: " + statusTopic.getTopicName());
-            MessageConsumer statusConsumer = session.createConsumer(statusTopic);
-            statusConsumer.setMessageListener(new MessageListener() {
-                @Override
-                public void onMessage(Message message) {
-                    try {
-                        ConnectionStatus connectionStatus = ConnectionStatus.parseFrom(JmsUtils.byteArrayFromMessage(session, message));
-                        log.debug("Received client connected status = " + connectionStatus.getConnected() + " for channel " + connectionStatus.getChannelId());
-                        if(!connectionStatus.getConnected()) {
-                            server.onChannelDisconnected(connectionStatus.getChannelId());
-                            channelProducers.remove(connectionStatus.getChannelId());
-                        }
-                    } catch (Exception ex){
-                        log.error("Failed to process status reply", ex);
+            Queue statusQueue = session.createQueue(serverTopics.statusClients);
+            log.debug("Subscribing for channel status on: " + statusQueue.getQueueName());
+            MessageConsumer statusConsumer = session.createConsumer(statusQueue);
+            statusConsumer.setMessageListener(message -> {
+                try {
+                    ConnectionStatus connectionStatus = ConnectionStatus.parseFrom(JmsUtils.byteArrayFromMessage(session, message));
+                    log.debug("Received client connected status = " + connectionStatus.getConnected() + " for channel " + connectionStatus.getChannelId());
+                    if(!connectionStatus.getConnected()) {
+                        server.onChannelDisconnected(connectionStatus.getChannelId());
+                        channelProducers.remove(connectionStatus.getChannelId());
                     }
+                } catch (Exception ex){
+                    log.error("Failed to process status reply", ex);
                 }
             });
 
-            Topic pingTopic = session.createTopic(serverTopics.statusPrompt);
-            log.debug("Subscribing for pings on : " + pingTopic.getTopicName());
-            MessageConsumer pingConsumer = session.createConsumer(pingTopic);
-            pingConsumer.setMessageListener(new MessageListener() {
-                @Override
-                public void onMessage(Message message) {
-                    try {
-                        log.debug("Received ping");
-                        notifyConnected(true);
-                    } catch (Exception ex){
-                        log.error("Failed to process status reply", ex);
-                    }
+            Queue pingQueue = session.createQueue(serverTopics.statusPrompt);
+            log.debug("Subscribing for pings on : " + pingQueue.getQueueName());
+            MessageConsumer pingConsumer = session.createConsumer(pingQueue);
+            pingConsumer.setMessageListener(message -> {
+                try {
+                    log.debug("Received ping");
+                    notifyConnected(true);
+                } catch (Exception ex){
+                    log.error("Failed to process status reply", ex);
                 }
             });
 
 
             notifyConnected(true);
+
+
+
         } catch (JMSException ex) {
             throw new MessagingException(ex);
         }
@@ -151,8 +145,8 @@ public class JmsServerTransport implements ServerMessageTransport {
         try {
             MessageProducer channelProducer = channelProducers.get(channelId);
             if(channelProducer == null){
-                final Topic replyTopic = session.createTopic(serverTopics.servicesOutForChannel(channelId));
-                channelProducer = session.createProducer(replyTopic);
+                final Queue replyQueue = session.createQueue(serverTopics.servicesOutForChannel(channelId));
+                channelProducer = session.createProducer(replyQueue);
                 channelProducers.put(channelId, channelProducer);
             }
             channelProducer.send(JmsUtils.messageFromByteArray(session, buffer));
@@ -167,8 +161,8 @@ public class JmsServerTransport implements ServerMessageTransport {
         final byte[] connectedMsg = ConnectionStatus.newBuilder().setConnected(connected).build().toByteArray();
         try {
             log.debug("Sending connected status " + connected);
-            Topic topic = session.createTopic(serverTopics.status);
-            MessageProducer producer = session.createProducer(topic);
+            Queue queue = session.createQueue(serverTopics.status);
+            MessageProducer producer = session.createProducer(queue);
             BytesMessage bytesMessage = session.createBytesMessage();
             bytesMessage.writeBytes(connectedMsg);
             producer.send(bytesMessage);

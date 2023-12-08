@@ -28,6 +28,6 @@ class ObserverLogger implements StreamObserver {
 
     @Override
     public void onCompleted() {
-        log.debug("onNext() " + name);
+        log.debug("onCompleted() " + name);
     }
 }

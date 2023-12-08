@@ -12,6 +12,8 @@ There was some other answer saying that the transport is tied to the semantics o
 
 Also:
 
+The transport API is internal and we don't support out-of-tree custom transports. If you have a need for a custom transport, 1) I'd first double-check that there is a serious need, as creating a new transport is involved and 2) would suggest it to be developed in tight coordination with us. I will note that many times a custom transport is not necessary, but it depends on what your needs are.
+
 So transport is pluggable in two ways: 1) you can implement ManagedChannel
 and Server directly or 2) you can use ManagedChannelImpl and ServerImpl as
 utilities and then implement the transport that they expect. (1) basically
@@ -133,6 +135,45 @@ TODO: Get an inprocess call going by using a manual registry? What is the regist
 The only other thing that is different from the mqtt implementation is flow control. Specifically the client does:
 // Notify gRPC to receive one additional response.
 call.request(1);
+
+Documentation is here: 
+    https://grpc.io/docs/guides/flow-control/
+    https://github.com/grpc/grpc-java/tree/master/examples/src/main/java/io/grpc/examples/manualflowcontrol
+We don't really want to have a solution that relies on broker queues because for mosquitto locally that would 
+just blow the memory on the broker. Maybe there could be an advanced solution later that does use broker queues per 
+streaming call and is configurable etc.
+However we don't want to have the extra bandwidth and slowdown of the server having to send a request to the client every time it 
+wants to get the next message in a stream.
+It looks like from the documentation that the easiest way to do this for mqtt without wasting bandwidth but still
+preventing the server getting flooded would be to request maybe 10 messages at a time (or some configurable setting).
+So the server would just accept the first 10 or so (minimum 1). Then it waits for the service impl to call request 10 times.
+When that is done it sends a request(10) message across the broker which then requests 10 from the client.
+We would need a FLOW message for this. 
+Note that the docs do say that "In gRPC, when a value is written to a stream, that does not mean that it has gone out over the network. Rather, that it has been passed to the framework which will now take care of the nitty gritty details of buffering it and sending it to the OS on its way over the network."
+But if the framework really buffers instead of blocking the client then the memory problem is just being put elsewhere.
+
+In fact run HttpServerCancelsAndShutdowns.slowServerFastClient. The client isn't blocked but the framework buffers everything
+on the client side. This saves the server being overwhelmed but it doesn't deal with memory. It doesn't seem much
+worse than just buffering on the server side as mgrpc does at the moment.
+
+#### Use broker queues
+Given this then it looks like the best compromise would be to use the broker to queue messages. This should be possible as grpc implements a pull model for streams. 
+grpc will call e.g. ServerCall.request() when it wants more messages to be pushed to it. So if we have a system with reliable, ordered queues we can pull from the queue when request is called.
+This might still be compatible with the MessageProcessor queue and ordering code. If a message is out of order or duplicate then it should call MessageHandler.request()
+which would call the ServerCall.request(). (note that if a couple of extra messages end up in the MessageProcessor queue because of this it won't take much memory).
+ServerCall.request() would call the transport.request(callId). Even if we have ordered broker queue we might want this anyway so we don't have to worry about thread
+pool randomness.
+Then the e.g. JMSQueueProvider would need to detect if a call has a server or client stream. If so it would have to set up a queue for the remaining messages in that stream
+and route the messages through it. It would release the queue when the call is finished. Most of the transport messages would have to be parameterised with callId for this to
+work. The queue would have to have a well known name based on the callId so the server or client knows where to pick it up.
+The ServerMessageListener.onMessage() would have to return a non-null callId if it wants a queue to be created for further messages.
+None of this would work for mqtt because the mqtt broker doesn't have queues and the paho mqtt client blocks all subscriber if one subscriber blocks anyway.
+So for mqtt transport it would just ignore the call to request() which is just a hint anyway to push more messages. Instead it would just push the messages
+to the ServerCall as they come in as it does now.
+
+### old flow control notes 
+(some of the notes below were written before the documentation above was made available)
+
 
 Its not clear if the grpc client will buffer the message until it gets a request(n) or if it actually sends the request(n) on to the server. It probably sends it on.
 We are unlikely to send it on over mqtt as this would be expensive in terms of the number of messages back and forth for each value. This is not how mqtt works anyway and so mqtt solutions don't have this.

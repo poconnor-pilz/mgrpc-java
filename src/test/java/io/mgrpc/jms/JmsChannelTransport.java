@@ -58,9 +58,6 @@ public class JmsChannelTransport implements ChannelMessageTransport {
     private MessageProducer requestProducer;
     private MessageProducer pingProducer;
     private final static String TOPIC_SEPARATOR = "/";
-    private final static long SUBSCRIBE_TIMEOUT_MILLIS = 5000;
-
-    private String clientId;
 
     private final ServerTopics serverTopics;
 
@@ -96,44 +93,38 @@ public class JmsChannelTransport implements ChannelMessageTransport {
 
             session = client.createSession();
 
-            Topic sendTopic = session.createTopic(serverTopics.servicesIn);
-            log.debug("Will send requests to : " + sendTopic.getTopicName());
-            requestProducer = session.createProducer(sendTopic);
+            Queue sendQueue = session.createQueue(serverTopics.servicesIn);
+            log.debug("Will send requests to : " + sendQueue.getQueueName());
+            requestProducer = session.createProducer(sendQueue);
 
-            Topic pingTopic = session.createTopic(serverTopics.statusPrompt);
-            log.debug("Will send pings to : " + pingTopic.getTopicName());
-            pingProducer = session.createProducer(pingTopic);
+            Queue pingQueue = session.createQueue(serverTopics.statusPrompt);
+            log.debug("Will send pings to : " + pingQueue.getQueueName());
+            pingProducer = session.createProducer(pingQueue);
 
-            Topic replyTopic = session.createTopic(serverTopics.servicesOutForChannel(this.channel.getChannelId()));
-            log.debug("Subscribing for responses on: " + replyTopic.getTopicName());
-            MessageConsumer consumer = session.createConsumer(replyTopic);
-            consumer.setMessageListener(new MessageListener() {
-                @Override
-                public void onMessage(Message message) {
-                    try {
-                        channel.onMessage(JmsUtils.byteArrayFromMessage(session, message));
-                    } catch (Exception ex){
-                        log.error("Failed to process reply", ex);
-                    }
+            Queue replyQueue = session.createQueue(serverTopics.servicesOutForChannel(this.channel.getChannelId()));
+            log.debug("Subscribing for responses on: " + replyQueue.getQueueName());
+            MessageConsumer consumer = session.createConsumer(replyQueue);
+            consumer.setMessageListener(message -> {
+                try {
+                    channel.onMessage(JmsUtils.byteArrayFromMessage(session, message));
+                } catch (Exception ex){
+                    log.error("Failed to process reply", ex);
                 }
             });
 
-            Topic statusTopic = session.createTopic(serverTopics.status);
-            log.debug("Subscribing for server status on: " + statusTopic.getTopicName());
-            MessageConsumer statusConsumer = session.createConsumer(statusTopic);
-            statusConsumer.setMessageListener(new MessageListener() {
-                @Override
-                public void onMessage(Message message) {
-                    try {
-                        serverConnected = ConnectionStatus.parseFrom(JmsUtils.byteArrayFromMessage(session, message)).getConnected();
-                        log.debug("Server connected status = " + serverConnected);
-                        serverConnectedLatch.countDown();
-                        if (!serverConnected) {
-                            channel.onServerDisconnected();
-                        }
-                    } catch (Exception ex){
-                        log.error("Failed to process status reply", ex);
+            Queue statusQueue = session.createQueue(serverTopics.status);
+            log.debug("Subscribing for server status on: " + statusQueue.getQueueName());
+            MessageConsumer statusConsumer = session.createConsumer(statusQueue);
+            statusConsumer.setMessageListener(message -> {
+                try {
+                    serverConnected = ConnectionStatus.parseFrom(JmsUtils.byteArrayFromMessage(session, message)).getConnected();
+                    log.debug("Server connected status = " + serverConnected);
+                    serverConnectedLatch.countDown();
+                    if (!serverConnected) {
+                        channel.onServerDisconnected();
                     }
+                } catch (Exception ex){
+                    log.error("Failed to process status reply", ex);
                 }
             });
 
@@ -151,14 +142,14 @@ public class JmsChannelTransport implements ChannelMessageTransport {
         try {
             //Notify that this client has been closed so that any server with ongoing calls can cancel them and
             //release resources.
-            String statusTopic = serverTopics.statusClients;
-            log.debug("Closing channel. Sending notification on " + statusTopic);
+            String statusQueue = serverTopics.statusClients;
+            log.debug("Closing channel. Sending notification on " + statusQueue);
             final byte[] connectedMsg = ConnectionStatus.newBuilder()
                     .setConnected(false)
                     .setChannelId(channel.getChannelId())
                     .build().toByteArray();
-            Topic topic = session.createTopic(statusTopic);
-            MessageProducer producer = session.createProducer(topic);
+            Queue queue = session.createQueue(statusQueue);
+            MessageProducer producer = session.createProducer(queue);
             BytesMessage bytesMessage = session.createBytesMessage();
             bytesMessage.writeBytes(connectedMsg);
             producer.send(bytesMessage);

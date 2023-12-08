@@ -17,6 +17,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.lang.invoke.MethodHandles;
+import java.util.ArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -377,6 +378,90 @@ public class HttpServerCancelsAndShutdowns {
         }
     }
 
+    //@Test
+    void slowServerFastClient() throws Exception {
+
+        //This is an invalid scenario. The client sends an error on an input stream. It should never have a reason
+        //to do this that is not satisfied by a cancel
+        //The behaviour that grpc does is that the "client" Observer logger will get onError()
+        //CANCELLED: Cancelled by client with StreamObserver.onError()
+        //But the server cancel handler does not get called and the server reqeust stream ObserverLogger
+        //does not get onError() called.
+
+        final CountDownLatch serverCancelledLatch = new CountDownLatch(1);
+        class SlowService extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
+            @Override
+            public StreamObserver<HelloRequest> lotsOfGreetings(StreamObserver<HelloReply> responseObserver) {
+                return new StreamObserver<HelloRequest>() {
+                    private ArrayList<String> names = new ArrayList<>();
+                    @Override
+                    public void onNext(HelloRequest value) {
+                        log.debug("lotsOfGreetings received " + value);
+                        names.add(value.getName());
+                        try {
+                            Thread.sleep(1000);
+                        } catch (InterruptedException e) {
+                            throw new RuntimeException(e);
+                        }
+                    }
+
+                    @Override
+                    public void onError(Throwable t) {
+                        log.error("Error in client stream", t);
+                    }
+
+                    @Override
+                    public void onCompleted() {
+                        log.debug("lotsOfGreetings onCompleted()");
+                        HelloReply reply = HelloReply.newBuilder().setMessage("Hello there").build();
+                        responseObserver.onNext(reply);
+                        responseObserver.onCompleted();
+                    }
+                };
+            }
+        }
+
+        int port = 50051;
+        Server httpServer = ServerBuilder.forPort(port)
+                .addService(new SlowService())
+                .build().start();
+        String target = "localhost:" + port;
+        ManagedChannel channel = ManagedChannelBuilder.forTarget(target)
+                .usePlaintext().build();
+
+        class ResponseWaiter extends ObserverLogger{
+
+            public CountDownLatch latch = new CountDownLatch(1);
+            ResponseWaiter(String name) {
+                super(name);
+            }
+
+            @Override
+            public void onCompleted() {
+                super.onCompleted();
+                latch.countDown();
+            }
+        }
+
+        try {
+            final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
+            HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
+            ResponseWaiter responseWaiter = new ResponseWaiter("responsewaiter");
+            final StreamObserver<HelloRequest> requestStream = stub.lotsOfGreetings(responseWaiter);
+            for (int i = 0; i < 100000; i++) {
+                requestStream.onNext(joe);
+            }
+            log.debug("Sent all requests");
+            responseWaiter.latch.await();
+        }
+        catch (Exception ex){
+            log.error("Failed", ex);
+        }
+        finally {
+            channel.shutdownNow().awaitTermination(5, TimeUnit.SECONDS);
+            httpServer.shutdown();
+        }
+    }
 
 
 }
