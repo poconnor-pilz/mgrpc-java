@@ -194,7 +194,7 @@ public class MessageServer implements ServerMessageListener {
             log.debug("Sending completed: " + status);
         }
         try {
-            send(topic, channelId, fullMethodName, message);
+            send(topic, channelId, callId, fullMethodName, message);
         } catch (MessagingException e) {
             //We cannot do anything here to help the client because there is no way of sending a message so just log.
             log.error("Failed to send status", e);
@@ -202,7 +202,7 @@ public class MessageServer implements ServerMessageListener {
     }
 
 
-    private void send(String topic, String channelId, String fullMethodName, RpcMessage message) throws MessagingException {
+    private void send(String topic, String channelId, String callId, String fullMethodName, RpcMessage message) throws MessagingException {
 
         log.debug("Sending {} {} {} for {} on topic {} ",
                 new Object[]{message.getMessageCase(), message.getSequence(),
@@ -218,7 +218,7 @@ public class MessageServer implements ServerMessageListener {
                 throw new MessagingException("Provider does not support MessagingPublisher");
             }
         } else {
-            transport.send(channelId, fullMethodName, message.toByteArray());
+            transport.send(channelId, callId, fullMethodName, message.toByteArray());
         }
     }
 
@@ -330,7 +330,7 @@ public class MessageServer implements ServerMessageListener {
 
                 String fullMethodName = header.getMethodName();
                 //fullMethodName is e.g. "helloworld.ExampleHelloService/SayHello"
-                log.debug("fullMethodName is: " + fullMethodName);
+                log.debug("fullMethodName for call " + callId + " is: " + fullMethodName);
                 ServerMethodDefinition<?, ?> serverMethodDefinition = registry.lookupMethod(fullMethodName);
                 if (serverMethodDefinition == null) {
                     if (fallBackRegistry != null) {
@@ -405,7 +405,7 @@ public class MessageServer implements ServerMessageListener {
             }
 
             public void start(ServerCallHandler<?, ?> serverCallHandler) {
-                log.debug("Starting call to " + this.methodDescriptor.getFullMethodName());
+                log.debug("Starting call " + callId + " to " + this.methodDescriptor.getFullMethodName());
                 if (header.getTimeoutMillis() > 0) {
                     Deadline deadline = Deadline.after(header.getTimeoutMillis(), TimeUnit.MILLISECONDS);
                     this.deadlineCancellationFuture = DeadlineTimer.start(deadline, (String deadlineMessage) -> {
@@ -527,7 +527,7 @@ public class MessageServer implements ServerMessageListener {
                         .setSequence(seq).build();
 
                 try {
-                    send(header.getReplyTo(), channelId, methodDescriptor.getFullMethodName(), rpcMessage);
+                    send(header.getReplyTo(), channelId, callId, methodDescriptor.getFullMethodName(), rpcMessage);
                 } catch (MessagingException e) {
                     throw new StatusRuntimeException(Status.UNAVAILABLE);//.withCause(e));
                 }

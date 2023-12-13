@@ -216,6 +216,7 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
         public void start(Listener<RespT> responseListener, Metadata headers) {
             this.responseListener = responseListener;
 
+            transport.onCallStart(methodDescriptor, callOptions, callId);
 
             //If the client specified authentication details then merge them into the metadata
             final CallCredentials credentials = this.callOptions.getCredentials();
@@ -249,11 +250,6 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
                 this.metadata = headers;
             }
 
-            if (context.isCancelled()) {
-                //Call is already cancelled
-                clientExec(() -> close(Status.CANCELLED));
-                return;
-            }
 
             //Listen for cancellations
             context.addListener(cancellationListener, command -> command.run());
@@ -265,6 +261,7 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
                     //We close the call here which will call listener.onClose(Status.DEADLINE_EXCEEDED)
                     //because this is what the listener expects.
                     //The listener will then call cancel on this call.
+                    log.debug("Deadline exceeded for call " + callId);
                     close(Status.DEADLINE_EXCEEDED.augmentDescription(deadlineMessage));
                 });
             }
@@ -511,8 +508,8 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
                 throw new MessagingException("channel.init() was not called");
             }
             final RpcMessage message = messageBuilder.build();
-            log.debug("Sending {} {} {} ",
-                    new Object[]{message.getMessageCase(), message.getSequence(), message.getCallId()});
+            log.debug("Sending {} {} {} {} ",
+                    new Object[]{message.getMessageCase(), message.getSequence(), message.getCallId(), methodDescriptor.getFullMethodName()});
             transport.send(isStart, callId, methodDescriptor, message.toByteArray());
         }
 

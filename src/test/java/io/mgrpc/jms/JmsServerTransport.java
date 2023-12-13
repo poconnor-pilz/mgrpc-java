@@ -39,17 +39,15 @@ public class JmsServerTransport implements ServerMessageTransport {
 
     /**
      * @param client
-     * @param serverTopic       The root topic of the server e.g. "tenant1/device1"
-     *                          The server will subscribe for requests on subtopics of {serverTopic}/i/svc
-     *                          A request for a method should be sent to sent to {serverTopic}/i/svc
-     *                          Replies will be sent to {serverTopic}/o/svc/{channelId}}
-     *
+     * @param serverTopic The root topic of the server e.g. "tenant1/device1"
+     *                    The server will subscribe for requests on subtopics of {serverTopic}/i/svc
+     *                    A request for a method should be sent to sent to {serverTopic}/i/svc
+     *                    Replies will be sent to {serverTopic}/o/svc/{channelId}}
      */
     public JmsServerTransport(Connection client, String serverTopic) {
         this.client = client;
         this.serverTopics = new ServerTopics(serverTopic, TOPIC_SEPARATOR);
     }
-
 
 
     @Override
@@ -69,7 +67,7 @@ public class JmsServerTransport implements ServerMessageTransport {
             consumer.setMessageListener(message -> {
                 try {
                     server.onMessage(JmsUtils.byteArrayFromMessage(session, message));
-                } catch (Exception ex){
+                } catch (Exception ex) {
                     log.error("Failed to process request", ex);
                 }
             });
@@ -81,11 +79,11 @@ public class JmsServerTransport implements ServerMessageTransport {
                 try {
                     ConnectionStatus connectionStatus = ConnectionStatus.parseFrom(JmsUtils.byteArrayFromMessage(session, message));
                     log.debug("Received client connected status = " + connectionStatus.getConnected() + " for channel " + connectionStatus.getChannelId());
-                    if(!connectionStatus.getConnected()) {
+                    if (!connectionStatus.getConnected()) {
                         server.onChannelDisconnected(connectionStatus.getChannelId());
                         channelProducers.remove(connectionStatus.getChannelId());
                     }
-                } catch (Exception ex){
+                } catch (Exception ex) {
                     log.error("Failed to process status reply", ex);
                 }
             });
@@ -97,7 +95,7 @@ public class JmsServerTransport implements ServerMessageTransport {
                 try {
                     log.debug("Received ping");
                     notifyConnected(true);
-                } catch (Exception ex){
+                } catch (Exception ex) {
                     log.error("Failed to process status reply", ex);
                 }
             });
@@ -106,10 +104,11 @@ public class JmsServerTransport implements ServerMessageTransport {
                 @Override
                 public void setCallTopics(CallTopics request, StreamObserver<Empty> responseObserver) {
                     JmsCallQueues callQueues = new JmsCallQueues();
-                    callQueuesMap.put(request.getChannelId()+request.getCallId(), callQueues);
-                    if(request.getTopicIn() != null && !request.getTopicIn().isEmpty()){
-                        String inQ = serverTopics.make(serverTopics.servicesIn, request.getChannelId(), request.getCallId());
-                        try {
+                    callQueuesMap.put(request.getChannelId() + request.getCallId(), callQueues);
+                    try {
+                        if (request.getTopicIn() != null && !request.getTopicIn().isEmpty()) {
+                            log.debug("Subscribing for input stream for call " + request.getCallId() + " on topic " + request.getTopicIn());
+                            String inQ = serverTopics.make(request.getTopicIn());
                             callQueues.consumerQueue = session.createQueue(inQ);
                             callQueues.consumer = session.createConsumer(callQueues.consumerQueue);
                             callQueues.consumer.setMessageListener(message -> {
@@ -119,20 +118,26 @@ public class JmsServerTransport implements ServerMessageTransport {
                                     log.error("Failed to process reply", ex);
                                 }
                             });
-                        } catch(JMSException ex){
-                            responseObserver.onError(ex);
-                            return;
+                            responseObserver.onNext(Empty.newBuilder().build());
+                            responseObserver.onCompleted();
                         }
-                        responseObserver.onNext(Empty.newBuilder().build());
-                        responseObserver.onCompleted();
+                        if (request.getTopicOut() != null && !request.getTopicOut().isEmpty()) {
+                            log.debug("Will send output stream for call " + request.getCallId() + " to topic " + request.getTopicOut());
+                            String outQ = serverTopics.make(request.getTopicOut());
+                            callQueues.producerQueue = session.createQueue(outQ);
+                            callQueues.producer = session.createProducer(callQueues.producerQueue);
+                        }
+                    } catch (JMSException ex) {
+                        responseObserver.onError(ex);
+                        return;
                     }
+                    responseObserver.onNext(Empty.newBuilder().build());
+                    responseObserver.onCompleted();
                 }
-                //TODO: Make the output queue and send to it etc.
             });
 
 
             notifyConnected(true);
-
 
 
         } catch (JMSException ex) {
@@ -141,7 +146,7 @@ public class JmsServerTransport implements ServerMessageTransport {
     }
 
     @Override
-    public void close(){
+    public void close() {
         try {
             notifyConnected(false);
             session.close();
@@ -170,16 +175,25 @@ public class JmsServerTransport implements ServerMessageTransport {
 
 
     @Override
-    public void send(String channelId, String methodName, byte[] buffer) throws MessagingException {
+    public void send(String channelId, String callId,  String methodName, byte[] buffer) throws MessagingException {
 
         try {
-            MessageProducer channelProducer = channelProducers.get(channelId);
-            if(channelProducer == null){
-                final Queue replyQueue = session.createQueue(serverTopics.servicesOutForChannel(channelId));
-                channelProducer = session.createProducer(replyQueue);
-                channelProducers.put(channelId, channelProducer);
+            MessageProducer producer = null;
+            final JmsCallQueues callQueues = callQueuesMap.get(channelId + callId);
+            if(callQueues!=null && callQueues.producer!=null){
+                //There is a specific queue for this call
+                producer = callQueues.producer;
+            } else {
+                //Use the general producer for the channel
+                producer = channelProducers.get(channelId);
+                if (producer == null) {
+                    final Queue replyQueue = session.createQueue(serverTopics.servicesOutForChannel(channelId));
+                    producer = session.createProducer(replyQueue);
+                    channelProducers.put(channelId, producer);
+                }
             }
-            channelProducer.send(JmsUtils.messageFromByteArray(session, buffer));
+            log.debug("Sending response for call " + callId + " on " + producer.getDestination().toString());
+            producer.send(JmsUtils.messageFromByteArray(session, buffer));
         } catch (JMSException e) {
             log.error("Failed to send mqtt message", e);
             throw new MessagingException(e);

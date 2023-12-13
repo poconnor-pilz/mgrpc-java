@@ -42,10 +42,10 @@ public class ServerTopics {
     public ServerTopics(String root, String topicSeparator) {
         this.root = root;
         this.sep = topicSeparator;
-        this.status = make(sep, root, OUT, SYS, STATUS);
-        this.statusPrompt = make(sep, root, IN, SYS, STATUS, PROMPT);
-        this.statusClients = make(sep, this.status, CLIENT);
-        this.servicesIn = make(sep, root, IN , SVC);
+        this.status = make(root, OUT, SYS, STATUS);
+        this.statusPrompt = make(root, IN, SYS, STATUS, PROMPT);
+        this.statusClients = make(this.status, CLIENT);
+        this.servicesIn = make(root, IN , SVC);
     }
 
     public ServerTopics(String root) {
@@ -65,7 +65,7 @@ public class ServerTopics {
         //dots with slashes anyway when handling mqtt. So it's better to do this up front here and
         //then on the server side put the dots back in before calling the method.
         final String fullMethodNameWithSlashes = fullMethodName.replace(".", sep);
-        return make(sep, servicesIn, fullMethodNameWithSlashes);
+        return make(servicesIn, fullMethodNameWithSlashes);
     }
 
     /**
@@ -91,7 +91,7 @@ public class ServerTopics {
      * @return e.g "myServer/helloworld/ExampleHelloService/LotsOfReplies/ppjupponvo5vtpzt"
      */
     public String replyTopic(String channelId, String fullMethodName){
-        return make(sep, servicesOutForChannel(channelId), fullMethodName.replace(".", sep));
+        return make(servicesOutForChannel(channelId), fullMethodName.replace(".", sep));
     }
 
     /**
@@ -99,12 +99,12 @@ public class ServerTopics {
      * Has the form {root}/o/svc/{channelId}
      */
     public String servicesOutForChannel(String channelId){
-        return make(sep, root, OUT , SVC, channelId);
+        return out(SVC, channelId);
     }
 
 
-    public static String out(String topicSeparator, String server, String ... segments){
-        return make(topicSeparator, make(topicSeparator, server, OUT), make(topicSeparator, segments));
+    public String out(String ... segments){
+        return make(make(root, OUT), make(segments));
     }
 
 
@@ -113,7 +113,7 @@ public class ServerTopics {
      * Convenience method for constructing a topic from a set of strings
      * It just inserts the '/' separator between them
      */
-    public static String make(String topicSeparator, String ... segments)
+    public String make(String ... segments)
     {
         if(segments.length == 0) {
             return null;
@@ -125,7 +125,7 @@ public class ServerTopics {
 
         StringBuffer result = new StringBuffer(segments[0]);
         for(int i = 1; i < segments.length; i++) {
-            result.append(topicSeparator).append(segments[i]);
+            result.append(this.sep).append(segments[i]);
         }
 
         return result.toString();

@@ -1,5 +1,6 @@
 package io.mgrpc.messaging;
 
+import io.grpc.CallOptions;
 import io.grpc.MethodDescriptor;
 import io.mgrpc.MessageChannel;
 
@@ -16,6 +17,13 @@ public interface ChannelMessageTransport {
      * @throws MessagingException
      */
     void start(MessageChannel channel) throws MessagingException;
+
+    /**
+     * Called by ClientCall.start. The transport can set up any resources it needs for the call at this point.
+     * @param methodDescriptor
+     * @param callOptions
+     */
+    void onCallStart(MethodDescriptor methodDescriptor, CallOptions callOptions, String callId);
 
     /**
      * Called by the channel when the channel closes. The transport should release any resources here.

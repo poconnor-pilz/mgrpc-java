@@ -1,6 +1,9 @@
 package io.mgrpc.jms;
 
+import io.grpc.CallOptions;
 import io.grpc.MethodDescriptor;
+import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
 import io.mgrpc.*;
 import io.mgrpc.messaging.ChannelMessageListener;
 import io.mgrpc.messaging.ChannelMessageTransport;
@@ -27,8 +30,6 @@ import java.util.concurrent.*;
 //
 //  device1/o/svc/l2zb6li45zy7ilso
 //
-
-
 
 
 //Status topics
@@ -107,7 +108,7 @@ public class JmsChannelTransport implements ChannelMessageTransport {
             consumer.setMessageListener(message -> {
                 try {
                     channel.onMessage(JmsUtils.byteArrayFromMessage(session, message));
-                } catch (Exception ex){
+                } catch (Exception ex) {
                     log.error("Failed to process reply", ex);
                 }
             });
@@ -123,7 +124,7 @@ public class JmsChannelTransport implements ChannelMessageTransport {
                     if (!serverConnected) {
                         channel.onServerDisconnected();
                     }
-                } catch (Exception ex){
+                } catch (Exception ex) {
                     log.error("Failed to process status reply", ex);
                 }
             });
@@ -178,7 +179,53 @@ public class JmsChannelTransport implements ChannelMessageTransport {
         return executorSingleton;
     }
 
+    @Override
+    public void onCallStart(MethodDescriptor methodDescriptor, CallOptions callOptions, String callId) {
 
+        if (!methodDescriptor.getType().clientSendsOneMessage()
+                || !methodDescriptor.getType().serverSendsOneMessage()) {
+            //This method has input or output streams (it's not just request response)
+            //Create specific queues for these so that the broker can buffer messages.
+            JmsCallQueues callQueues = new JmsCallQueues();
+            final CallTopics.Builder builder = CallTopics.newBuilder();
+            builder.setChannelId(channel.getChannelId());
+            builder.setCallId(callId);
+
+            try {
+                if (!methodDescriptor.getType().clientSendsOneMessage()) {
+                    String inQ = serverTopics.make(serverTopics.servicesIn, channel.getChannelId(), callId);
+                    callQueues.producerQueue = session.createQueue(inQ);
+                    callQueues.producer = session.createProducer(callQueues.producerQueue);
+                    builder.setTopicIn(inQ);
+                }
+                if (!methodDescriptor.getType().serverSendsOneMessage()) {
+                    String outQ = serverTopics.make(serverTopics.servicesOutForChannel(channel.getChannelId()), callId);
+                    callQueues.consumerQueue = session.createQueue(outQ);
+                    callQueues.consumer = session.createConsumer(callQueues.consumerQueue);
+                    builder.setTopicOut(outQ);
+                    //Listen for messages on the specific queue
+                    callQueues.consumer.setMessageListener(message -> {
+                        try {
+                            channel.onMessage(JmsUtils.byteArrayFromMessage(session, message));
+                        } catch (Exception ex) {
+                            log.error("Failed to process reply", ex);
+                        }
+                    });
+                }
+                final CallTopicsServiceGrpc.CallTopicsServiceBlockingStub callTopicsService
+                        = CallTopicsServiceGrpc.newBlockingStub(channel).withDeadlineAfter(5, TimeUnit.SECONDS);
+                //Inform the server to create topics. This call will block until the server has returned a response.
+                //and throw a StatusRuntimeException if it fails or times out
+                callTopicsService.setCallTopics(builder.build());
+
+                callQueuesMap.put(callId, callQueues);
+            } catch (Exception ex) {
+                log.error("Failed to set up call queues for call " + callId, ex);
+                throw new StatusRuntimeException(Status.INTERNAL.withDescription(ex.getMessage()).withCause(ex));
+            }
+        }
+
+    }
 
     @Override
     public void send(boolean isStart, String callId, MethodDescriptor methodDescriptor, byte[] buffer) throws MessagingException {
@@ -196,69 +243,29 @@ public class JmsChannelTransport implements ChannelMessageTransport {
                 throw new MessagingException("Server is not connected");
             }
         }
+
+        JmsCallQueues callQueues = callQueuesMap.get(callId);
         try {
-            JmsCallQueues callQueues = null;
-            if(isStart) {
-                if (!methodDescriptor.getType().clientSendsOneMessage()
-                ||!methodDescriptor.getType().serverSendsOneMessage()) {
-                    //This method has input or output streams (it's not just request response)
-                    //Create specific queues for these so that the broker can buffer messages.
-                    callQueues = new JmsCallQueues();
-                    callQueuesMap.put(callId, callQueues);
-                    final CallTopics.Builder builder = CallTopics.newBuilder();
-                    builder.setChannelId(channel.getChannelId());
-                    builder.setCallId(callId);
-
-                    if(!methodDescriptor.getType().clientSendsOneMessage()) {
-                        String inQ = serverTopics.make(serverTopics.servicesIn, channel.getChannelId(), callId);
-                        callQueues.producerQueue = session.createQueue(inQ);
-                        callQueues.producer = session.createProducer(callQueues.producerQueue);
-                        builder.setTopicIn(inQ);
-                    }
-                    if(!methodDescriptor.getType().serverSendsOneMessage()) {
-                        String outQ = serverTopics.make(serverTopics.servicesOutForChannel(channel.getChannelId()), callId);
-                        callQueues.consumerQueue = session.createQueue(outQ);
-                        callQueues.consumer = session.createConsumer(callQueues.consumerQueue);
-                        builder.setTopicOut(outQ);
-                        //Listen for messages on the specific queue
-                        callQueues.consumer.setMessageListener(message -> {
-                            try {
-                                channel.onMessage(JmsUtils.byteArrayFromMessage(session, message));
-                            } catch (Exception ex){
-                                log.error("Failed to process reply", ex);
-                            }
-                        });
-                    }
-                    final CallTopicsServiceGrpc.CallTopicsServiceBlockingStub callTopicsService
-                            = CallTopicsServiceGrpc.newBlockingStub(channel);
-                    //Inform the server to create topics. This call will block until the server has returned a response.
-                    callTopicsService.setCallTopics(builder.build());
-                }
-            } else {
-                callQueues = callQueuesMap.get(callId);
-            }
-
-            if(callQueues != null && callQueues.producer != null){
+            if (callQueues != null && callQueues.producer != null) {
                 //This message must be sent to a specific input queue
                 callQueues.producer.send(JmsUtils.messageFromByteArray(session, buffer));
             } else {
                 requestProducer.send(JmsUtils.messageFromByteArray(session, buffer));
             }
-
-            //TODO: The CallQueues need to be closed when the call closes so need notification of that
-            //Then do all the server side stuff. It needs to implement the CallTopicsServiceGrpc and create
-            //the queues on its side for starters.
-            //This should be done in the the transport there is just one transport per server
-            // Then it needs to listen for request() and pump the queues
-            //Also the client above has a listener for the output queue but it is just pumping it whenever
-            //a message comes in. It also needs to listen for request()
-            //But before testing with request could run all tests without it to make sure things are working.
-
-
-        } catch (JMSException e) {
-            log.error("Failed to send request", e);
-            throw new MessagingException(e);
+        } catch (JMSException ex){
+            throw new MessagingException(ex);
         }
+
+        //TODO: The CallQueues need to be closed when the call closes so need notification of that
+        //Then do all the server side stuff. It needs to implement the CallTopicsServiceGrpc and create
+        //the queues on its side for starters.
+        //This should be done in the the transport there is just one transport per server
+        // Then it needs to listen for request() and pump the queues
+        //Also the client above has a listener for the output queue but it is just pumping it whenever
+        //a message comes in. It also needs to listen for request()
+        //But before testing with request could run all tests without it to make sure things are working.
+
+
     }
 
 
@@ -286,7 +293,6 @@ public class JmsChannelTransport implements ChannelMessageTransport {
     public void fakeServerConnectedForTests() {
         this.serverConnected = true;
     }
-
 
 
 }

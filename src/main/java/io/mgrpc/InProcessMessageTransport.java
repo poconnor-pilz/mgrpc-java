@@ -1,5 +1,6 @@
 package io.mgrpc;
 
+import io.grpc.CallOptions;
 import io.grpc.MethodDescriptor;
 import io.mgrpc.messaging.*;
 import org.slf4j.Logger;
@@ -67,7 +68,7 @@ public class InProcessMessageTransport {
         }
 
         @Override
-        public void send(String channelId, String methodName, byte[] buffer) throws MessagingException {
+        public void send(String channelId, String callId, String methodName, byte[] buffer) throws MessagingException {
             final ChannelMessageListener channel = channelsById.get(channelId);
             if(channel == null){
                 String err = "Channel " + channelId +  " does not exist";
@@ -92,6 +93,10 @@ public class InProcessMessageTransport {
         public void start(MessageChannel channel) throws MessagingException {
             this.channelId = channel.getChannelId();
             channelsById.put(channelId, channel);
+        }
+
+        @Override
+        public void onCallStart(MethodDescriptor methodDescriptor, CallOptions callOptions, String callId) {
         }
 
         @Override

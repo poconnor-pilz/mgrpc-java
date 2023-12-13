@@ -119,8 +119,9 @@ public class TestSubscription {
             }
         }
 
-        final String responseTopic1 = ServerTopics.out("/", SERVER,"atesttopic");
-        final String responseTopic2 = ServerTopics.out("/", SERVER,"atesttopic2");
+        final ServerTopics serverTopics = new ServerTopics(SERVER);
+        final String responseTopic1 = serverTopics.out("atesttopic");
+        final String responseTopic2 = serverTopics.out("atesttopic2");
 
         //Subscribe for responses
         CountDownLatch latch = new CountDownLatch(3);

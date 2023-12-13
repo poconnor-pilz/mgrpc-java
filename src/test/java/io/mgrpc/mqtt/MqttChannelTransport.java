@@ -2,6 +2,7 @@ package io.mgrpc.mqtt;
 
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.protobuf.Parser;
+import io.grpc.CallOptions;
 import io.grpc.MethodDescriptor;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.ConnectionStatus;
@@ -147,6 +148,9 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
         }
 
     }
+
+    @Override
+    public void onCallStart(MethodDescriptor methodDescriptor, CallOptions callOptions, String callId) {}
 
     @Override
     public void close() {

@@ -118,7 +118,7 @@ public class MqttServerTransport implements ServerMessageTransport, MessagePubli
 
 
     @Override
-    public void send(String channelId, String methodName, byte[] buffer) throws MessagingException {
+    public void send(String channelId, String callId, String methodName, byte[] buffer) throws MessagingException {
 
         try {
             client.publish(serverTopics.replyTopic(channelId, methodName), new MqttMessage(buffer));
