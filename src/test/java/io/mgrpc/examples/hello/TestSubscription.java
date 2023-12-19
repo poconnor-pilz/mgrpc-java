@@ -144,7 +144,7 @@ public class TestSubscription {
         //Send two requests each with a different responseTopic
         final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub blockingStub1 =
                 ExampleHelloServiceGrpc.newBlockingStub(channel)
-                        .withOption(MessageChannel.RESPONSE_TOPIC, responseTopic1);
+                        .withOption(MessageChannel.OUT_TOPIC, responseTopic1);
 
         HelloRequest request1 = HelloRequest.newBuilder().setName("2").build();
         final Iterator<HelloReply> helloReplyIterator = blockingStub1.lotsOfReplies(request1);
@@ -154,7 +154,7 @@ public class TestSubscription {
 
         final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub blockingStub2 =
                 ExampleHelloServiceGrpc.newBlockingStub(channel)
-                        .withOption(MessageChannel.RESPONSE_TOPIC, responseTopic2);
+                        .withOption(MessageChannel.OUT_TOPIC, responseTopic2);
         HelloRequest request2 = HelloRequest.newBuilder().setName("3").build();
         blockingStub2.lotsOfReplies(request2);
 

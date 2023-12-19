@@ -63,8 +63,13 @@ public class InProcessMessageTransport {
         }
 
         @Override
-        public void close() {
+        public void close() {}
 
+        @Override
+        public void onCallClose(String channelId, String callId) {}
+
+        @Override
+        public void request(String channelId, String callId, int numMessages) {
         }
 
         @Override
@@ -96,8 +101,10 @@ public class InProcessMessageTransport {
         }
 
         @Override
-        public void onCallStart(MethodDescriptor methodDescriptor, CallOptions callOptions, String callId) {
-        }
+        public void onCallStart(MethodDescriptor methodDescriptor, CallOptions callOptions, String callId) {}
+
+        @Override
+        public void onCallClose(String callId){}
 
         @Override
         public void close() {
@@ -105,8 +112,8 @@ public class InProcessMessageTransport {
         }
 
         @Override
-        public void send(boolean isStart, String callId, MethodDescriptor methodDescriptor, byte[] buffer) throws MessagingException {
-            server.onMessage(buffer);
+        public void send(MethodDescriptor methodDescriptor, RpcMessage.Builder rpcMessageBuilder) throws MessagingException {
+            server.onMessage(rpcMessageBuilder.build());
         }
 
         @Override

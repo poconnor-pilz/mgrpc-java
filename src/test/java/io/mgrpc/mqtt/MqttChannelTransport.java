@@ -5,10 +5,7 @@ import com.google.protobuf.Parser;
 import io.grpc.CallOptions;
 import io.grpc.MethodDescriptor;
 import io.grpc.stub.StreamObserver;
-import io.mgrpc.ConnectionStatus;
-import io.mgrpc.MessageChannel;
-import io.mgrpc.MessageServer;
-import io.mgrpc.ServerTopics;
+import io.mgrpc.*;
 import io.mgrpc.messaging.ChannelMessageListener;
 import io.mgrpc.messaging.ChannelMessageTransport;
 import io.mgrpc.messaging.MessagingException;
@@ -46,7 +43,6 @@ import java.util.concurrent.*;
 //      gRPC full method name = helloworld.ExampleHelloService/SayHello
 
 
-
 //Status topics
 //The server status topic will be
 //  server/o/sys/status
@@ -81,6 +77,8 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
     private static volatile Executor executorSingleton;
 
     private final Map<String, List<StreamObserver>> subscribersByTopic = new ConcurrentHashMap<>();
+
+    private final Map<String, RpcMessage.Builder> cachedStartMessages = new ConcurrentHashMap<>();
 
     public static class Stats {
         private final int subscribers;
@@ -150,7 +148,12 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
     }
 
     @Override
-    public void onCallStart(MethodDescriptor methodDescriptor, CallOptions callOptions, String callId) {}
+    public void onCallStart(MethodDescriptor methodDescriptor, CallOptions callOptions, String callId) {
+    }
+
+    @Override
+    public void onCallClose(String callId) {
+    }
 
     @Override
     public void close() {
@@ -190,7 +193,42 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
 
 
     @Override
-    public void send(boolean isStart, String callId, MethodDescriptor methodDescriptor, byte[] buffer) throws MessagingException {
+    public void send(MethodDescriptor methodDescriptor, RpcMessage.Builder messageBuilder) throws MessagingException {
+
+        final RpcBatch.Builder batchBuilder = RpcBatch.newBuilder();
+
+        if (methodDescriptor.getType().clientSendsOneMessage()) {
+            //If clientSendsOneMessage we only want to send one broker message containing
+            //start, request, status.
+            if (messageBuilder.hasStart()) {
+                //Cache the start message here and wait for the request
+                cachedStartMessages.put(messageBuilder.getCallId(), messageBuilder);
+                return;
+            }
+            if(messageBuilder.hasStatus()){
+                //Ignore status values as the status will already have been sent automatically below
+                return;
+            }
+            final RpcMessage.Builder startBuilder = cachedStartMessages.remove(messageBuilder.getCallId());
+            if (startBuilder == null) {
+                log.error("Request received but no cached start message"); //should never happen
+                return;
+            }
+            batchBuilder.addMessages(startBuilder);
+            batchBuilder.addMessages(messageBuilder);
+            final com.google.rpc.Status okStatus = io.grpc.protobuf.StatusProto.fromStatusAndTrailers(io.grpc.Status.OK, null);
+            final RpcMessage.Builder statusBuilder = RpcMessage.newBuilder()
+                    .setCallId(messageBuilder.getCallId())
+                    .setSequence(messageBuilder.getSequence() + 1)
+                    .setStatus(okStatus);
+            batchBuilder.addMessages(statusBuilder);
+        } else {
+            batchBuilder.addMessages(messageBuilder);
+        }
+
+
+        final byte[] buffer = batchBuilder.build().toByteArray();
+
         if (!serverConnected) {
             //The server should have an mqtt LWT that reliably sends a message when it is disconnected.
             //Nevertheless send it a ping to make double sure that it is definitely not connected.
@@ -273,7 +311,7 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
             }
             subscribers.add(streamObserver);
         } catch (MqttException e) {
-            throw new MessagingException("Subscription failed",e);
+            throw new MessagingException("Subscription failed", e);
         }
 
     }

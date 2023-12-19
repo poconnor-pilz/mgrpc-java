@@ -153,8 +153,24 @@ Note that the docs do say that "In gRPC, when a value is written to a stream, th
 But if the framework really buffers instead of blocking the client then the memory problem is just being put elsewhere.
 
 In fact run HttpServerCancelsAndShutdowns.slowServerFastClient. The client isn't blocked but the framework buffers everything
-on the client side. This saves the server being overwhelmed but it doesn't deal with memory. It doesn't seem much
-worse than just buffering on the server side as mgrpc does at the moment.
+on the client side. This saves the server being overwhelmed but it doesn't deal with memory on the client side. The server resources are more critical because the server can have many clients flooding it with requests.
+
+We could do the same. Have the server transport make a request(n) call to the client transport. The client transport buffers the input stream until it receives a request(n). But the mqtt transport would optimistically always send the first two messages as a batch (start and first value). For a unary call this would be enough and there would be no need to send a request(n) across the network. For services with an input stream we would pay the cost of the request(n) being sent. We could make two types of transport (or one with a buffer=true/false param). One is optimised for bandwidth and speed. The other is optimised for resources. Then finally if broker queueing is available we can have one that uses the broker. This optimises for speed, bandwidth and server and client resources at the expense of broker resources. This is ideal when we have a powerful broker (i.e. not mosquitto). 
+
+For the non broker case it should be possible to take the request(n) as a hint. If request(5) comes up to the client but it only has 4 messages in its buffer then it just sends all 4 in a batch message. The server will call request again at the end of each service call anyway. Alternatively it should be possible not to use a buffer on the client side and to just block the send until we receive a request(1). Or have a blocking queue on the client side for a buffer. This would mean that for the most part we don't block a thread on the client until we are running out of memory. With loom though it wouldn't matter if we blocked a thread.
+
+From the manualflowcontrol documentation (link above)
+"An example use case is, you have a buffer where your onNext places values from the stream. Manual flow control can be used to avoid buffer overflows. You could use a blocking buffer, but you may not want to have the thread being used by onNext block."
+i.e. if your buffer has size 10 then when you get to 10 you don't call request(). You wait for the buffer to clear down a bit and then call request. But it recommends that you should call request(1). Then you keep calling request(1) until the buffer clears again.
+Alternatively if you don't want to flood the framework buffer you can use onReady and isReady. The javadoc for ServerCall.isReady():
+"If true, indicates that the call is capable of sending additional messages without requiring excessive buffering internally. This event is just a suggestion and the application is free to ignore it, however doing so may result in excessive buffering within the call."
+Where "the application" means HelloServiceImpl. So the application can check isReady to make sure that the ServerCall (and it's transport) can take more messages. If the Servercall can't then the application can hold off somehow. It could busy wait or else it could just not send and then wait for an onReady() event and start sending again in a loop that checks isReady()
+Have a look at the java manual flow control code to see how it works.
+The default behaviour is for the system to call request(1) at the end of each message handler.
+
+For the most part we don't care about implementing isReady or onReady except to always return true. This is because we know that we will be just sending to the broker which will always take our request. Except in the case maybe of the AWS mqtt broker which might have limit on the number of messages but the docs seem to say that the only limit on queued messages is "This limit applies when AWS IoT Core stores the messages send to offline persistent sessions." So it seems high  
+
+Note also that flow control can also be done at the applicatoin level using bidi streaming where the HelloServiceImpl sends back a message in its outstream with a number that tells the client how many new messages to send on the instream. 
 
 #### Use broker queues
 Given this then it looks like the best compromise would be to use the broker to queue messages. This should be possible as grpc implements a pull model for streams. 

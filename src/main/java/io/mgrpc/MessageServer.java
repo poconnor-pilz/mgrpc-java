@@ -117,14 +117,8 @@ public class MessageServer implements ServerMessageListener {
 
 
     @Override
-    public void onMessage(byte[] buffer) {
-        final RpcMessage message;
-        try {
-            message = RpcMessage.parseFrom(buffer);
-        } catch (InvalidProtocolBufferException e) {
-            log.error("Failed to parse RpcMessage", e);
-            return;
-        }
+    public void onMessage(RpcMessage message) {
+
         log.debug("Received {} {} {} ", new Object[]{message.getMessageCase(),
                 message.getSequence(), message.getCallId()});
         final String callId = message.getCallId();
@@ -353,7 +347,6 @@ public class MessageServer implements ServerMessageListener {
 
                 serverCall.start(serverCallHandler);
 
-                serverCall.onClientMessage(message);
             } catch (Exception ex) {
                 log.error("Error processing RpcMessage", ex);
             }
@@ -438,7 +431,8 @@ public class MessageServer implements ServerMessageListener {
 
             @Override
             public void request(int numMessages) {
-
+                log.debug("request(" + numMessages + ")");
+                transport.request(channelId, callId, numMessages);
             }
 
             @Override
@@ -450,9 +444,6 @@ public class MessageServer implements ServerMessageListener {
 
                 Value value;
                 switch (message.getMessageCase()) {
-                    case START:
-                        value = message.getStart().getValue();
-                        break;
                     case VALUE:
                         value = message.getValue();
                         break;
@@ -485,12 +476,6 @@ public class MessageServer implements ServerMessageListener {
                     listener.onMessage(objValue);
                 });
 
-                if (message.getSequence() == SINGLE_MESSAGE_STREAM) {
-                    //We do not expect the client to send a completed if there is only one message
-                    //We do not call remove() here as the call needs to remain available to handle a cancel
-                    //It will be removed when close() is called by the listener/service implementation
-                    listener.onHalfClose();
-                }
 
             }
 
@@ -527,7 +512,7 @@ public class MessageServer implements ServerMessageListener {
                         .setSequence(seq).build();
 
                 try {
-                    send(header.getReplyTo(), channelId, callId, methodDescriptor.getFullMethodName(), rpcMessage);
+                    send(header.getOutTopic(), channelId, callId, methodDescriptor.getFullMethodName(), rpcMessage);
                 } catch (MessagingException e) {
                     throw new StatusRuntimeException(Status.UNAVAILABLE);//.withCause(e));
                 }
@@ -554,10 +539,11 @@ public class MessageServer implements ServerMessageListener {
                     ;//It's clearer to have empty statement here than express the if conditions negatively
                 } else {
                     sequence++;
-                    sendStatus(header.getReplyTo(), channelId, methodDescriptor.getFullMethodName(), callId, sequence, status);
+                    sendStatus(header.getOutTopic(), channelId, methodDescriptor.getFullMethodName(), callId, sequence, status);
                 }
                 cancelTimeouts();
                 MgMessageHandler.this.remove();
+                transport.onCallClose(channelId, callId);
             }
 
             public void cancel() {

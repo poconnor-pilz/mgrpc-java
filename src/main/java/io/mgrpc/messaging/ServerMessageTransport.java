@@ -23,6 +23,19 @@ public interface ServerMessageTransport {
     void close();
 
     /**
+     * Called by the server after the call has closed.
+     * The transport can clean up any resources here for the call.
+     */
+    void onCallClose(String channelId, String callId);
+
+    /**
+     * Request the transport to send on a number of messages for a call
+     * If the transport does not implement buffering it can ignore this and just send the messages
+     * whenever they arrive.
+     */
+    void request(String channelId, String callId, int numMessages);
+
+    /**
      * Send a message reply to a channel.
      * @param channelId The id of the channel.
      * @param callId The id of the call.

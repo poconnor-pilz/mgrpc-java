@@ -9,6 +9,10 @@ option java_multiple_files = true;
 option java_package = "io.mgrpc";
 option java_outer_classname = "MGrpc";
 
+message RpcBatch{
+  //A batch of messages. A transport can decide how many messages to include in a batch.
+  repeated RpcMessage messages = 1;
+}
 
 message  RpcMessage{
   //Every rpc message is part of a call and should have a unique call id relative to all other calls
@@ -24,14 +28,15 @@ message  RpcMessage{
   //(For request/response the client sends one message with sequence=0 and the server sends one message with sequence=0)
   uint32 sequence = 2;
 
-  //A message is either Start, Value or Status (where Start contains a Value)
+  //A message is either Start, Value or Status (where Start contains a Value for a unary call (single request/response))
   //Examples:
   //Request response:
-  //    client stream:   start.
+  //    client stream:   start with non-null value.
   //    server stream:   value or status.
-  //A client stream:     start, value, value, status.
-  //A server stream:     value, value, status.
-  //A client stream with cancellation:    start, value, value, status(cancelled).
+  //A client stream with 1 value:      start, value, status.
+  //A client stream with 2 values:     start, value, value, status.
+  //A server stream with 1 value:      value, status.
+  //A client stream with two values and a cancellation:    start, value, value, status(cancelled).
   oneof message {
     Start start = 3;
     Value value = 4;
@@ -43,6 +48,8 @@ message  RpcMessage{
 //The first message in a client stream must be a Start message
 message Start{
   Header header = 1;
+  //For a unary call the value is included in the start message to minimise the amount of messages sent.
+  //For all other calls the value will be null.
   Value value = 2;
 }
 
@@ -71,8 +78,13 @@ message Header{
   //(to prevent other clients stealing the tokens and using them)
   repeated MetadataEntry metadata = 4;
 
-  //If the provider/transport supports topics then this can be used to override the default reply topic
-  string replyTo = 5;
+  //Topic or queue that should be used for the input stream for this call
+  //Will not be set for a unary call and may not be set depending on the transport strategy
+  string inTopic = 5;
+
+  //Topic or queue that should be used for the output stream for this call
+  //Will not be set for a unary call and may not be set depending on the transport strategy
+  string outTopic = 6;
 
 }
 
@@ -99,10 +111,9 @@ message MetadataEntry{
 
 
 service CallTopicsService {
-
-  //A channel transport can inform a server to create special topics or queues for a call
-  //The channel transport should wait until this call has completed so that it knows the
-  //topics/queues have been created before proceeding further.
+  //A server transport may implement this service. If it does then a channel transport can use
+  //this service to inform a server to use special topics or queues for a call
+  //In this case the channel transport should call this method before it sends the first message for the call.
   rpc SetCallTopics(CallTopics) returns (google.protobuf.Empty);
 }
 

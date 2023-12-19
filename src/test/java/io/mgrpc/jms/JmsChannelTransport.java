@@ -67,6 +67,8 @@ public class JmsChannelTransport implements ChannelMessageTransport {
 
     private Map<String, JmsCallQueues> callQueuesMap = new ConcurrentHashMap<>();
 
+    private final Map<String, RpcMessage.Builder> cachedStartMessages = new ConcurrentHashMap<>();
+
     private static volatile Executor executorSingleton;
 
 
@@ -185,7 +187,7 @@ public class JmsChannelTransport implements ChannelMessageTransport {
         if (!methodDescriptor.getType().clientSendsOneMessage()
                 || !methodDescriptor.getType().serverSendsOneMessage()) {
             //This method has input or output streams (it's not just request response)
-            //Create specific queues for these so that the broker can buffer messages.
+            //Create specific queues for these so that the broker can buffer messages using broker queues
             JmsCallQueues callQueues = new JmsCallQueues();
             final CallTopics.Builder builder = CallTopics.newBuilder();
             builder.setChannelId(channel.getChannelId());
@@ -214,9 +216,11 @@ public class JmsChannelTransport implements ChannelMessageTransport {
                 }
                 final CallTopicsServiceGrpc.CallTopicsServiceBlockingStub callTopicsService
                         = CallTopicsServiceGrpc.newBlockingStub(channel).withDeadlineAfter(5, TimeUnit.SECONDS);
-                //Inform the server to create topics. This call will block until the server has returned a response.
-                //and throw a StatusRuntimeException if it fails or times out
+                //Inform the server to create corresponding topics on its end.
+                //This call will block until the server has returned a response
+                //and throw a StatusRuntimeException if it fails or times out.
                 callTopicsService.setCallTopics(builder.build());
+                log.debug("CallTopicsService.setCallTopics returned ok");
 
                 callQueuesMap.put(callId, callQueues);
             } catch (Exception ex) {
@@ -227,8 +231,60 @@ public class JmsChannelTransport implements ChannelMessageTransport {
 
     }
 
+    public void onCallClose(String callId){
+        final JmsCallQueues callQueues = callQueuesMap.get(callId);
+        try{
+            if(callQueues != null){
+                log.debug("Transport releasing resources for call " + callId);
+                if(callQueues.producer != null){
+                    callQueues.producer.close();
+                }
+                if(callQueues.consumer != null){
+                    callQueues.consumer.close();
+                }
+            }
+        } catch (Exception ex){
+            log.error("Exception closing call queues", ex);
+        }
+    }
+
     @Override
-    public void send(boolean isStart, String callId, MethodDescriptor methodDescriptor, byte[] buffer) throws MessagingException {
+    public void send(MethodDescriptor methodDescriptor, RpcMessage.Builder messageBuilder) throws MessagingException {
+
+        final RpcBatch.Builder batchBuilder = RpcBatch.newBuilder();
+
+        if (methodDescriptor.getType().clientSendsOneMessage()) {
+            //If clientSendsOneMessage we only want to send one broker message containing
+            //start, request, status.
+            if (messageBuilder.hasStart()) {
+                //Cache the start message here and wait for the request
+                cachedStartMessages.put(messageBuilder.getCallId(), messageBuilder);
+                return;
+            }
+            if(messageBuilder.hasStatus()){
+                //Ignore status values as the status will already have been sent automatically below
+                return;
+            }
+            final RpcMessage.Builder startBuilder = cachedStartMessages.remove(messageBuilder.getCallId());
+            if (startBuilder == null) {
+                log.error("Request received but no cached start message"); //should never happen
+                return;
+            }
+            batchBuilder.addMessages(startBuilder);
+            batchBuilder.addMessages(messageBuilder);
+            final com.google.rpc.Status okStatus = io.grpc.protobuf.StatusProto.fromStatusAndTrailers(io.grpc.Status.OK, null);
+            final RpcMessage.Builder statusBuilder = RpcMessage.newBuilder()
+                    .setCallId(messageBuilder.getCallId())
+                    .setSequence(messageBuilder.getSequence() + 1)
+                    .setStatus(okStatus);
+            batchBuilder.addMessages(statusBuilder);
+        } else {
+            batchBuilder.addMessages(messageBuilder);
+        }
+
+
+        final byte[] buffer = batchBuilder.build().toByteArray();
+
         if (!serverConnected) {
             //The server should have an mqtt LWT that reliably sends a message when it is disconnected.
             //Nevertheless send it a ping to make double sure that it is definitely not connected.
@@ -244,7 +300,7 @@ public class JmsChannelTransport implements ChannelMessageTransport {
             }
         }
 
-        JmsCallQueues callQueues = callQueuesMap.get(callId);
+        JmsCallQueues callQueues = callQueuesMap.get(messageBuilder.getCallId());
         try {
             if (callQueues != null && callQueues.producer != null) {
                 //This message must be sent to a specific input queue

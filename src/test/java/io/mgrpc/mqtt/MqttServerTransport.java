@@ -1,8 +1,7 @@
 package io.mgrpc.mqtt;
 
-import io.mgrpc.ConnectionStatus;
-import io.mgrpc.MessageServer;
-import io.mgrpc.ServerTopics;
+import com.google.protobuf.InvalidProtocolBufferException;
+import io.mgrpc.*;
 import io.mgrpc.messaging.MessagingException;
 import io.mgrpc.messaging.ServerMessageListener;
 import io.mgrpc.messaging.ServerMessageTransport;
@@ -60,7 +59,15 @@ public class MqttServerTransport implements ServerMessageTransport, MessagePubli
             String inTopicFilter = serverTopics.servicesIn + "/#";
             log.debug("Subscribing for requests on " + inTopicFilter);
             client.subscribe(inTopicFilter, 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
-                server.onMessage(mqttMessage.getPayload());
+                try {
+                    final RpcBatch rpcBatch = RpcBatch.parseFrom(mqttMessage.getPayload());
+                    for(RpcMessage rpcMessage: rpcBatch.getMessagesList()){
+                        server.onMessage(rpcMessage);
+                    }
+                } catch (InvalidProtocolBufferException e) {
+                    log.error("Failed to parse RpcMessage", e);
+                    return;
+                }
             })).waitForCompletion(SUBSCRIBE_TIMEOUT_MILLIS);
 
 
@@ -96,6 +103,14 @@ public class MqttServerTransport implements ServerMessageTransport, MessagePubli
         } catch (MqttException exception) {
             log.error("Exception closing " + exception);
         }
+    }
+
+    @Override
+    public void onCallClose(String channelId, String callId) {
+    }
+
+    @Override
+    public void request(String channelId, String callId, int numMessages) {
     }
 
     @Override

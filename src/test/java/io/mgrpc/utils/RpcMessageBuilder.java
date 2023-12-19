@@ -28,7 +28,7 @@ public class RpcMessageBuilder {
 
     public static RpcMessage makeStart(String methodName, String callId, int sequence, String replyTo, MessageLite payload){
         Header header = Header.newBuilder()
-                .setReplyTo(replyTo)
+                .setOutTopic(replyTo)
                 .setMethodName(methodName)
                 .build();
         Value value = Value.newBuilder().setContents(payload.toByteString()).build();

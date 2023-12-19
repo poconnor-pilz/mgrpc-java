@@ -52,7 +52,7 @@ public abstract class TestHelloBase {
     @Test
     public void testSayHello() {
         final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub blockingStub = ExampleHelloServiceGrpc.newBlockingStub(getChannel())
-                .withDeadlineAfter(REQUEST_TIMEOUT, TimeUnit.MILLISECONDS);;
+               .withDeadlineAfter(REQUEST_TIMEOUT, TimeUnit.MILLISECONDS);;
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
         final HelloReply helloReply = blockingStub.sayHello(joe);
         assertEquals("Hello joe", helloReply.getMessage());
@@ -112,13 +112,15 @@ public abstract class TestHelloBase {
         final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(getChannel());
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
         HelloRequest jane = HelloRequest.newBuilder().setName("jane").build();
+        HelloRequest john = HelloRequest.newBuilder().setName("john").build();
         StreamWaiter<HelloReply> waiter = new StreamWaiter<>(REQUEST_TIMEOUT);
         StreamObserver<HelloRequest> clientStreamObserver = stub.lotsOfGreetings(waiter);
         clientStreamObserver.onNext(joe);
         clientStreamObserver.onNext(jane);
+        clientStreamObserver.onNext(john);
         clientStreamObserver.onCompleted();
         final HelloReply reply = waiter.getSingle();
-        assertEquals("Hello joe,jane,", reply.getMessage());
+        assertEquals("Hello joe,jane,john,", reply.getMessage());
         checkForLeaks(0);
     }
 

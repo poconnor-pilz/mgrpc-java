@@ -1,6 +1,7 @@
 package io.mgrpc.jms;
 
 import com.google.protobuf.Empty;
+import com.google.protobuf.InvalidProtocolBufferException;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
 import io.mgrpc.messaging.MessagingException;
@@ -66,7 +67,16 @@ public class JmsServerTransport implements ServerMessageTransport {
             MessageConsumer consumer = session.createConsumer(inQueue);
             consumer.setMessageListener(message -> {
                 try {
-                    server.onMessage(JmsUtils.byteArrayFromMessage(session, message));
+                    final byte[] bytes = JmsUtils.byteArrayFromMessage(session, message);
+                    try {
+                        final RpcBatch rpcBatch = RpcBatch.parseFrom(bytes);
+                        for(RpcMessage rpcMessage: rpcBatch.getMessagesList()){
+                            server.onMessage(rpcMessage);
+                        }
+                    } catch (InvalidProtocolBufferException e) {
+                        log.error("Failed to parse RpcMessage", e);
+                        return;
+                    }
                 } catch (Exception ex) {
                     log.error("Failed to process request", ex);
                 }
@@ -100,41 +110,41 @@ public class JmsServerTransport implements ServerMessageTransport {
                 }
             });
 
-            server.addService(new CallTopicsServiceGrpc.CallTopicsServiceImplBase() {
-                @Override
-                public void setCallTopics(CallTopics request, StreamObserver<Empty> responseObserver) {
-                    JmsCallQueues callQueues = new JmsCallQueues();
-                    callQueuesMap.put(request.getChannelId() + request.getCallId(), callQueues);
-                    try {
-                        if (request.getTopicIn() != null && !request.getTopicIn().isEmpty()) {
-                            log.debug("Subscribing for input stream for call " + request.getCallId() + " on topic " + request.getTopicIn());
-                            String inQ = serverTopics.make(request.getTopicIn());
-                            callQueues.consumerQueue = session.createQueue(inQ);
-                            callQueues.consumer = session.createConsumer(callQueues.consumerQueue);
-                            callQueues.consumer.setMessageListener(message -> {
-                                try {
-                                    server.onMessage(JmsUtils.byteArrayFromMessage(session, message));
-                                } catch (Exception ex) {
-                                    log.error("Failed to process reply", ex);
-                                }
-                            });
-                            responseObserver.onNext(Empty.newBuilder().build());
-                            responseObserver.onCompleted();
-                        }
-                        if (request.getTopicOut() != null && !request.getTopicOut().isEmpty()) {
-                            log.debug("Will send output stream for call " + request.getCallId() + " to topic " + request.getTopicOut());
-                            String outQ = serverTopics.make(request.getTopicOut());
-                            callQueues.producerQueue = session.createQueue(outQ);
-                            callQueues.producer = session.createProducer(callQueues.producerQueue);
-                        }
-                    } catch (JMSException ex) {
-                        responseObserver.onError(ex);
-                        return;
-                    }
-                    responseObserver.onNext(Empty.newBuilder().build());
-                    responseObserver.onCompleted();
-                }
-            });
+//            server.addService(new CallTopicsServiceGrpc.CallTopicsServiceImplBase() {
+//                @Override
+//                public void setCallTopics(CallTopics request, StreamObserver<Empty> responseObserver) {
+//                    JmsCallQueues callQueues = new JmsCallQueues();
+//                    callQueuesMap.put(request.getChannelId() + request.getCallId(), callQueues);
+//                    try {
+//                        if (request.getTopicIn() != null && !request.getTopicIn().isEmpty()) {
+//                            log.debug("Subscribing for input stream for call " + request.getCallId() + " on topic " + request.getTopicIn());
+//                            String inQ = serverTopics.make(request.getTopicIn());
+//                            callQueues.consumerQueue = session.createQueue(inQ);
+//                            callQueues.consumer = session.createConsumer(callQueues.consumerQueue);
+//                            //Pull one message from the input queue. Further messages will be pulled in request()
+//                            getExecutor().execute(()->{
+//                                try {
+//                                    final Message message = callQueues.consumer.receive();
+//                                    server.onMessage(JmsUtils.byteArrayFromMessage(session, message));
+//                                } catch (Exception ex){
+//                                    log.error("Error processing start message for queued call");
+//                                }
+//                            });
+//                        }
+//                        if (request.getTopicOut() != null && !request.getTopicOut().isEmpty()) {
+//                            log.debug("Will send output stream for call " + request.getCallId() + " to topic " + request.getTopicOut());
+//                            String outQ = serverTopics.make(request.getTopicOut());
+//                            callQueues.producerQueue = session.createQueue(outQ);
+//                            callQueues.producer = session.createProducer(callQueues.producerQueue);
+//                        }
+//                    } catch (JMSException ex) {
+//                        responseObserver.onError(ex);
+//                        return;
+//                    }
+//                    responseObserver.onNext(Empty.newBuilder().build());
+//                    responseObserver.onCompleted();
+//                }
+//            });
 
 
             notifyConnected(true);
@@ -152,6 +162,53 @@ public class JmsServerTransport implements ServerMessageTransport {
             session.close();
         } catch (JMSException exception) {
             log.error("Exception closing " + exception);
+        }
+    }
+
+
+    @Override
+    public void onCallClose(String channelId, String callId) {
+        final JmsCallQueues callQueues = getCallQueues(channelId, callId);
+        try{
+            if(callQueues != null){
+                log.debug("Transport releasing resources for call " + callId);
+                if(callQueues.producer != null){
+                    callQueues.producer.close();
+                }
+                if(callQueues.consumer != null){
+                    callQueues.consumer.close();
+                }
+            }
+        } catch (Exception ex){
+            log.error("Exception closing call queues", ex);
+        }
+    }
+
+    @Override
+    public void request(String channelId, String callId, int numMessages) {
+        final JmsCallQueues callQueues = getCallQueues(channelId, callId);
+        try{
+            if(callQueues != null){
+                if(callQueues.consumer != null){
+                    for(int i=0; i < numMessages; i++){
+                        final Message message = callQueues.consumer.receive();
+                        if(message != null) {
+                            final byte[] bytes = JmsUtils.byteArrayFromMessage(session, message);
+                            try {
+                                final RpcBatch rpcBatch = RpcBatch.parseFrom(bytes);
+                                for(RpcMessage rpcMessage: rpcBatch.getMessagesList()){
+                                    server.onMessage(rpcMessage);
+                                }
+                            } catch (InvalidProtocolBufferException e) {
+                                log.error("Failed to parse RpcMessage", e);
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (Exception ex){
+            log.error("Exception closing call queues", ex);
         }
     }
 
@@ -179,7 +236,7 @@ public class JmsServerTransport implements ServerMessageTransport {
 
         try {
             MessageProducer producer = null;
-            final JmsCallQueues callQueues = callQueuesMap.get(channelId + callId);
+            final JmsCallQueues callQueues = getCallQueues(channelId, callId);
             if(callQueues!=null && callQueues.producer!=null){
                 //There is a specific queue for this call
                 producer = callQueues.producer;
@@ -195,7 +252,7 @@ public class JmsServerTransport implements ServerMessageTransport {
             log.debug("Sending response for call " + callId + " on " + producer.getDestination().toString());
             producer.send(JmsUtils.messageFromByteArray(session, buffer));
         } catch (JMSException e) {
-            log.error("Failed to send mqtt message", e);
+            log.error("Failed to send jms message", e);
             throw new MessagingException(e);
         }
     }
@@ -213,6 +270,10 @@ public class JmsServerTransport implements ServerMessageTransport {
         } catch (JMSException e) {
             log.error("Failed to notify connected", e);
         }
+    }
+
+    private JmsCallQueues getCallQueues(String channelId, String callId){
+        return callQueuesMap.get(channelId + callId);
     }
 
 }

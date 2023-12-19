@@ -3,6 +3,7 @@ package io.mgrpc.messaging;
 import io.grpc.CallOptions;
 import io.grpc.MethodDescriptor;
 import io.mgrpc.MessageChannel;
+import io.mgrpc.RpcMessage;
 
 import java.util.concurrent.Executor;
 
@@ -26,19 +27,22 @@ public interface ChannelMessageTransport {
     void onCallStart(MethodDescriptor methodDescriptor, CallOptions callOptions, String callId);
 
     /**
+     * Called by the channel after the call has closed.
+     * The transport can clean up any resources here for the call.
+     */
+    void onCallClose(String callId);
+
+
+    /**
      * Called by the channel when the channel closes. The transport should release any resources here.
      */
     void close();
 
     /**
      * Send a request to a server.
-     * @param isStart Is a start message.
-     * @param callId The call id
-     * @param methodDescriptor The descriptor of gRPC service method
-     * @param buffer The payload of the message to send
      * @exception
      */
-    void send(boolean isStart, String callId, MethodDescriptor methodDescriptor, byte[] buffer) throws MessagingException;
+    void send(MethodDescriptor methodDescriptor, RpcMessage.Builder rpcMessageBuilder) throws MessagingException;
 
     /**
      * @return The executor with which to execute calls

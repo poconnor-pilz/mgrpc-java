@@ -26,10 +26,11 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
     public static final long SUBSCRIPTION_TIMEOUT_MILLIS = 10 * 1000;
 
-    public static final CallOptions.Key<String> RESPONSE_TOPIC = CallOptions.Key.create("response-topic");
+    public static final CallOptions.Key<String> OUT_TOPIC = CallOptions.Key.create("out-topic");
 
     private final static Metadata EMPTY_METADATA = new Metadata();
 
+    private static final com.google.rpc.Status GOOGLE_RPC_OK_STATUS = io.grpc.protobuf.StatusProto.fromStatusAndTrailers(Status.OK, null);
 
     private static volatile Executor executorSingleton;
 
@@ -265,6 +266,21 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
                     close(Status.DEADLINE_EXCEEDED.augmentDescription(deadlineMessage));
                 });
             }
+
+            //Only increment sequence if there is potentially more than one message in the stream.
+            if (!methodDescriptor.getType().clientSendsOneMessage()) {
+                sequence++;
+            }
+            final RpcMessage.Builder msgBuilder = RpcMessage.newBuilder()
+                    .setCallId(callId).setSequence(sequence);
+            final Header header = getHeader();
+            msgBuilder.setStart(Start.newBuilder().setHeader(header));
+            try {
+                transport.send(methodDescriptor, msgBuilder);
+            } catch (MessagingException ex) {
+                throw new StatusRuntimeException(Status.INTERNAL.withDescription(ex.getMessage()).withCause(ex));
+            }
+
             //TODO should we call responseListener.onReady() here?
 //            exec(() -> responseListener.onReady());
         }
@@ -272,11 +288,12 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
         @Override
         public void sendMessage(ReqT message) {
 
+            sequence++;
             //Send message to the server
             final RpcMessage.Builder msgBuilder = RpcMessage.newBuilder()
-                    .setCallId(callId);
+                    .setCallId(callId)
+                    .setSequence(sequence);
 
-            final Value.Builder valueBuilder = Value.newBuilder();
 
             ByteString valueByteString;
             if (message instanceof MessageLite) {
@@ -287,56 +304,42 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
             }
             final Value value = Value.newBuilder()
                     .setContents(valueByteString).build();
-            if (sequence == 0) {
-                //This is the start of the call so make a Start message with a header
-                Header.Builder header = Header.newBuilder();
-                header.setChannelId(channelId);
-                header.setMethodName(methodDescriptor.getFullMethodName());
-                if (effectiveDeadline != null) {
-                    header.setTimeoutMillis(effectiveDeadline.timeRemaining(TimeUnit.MILLISECONDS));
-                }
-                final String responseTopic = this.callOptions.getOption(RESPONSE_TOPIC);
-                if (responseTopic != null && responseTopic.trim().length() != 0) {
-                    //If the client specified a responseTopic then set that in the message to the server and
-                    //close the call. The client should have already done a subscribe to receive the responses
-                    //Note that deadlines will be ignored in this case (although they will be passed to the server)
-                    log.debug("replyTo topic = " + responseTopic);
-                    header.setReplyTo(responseTopic);
-                    close(Status.OK);
-                }
-
-                //Add metadata to header
-                Set<String> keys = metadata.keys();
-                for (String key : keys) {
-                    final String mvalue = metadata.get(Metadata.Key.of(key, Metadata.ASCII_STRING_MARSHALLER));
-                    MetadataEntry entry = MetadataEntry.newBuilder()
-                            .setKey(key)
-                            .setValue(mvalue).build();
-                    header.addMetadata(entry);
-                }
-
-                final Start start = Start.newBuilder()
-                        .setHeader(header.build())
-                        .setValue(value).build();
-                msgBuilder.setStart(start);
-
-            } else {
-                msgBuilder.setValue(value);
-            }
-
-            //Only increment sequence if there is potentially more than one message in the stream.
-            if (!methodDescriptor.getType().clientSendsOneMessage()) {
-                sequence++;
-            }
-            msgBuilder.setSequence(sequence);
-
+            msgBuilder.setValue(value);
             try {
-                send(msgBuilder.hasStart(), callId, methodDescriptor, msgBuilder);
+                send(methodDescriptor, msgBuilder);
             } catch (MessagingException ex){
                 this.close(Status.UNAVAILABLE.withDescription(ex.getMessage()).withCause(ex));
                 return;
             }
             responseListener.onReady();
+        }
+
+        private Header getHeader(){
+            Header.Builder header = Header.newBuilder();
+            header.setChannelId(channelId);
+            header.setMethodName(methodDescriptor.getFullMethodName());
+            if (effectiveDeadline != null) {
+                header.setTimeoutMillis(effectiveDeadline.timeRemaining(TimeUnit.MILLISECONDS));
+            }
+            final String responseTopic = this.callOptions.getOption(OUT_TOPIC);
+            if (responseTopic != null && responseTopic.trim().length() != 0) {
+                //If the client specified a responseTopic then set that in the message to the server and
+                //close the call. The client should have already done a subscribe to receive the responses
+                //Note that deadlines will be ignored in this case (although they will be passed to the server)
+                log.debug("replyTo topic = " + responseTopic);
+                header.setOutTopic(responseTopic);
+                close(Status.OK);
+            }
+            //Add metadata to header
+            Set<String> keys = metadata.keys();
+            for (String key : keys) {
+                final String mvalue = metadata.get(Metadata.Key.of(key, Metadata.ASCII_STRING_MARSHALLER));
+                MetadataEntry entry = MetadataEntry.newBuilder()
+                        .setKey(key)
+                        .setValue(mvalue).build();
+                header.addMetadata(entry);
+            }
+            return header.build();
         }
 
         private final class ContextCancellationListener implements Context.CancellationListener {
@@ -407,7 +410,7 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
                     .setSequence(sequence)
                     .setStatus(cancelled);
             try {
-                send(false, callId, methodDescriptor, msgBuilder);
+                send(methodDescriptor, msgBuilder);
             } catch (MessagingException e) {
                 log.error("onQueueCapacityExceeded() failed to send cancelled status", e);
             }
@@ -421,6 +424,7 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
             cancelTimeouts();
             clientExec(() -> responseListener.onClose(status, EMPTY_METADATA));
             clientCallsById.remove(this.callId);
+            transport.onCallClose(callId);
         }
 
         public void cancelTimeouts() {
@@ -473,7 +477,7 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
                     .setSequence(sequence)
                     .setStatus(cancelled);
             try {
-                send(false, callId, methodDescriptor, msgBuilder);
+                send(methodDescriptor, msgBuilder);
             } catch (MessagingException ex) {
                 throw new StatusRuntimeException(Status.UNAVAILABLE.withDescription(ex.getMessage()).withCause(ex));
             }
@@ -483,26 +487,20 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
 
         @Override
         public void halfClose() {
-            //This will be sent by the client (e.g a stub) when the client stream is complete (or after one unary request)
-            if (methodDescriptor.getType().clientSendsOneMessage()) {
-                //Don't send a completed as the server doesn't care and it's an extra unnecessary mqtt message
-                return;
-            }
-            final com.google.rpc.Status ok = io.grpc.protobuf.StatusProto.fromStatusAndTrailers(Status.OK, null);
             sequence++;
             final RpcMessage.Builder msgBuilder = RpcMessage.newBuilder()
                     .setCallId(callId)
                     .setSequence(sequence)
-                    .setStatus(ok);
+                    .setStatus(GOOGLE_RPC_OK_STATUS);
             try {
-                send(false, callId, methodDescriptor, msgBuilder);
+                send(methodDescriptor, msgBuilder);
             } catch (MessagingException ex) {
                 throw new StatusRuntimeException(Status.UNAVAILABLE.withDescription(ex.getMessage()).withCause(ex));
             }
         }
 
 
-        private void send(boolean isStart, String callId, MethodDescriptor methodDescriptor, RpcMessage.Builder messageBuilder) throws MessagingException {
+        private void send(MethodDescriptor methodDescriptor, RpcMessage.Builder messageBuilder) throws MessagingException {
             //fullMethodName will be e.g. "helloworld.ExampleHelloService/LotsOfReplies"
             if (!initialized) {
                 throw new MessagingException("channel.init() was not called");
@@ -510,7 +508,7 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
             final RpcMessage message = messageBuilder.build();
             log.debug("Sending {} {} {} {} ",
                     new Object[]{message.getMessageCase(), message.getSequence(), message.getCallId(), methodDescriptor.getFullMethodName()});
-            transport.send(isStart, callId, methodDescriptor, message.toByteArray());
+            transport.send(methodDescriptor, messageBuilder);
         }
 
 
