@@ -1,6 +1,7 @@
 package io.mgrpc.messaging;
 
 import io.mgrpc.MessageServer;
+import io.mgrpc.RpcMessage;
 
 import java.util.concurrent.Executor;
 
@@ -38,13 +39,12 @@ public interface ServerMessageTransport {
     /**
      * Send a message reply to a channel.
      * @param channelId The id of the channel.
-     * @param callId The id of the call.
      * @param methodName The full method name of the gRPC service method e.g.
      *                   helloworld.ExampleHelloService/SayHello
-     * @param buffer The payload of the message to send
+     * @param message The message to send
      * @exception
      */
-    void send(String channelId, String callId, String methodName, byte[] buffer) throws MessagingException;
+    void send(String channelId, String methodName, boolean serverSendsOneMessage, RpcMessage message) throws MessagingException;
 
     /**
      * @return The executor with which to execute calls

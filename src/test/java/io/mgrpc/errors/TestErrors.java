@@ -315,11 +315,12 @@ public class TestErrors {
             }
         }
         server.addService(new OnlySendsCompleted());
-        final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub blockingStub = ExampleHelloServiceGrpc.newBlockingStub(channel);
+        final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub blockingStub
+                = ExampleHelloServiceGrpc.newBlockingStub(channel).withDeadlineAfter(2, TimeUnit.SECONDS);;
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
         StatusRuntimeException ex = assertThrows(StatusRuntimeException.class, () -> blockingStub.sayHello(joe));
-        assertEquals(Status.INTERNAL.getCode(), ex.getStatus().getCode());
-        assertTrue(ex.getMessage().contains("No value received for unary call"));
+        //The call should timeout
+        assertEquals(Status.DEADLINE_EXCEEDED.getCode(), ex.getStatus().getCode());
     }
 
 

@@ -106,8 +106,8 @@ public class TestOrderAndDuplicates {
         publishAndPause(clientMqtt, topic, RpcMessageBuilder.makeValueRequest(callId, 4));
         publishAndPause(clientMqtt, topic, RpcMessageBuilder.makeStatus(callId, 6, Status.OK));
         accumulator.latch.await();
-        assertEquals(5, accumulator.requests.size());
-        int seq = 0;
+        assertEquals(4, accumulator.requests.size());
+        int seq = 1;
         for (HelloRequest request: accumulator.requests) {
             int current = Integer.parseInt(request.getName());
             if( current - seq != 1){
@@ -123,8 +123,11 @@ public class TestOrderAndDuplicates {
 
 
 
-    public void publishAndPause(MqttAsyncClient client, String topic, MessageLite messageLite) throws Exception{
-        clientMqtt.publish(topic, new MqttMessage(messageLite.toByteArray()));
+    public void publishAndPause(MqttAsyncClient client, String topic, RpcMessage rpcMessage) throws Exception{
+
+        final RpcBatch.Builder batchBuilder = RpcBatch.newBuilder();
+        batchBuilder.addMessages(rpcMessage);
+        clientMqtt.publish(topic, new MqttMessage(batchBuilder.build().toByteArray()));
         //Introduce slight pause between messages to simulate a real system
         //If we don't do this then the thread pool that processes the messages won't get activated
         //until after all the messages are received by which time they are automatically ordered by the queue
@@ -161,8 +164,8 @@ public class TestOrderAndDuplicates {
         publishAndPause(clientMqtt, topic, RpcMessageBuilder.makeValueRequest(callId, 4));
 
         accumulator.latch.await();
-        assertEquals(5, accumulator.requests.size());
-        int seq = 0;
+        assertEquals(4, accumulator.requests.size());
+        int seq = 1;
         for (HelloRequest request: accumulator.requests) {
             int current = Integer.parseInt(request.getName());
             if( current - seq != 1){
@@ -187,12 +190,8 @@ public class TestOrderAndDuplicates {
         final String channelId = Id.random();
 
         serverMqtt.subscribe(servicesInFilter, 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
-            final RpcMessage message;
-            try {
-                message = RpcMessage.parseFrom(mqttMessage.getPayload());
-            } catch (InvalidProtocolBufferException e) {
-                throw new RuntimeException(e);
-            }
+            final RpcBatch rpcBatch = RpcBatch.parseFrom(mqttMessage.getPayload());
+            final RpcMessage message = rpcBatch.getMessages(0);
             log.debug("Received {} with sequence {} message on : {}", new Object[]{message.getMessageCase(), message.getSequence(), topic});
             final String callId = message.getCallId();
             String methodName = "helloworld.ExampleHelloService/LotsOfReplies";

@@ -1,6 +1,7 @@
 package io.mgrpc.mqtt;
 
 import com.google.protobuf.InvalidProtocolBufferException;
+import io.grpc.Status;
 import io.mgrpc.*;
 import io.mgrpc.messaging.MessagingException;
 import io.mgrpc.messaging.ServerMessageListener;
@@ -20,6 +21,8 @@ public class MqttServerTransport implements ServerMessageTransport, MessagePubli
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
+    private static final com.google.rpc.Status GOOGLE_RPC_OK_STATUS = io.grpc.protobuf.StatusProto.fromStatusAndTrailers(Status.OK, null);
+
     private final MqttAsyncClient client;
     private final static long SUBSCRIBE_TIMEOUT_MILLIS = 5000;
 
@@ -32,20 +35,18 @@ public class MqttServerTransport implements ServerMessageTransport, MessagePubli
 
     /**
      * @param client
-     * @param serverTopic       The root topic of the server e.g. "tenant1/device1"
-     *                          This topic should be unique to the broker.
-     *                          The server will subscribe for requests on subtopics of {serverTopic}/i/svc
-     *                          A request for a method should be sent to sent to {serverTopic}/i/svc/{slashedFullMethod}
-     *                          Replies will be sent to {serverTopic}/o/svc/{channelId}/{slashedFullMethod}
-     *                          Where if the gRPC fullMethodName is "helloworld.HelloService/SayHello"
-     *                          then {slashedFullMethod} is "helloworld/HelloService/SayHello"
-     *
+     * @param serverTopic The root topic of the server e.g. "tenant1/device1"
+     *                    This topic should be unique to the broker.
+     *                    The server will subscribe for requests on subtopics of {serverTopic}/i/svc
+     *                    A request for a method should be sent to sent to {serverTopic}/i/svc/{slashedFullMethod}
+     *                    Replies will be sent to {serverTopic}/o/svc/{channelId}/{slashedFullMethod}
+     *                    Where if the gRPC fullMethodName is "helloworld.HelloService/SayHello"
+     *                    then {slashedFullMethod} is "helloworld/HelloService/SayHello"
      */
     public MqttServerTransport(MqttAsyncClient client, String serverTopic) {
         this.client = client;
         this.serverTopics = new ServerTopics(serverTopic);
     }
-
 
 
     @Override
@@ -61,7 +62,7 @@ public class MqttServerTransport implements ServerMessageTransport, MessagePubli
             client.subscribe(inTopicFilter, 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
                 try {
                     final RpcBatch rpcBatch = RpcBatch.parseFrom(mqttMessage.getPayload());
-                    for(RpcMessage rpcMessage: rpcBatch.getMessagesList()){
+                    for (RpcMessage rpcMessage : rpcBatch.getMessagesList()) {
                         server.onMessage(rpcMessage);
                     }
                 } catch (InvalidProtocolBufferException e) {
@@ -76,7 +77,7 @@ public class MqttServerTransport implements ServerMessageTransport, MessagePubli
             client.subscribe(serverTopics.statusClients, 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
                 ConnectionStatus connectionStatus = ConnectionStatus.parseFrom(mqttMessage.getPayload());
                 log.debug("Received client connected status = " + connectionStatus.getConnected() + " on " + topic + " for channel " + connectionStatus.getChannelId());
-                if(!connectionStatus.getConnected()) {
+                if (!connectionStatus.getConnected()) {
                     server.onChannelDisconnected(connectionStatus.getChannelId());
                 }
             })).waitForCompletion(SUBSCRIBE_TIMEOUT_MILLIS);
@@ -84,7 +85,7 @@ public class MqttServerTransport implements ServerMessageTransport, MessagePubli
             //If this receives a ping from a client then send a notification that we are connected
             log.debug("Subscribing for client pings on " + serverTopics.statusPrompt);
             client.subscribe(serverTopics.statusPrompt, 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
-               notifyConnected(true);
+                notifyConnected(true);
             })).waitForCompletion(SUBSCRIBE_TIMEOUT_MILLIS);
 
             notifyConnected(true);
@@ -94,7 +95,7 @@ public class MqttServerTransport implements ServerMessageTransport, MessagePubli
     }
 
     @Override
-    public void close(){
+    public void close() {
         try {
             notifyConnected(false);
             client.unsubscribe(serverTopics.servicesIn + "/#");
@@ -133,10 +134,32 @@ public class MqttServerTransport implements ServerMessageTransport, MessagePubli
 
 
     @Override
-    public void send(String channelId, String callId, String methodName, byte[] buffer) throws MessagingException {
+    public void send(String channelId, String methodName,
+                     boolean serverSendsOneMessage, RpcMessage message) throws MessagingException {
 
+        final RpcBatch.Builder batchBuilder = RpcBatch.newBuilder();
+        if (serverSendsOneMessage) {
+            if (message.hasValue()) {
+                //Send the value and the status as on batch message to the broker
+                batchBuilder.addMessages(message);
+                final RpcMessage.Builder statusBuilder = RpcMessage.newBuilder()
+                        .setCallId(message.getCallId())
+                        .setSequence(message.getSequence() + 1)
+                        .setStatus(GOOGLE_RPC_OK_STATUS);
+                batchBuilder.addMessages(statusBuilder);
+            } else {
+                if (message.getStatus().getCode() != Status.OK.getCode().value()) {
+                    batchBuilder.addMessages(message);
+                } else {
+                    //Ignore non error status values (non cancel values) as the status will already have been sent automatically above
+                    return;
+                }
+            }
+        } else {
+            batchBuilder.addMessages(message);
+        }
         try {
-            client.publish(serverTopics.replyTopic(channelId, methodName), new MqttMessage(buffer));
+            client.publish(serverTopics.replyTopic(channelId, methodName), new MqttMessage(batchBuilder.build().toByteArray()));
         } catch (MqttException e) {
             log.error("Failed to send mqtt message", e);
             throw new MessagingException(e);

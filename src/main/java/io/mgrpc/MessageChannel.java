@@ -1,7 +1,6 @@
 package io.mgrpc;
 
 import com.google.protobuf.ByteString;
-import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.protobuf.MessageLite;
 import io.grpc.*;
 import io.grpc.protobuf.StatusProto;
@@ -104,14 +103,7 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
     }
 
     @Override
-    public void onMessage(byte[] buffer)  {
-        final RpcMessage message;
-        try {
-            message = RpcMessage.parseFrom(buffer);
-        } catch (InvalidProtocolBufferException e) {
-            log.error("Failed to parse RpcMessage", e);
-            return;
-        }
+    public void onMessage(RpcMessage message)  {
         final MsgClientCall call = clientCallsById.get(message.getCallId());
         if (call == null) {
             log.error("Could not find call with callId: " + message.getCallId() + " for message " + message.getSequence());
@@ -267,14 +259,36 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
                 });
             }
 
-            //Only increment sequence if there is potentially more than one message in the stream.
-            if (!methodDescriptor.getType().clientSendsOneMessage()) {
-                sequence++;
-            }
+            sequence++;
             final RpcMessage.Builder msgBuilder = RpcMessage.newBuilder()
                     .setCallId(callId).setSequence(sequence);
-            final Header header = getHeader();
-            msgBuilder.setStart(Start.newBuilder().setHeader(header));
+
+            Start.Builder start = Start.newBuilder();
+            start.setChannelId(channelId);
+            start.setMethodName(methodDescriptor.getFullMethodName());
+            if (effectiveDeadline != null) {
+                start.setTimeoutMillis(effectiveDeadline.timeRemaining(TimeUnit.MILLISECONDS));
+            }
+            final String responseTopic = this.callOptions.getOption(OUT_TOPIC);
+            if (responseTopic != null && responseTopic.trim().length() != 0) {
+                //If the client specified a responseTopic then set that in the message to the server and
+                //close the call. The client should have already done a subscribe to receive the responses
+                //Note that deadlines will be ignored in this case (although they will be passed to the server)
+                log.debug("replyTo topic = " + responseTopic);
+                start.setOutTopic(responseTopic);
+                close(Status.OK);
+            }
+            //Add metadata to start
+            Set<String> keys = metadata.keys();
+            for (String key : keys) {
+                final String mvalue = metadata.get(Metadata.Key.of(key, Metadata.ASCII_STRING_MARSHALLER));
+                MetadataEntry entry = MetadataEntry.newBuilder()
+                        .setKey(key)
+                        .setValue(mvalue).build();
+                start.addMetadata(entry);
+            }
+
+            msgBuilder.setStart(start);
             try {
                 transport.send(methodDescriptor, msgBuilder);
             } catch (MessagingException ex) {
@@ -314,33 +328,6 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
             responseListener.onReady();
         }
 
-        private Header getHeader(){
-            Header.Builder header = Header.newBuilder();
-            header.setChannelId(channelId);
-            header.setMethodName(methodDescriptor.getFullMethodName());
-            if (effectiveDeadline != null) {
-                header.setTimeoutMillis(effectiveDeadline.timeRemaining(TimeUnit.MILLISECONDS));
-            }
-            final String responseTopic = this.callOptions.getOption(OUT_TOPIC);
-            if (responseTopic != null && responseTopic.trim().length() != 0) {
-                //If the client specified a responseTopic then set that in the message to the server and
-                //close the call. The client should have already done a subscribe to receive the responses
-                //Note that deadlines will be ignored in this case (although they will be passed to the server)
-                log.debug("replyTo topic = " + responseTopic);
-                header.setOutTopic(responseTopic);
-                close(Status.OK);
-            }
-            //Add metadata to header
-            Set<String> keys = metadata.keys();
-            for (String key : keys) {
-                final String mvalue = metadata.get(Metadata.Key.of(key, Metadata.ASCII_STRING_MARSHALLER));
-                MetadataEntry entry = MetadataEntry.newBuilder()
-                        .setKey(key)
-                        .setValue(mvalue).build();
-                header.addMetadata(entry);
-            }
-            return header.build();
-        }
 
         private final class ContextCancellationListener implements Context.CancellationListener {
             @Override

@@ -1,7 +1,6 @@
 package io.mgrpc;
 
 import com.google.protobuf.ByteString;
-import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.protobuf.MessageLite;
 import io.grpc.*;
 import io.grpc.protobuf.StatusProto;
@@ -55,8 +54,6 @@ public class MessageServer implements ServerMessageListener {
 
     private static final int DEFAULT_QUEUE_SIZE = 100;
     private final int queueSize;
-
-    private static final int SINGLE_MESSAGE_STREAM = 0;
 
     private  ScheduledFuture<?> clearRecentlyRemovedTimer;
 
@@ -171,11 +168,13 @@ public class MessageServer implements ServerMessageListener {
 
 
 
-    private void sendStatus(String channelId, String fullMethodName, String callId, int sequence, Status status) {
-        sendStatus(null, channelId, fullMethodName, callId, sequence, status);
+    private void sendStatus(String channelId, String fullMethodName,
+                            boolean serverSendsOneMessage, String callId, int sequence, Status status) {
+        sendStatus(null, channelId, fullMethodName, serverSendsOneMessage, callId, sequence, status);
     }
 
-    private void sendStatus(String topic, String channelId, String fullMethodName, String callId, int sequence, Status status) {
+    private void sendStatus(String topic, String channelId, String fullMethodName,
+                            boolean serverSendsOneMessage, String callId, int sequence, Status status) {
         final com.google.rpc.Status grpcStatus = StatusProto.fromStatusAndTrailers(status, null);
         RpcMessage message = RpcMessage.newBuilder()
                 .setStatus(grpcStatus)
@@ -188,7 +187,7 @@ public class MessageServer implements ServerMessageListener {
             log.debug("Sending completed: " + status);
         }
         try {
-            send(topic, channelId, callId, fullMethodName, message);
+            send(topic, channelId, callId, fullMethodName, serverSendsOneMessage, message);
         } catch (MessagingException e) {
             //We cannot do anything here to help the client because there is no way of sending a message so just log.
             log.error("Failed to send status", e);
@@ -196,7 +195,8 @@ public class MessageServer implements ServerMessageListener {
     }
 
 
-    private void send(String topic, String channelId, String callId, String fullMethodName, RpcMessage message) throws MessagingException {
+    private void send(String topic, String channelId, String callId, String fullMethodName,
+                      boolean serverSendsOneMessage, RpcMessage message) throws MessagingException {
 
         log.debug("Sending {} {} {} for {} on topic {} ",
                 new Object[]{message.getMessageCase(), message.getSequence(),
@@ -212,7 +212,7 @@ public class MessageServer implements ServerMessageListener {
                 throw new MessagingException("Provider does not support MessagingPublisher");
             }
         } else {
-            transport.send(channelId, callId, fullMethodName, message.toByteArray());
+            transport.send(channelId, fullMethodName, serverSendsOneMessage, message);
         }
     }
 
@@ -315,14 +315,9 @@ public class MessageServer implements ServerMessageListener {
                 }
 
                 //This is a start message so we need to construct the server call.
-                final Header header = message.getStart().getHeader();
-                if (header == null) {
-                    log.error("Received start message without a header");
-                    return;
-                }
+                final Start start = message.getStart();
 
-
-                String fullMethodName = header.getMethodName();
+                String fullMethodName = start.getMethodName();
                 //fullMethodName is e.g. "helloworld.ExampleHelloService/SayHello"
                 log.debug("fullMethodName for call " + callId + " is: " + fullMethodName);
                 ServerMethodDefinition<?, ?> serverMethodDefinition = registry.lookupMethod(fullMethodName);
@@ -332,18 +327,18 @@ public class MessageServer implements ServerMessageListener {
                     }
                 }
                 if (serverMethodDefinition == null) {
-                    sendStatus(header.getChannelId(), fullMethodName, callId, 1,
+                    sendStatus(start.getChannelId(), fullMethodName, false, callId, 1,
                             Status.UNIMPLEMENTED.withDescription("No method registered for " + fullMethodName));
                     return;
                 }
                 final ServerCallHandler<?, ?> serverCallHandler = serverMethodDefinition.getServerCallHandler();
 
                 serverCall = new MsgServerCall<>(serverMethodDefinition.getMethodDescriptor(),
-                        header, callId);
+                        start, callId);
 
                 //Extract the channelId from the header. It may be used later to find calls for a
                 //particular client that need to be cleaned up because the client has disconnected.
-                this.channelId = header.getChannelId();
+                this.channelId = start.getChannelId();
 
                 serverCall.start(serverCallHandler);
 
@@ -381,7 +376,7 @@ public class MessageServer implements ServerMessageListener {
         private class MsgServerCall<ReqT, RespT> extends ServerCall<ReqT, RespT> {
 
             final MethodDescriptor<ReqT, RespT> methodDescriptor;
-            final Header header;
+            final Start start;
             final String callId;
             int sequence = 0;
             private Listener listener;
@@ -391,16 +386,16 @@ public class MessageServer implements ServerMessageListener {
             private Context.CancellableContext cancellableContext = null;
             private Context context = null;
 
-            MsgServerCall(MethodDescriptor<ReqT, RespT> methodDescriptor, Header header, String callId) {
+            MsgServerCall(MethodDescriptor<ReqT, RespT> methodDescriptor, Start start, String callId) {
                 this.methodDescriptor = methodDescriptor;
-                this.header = header;
+                this.start = start;
                 this.callId = callId;
             }
 
             public void start(ServerCallHandler<?, ?> serverCallHandler) {
                 log.debug("Starting call " + callId + " to " + this.methodDescriptor.getFullMethodName());
-                if (header.getTimeoutMillis() > 0) {
-                    Deadline deadline = Deadline.after(header.getTimeoutMillis(), TimeUnit.MILLISECONDS);
+                if (start.getTimeoutMillis() > 0) {
+                    Deadline deadline = Deadline.after(start.getTimeoutMillis(), TimeUnit.MILLISECONDS);
                     this.deadlineCancellationFuture = DeadlineTimer.start(deadline, (String deadlineMessage) -> {
                         cancel();
                         MgMessageHandler.this.remove();
@@ -413,7 +408,7 @@ public class MessageServer implements ServerMessageListener {
                 context = cancellableContext.withValue(akey, 99);
 
                 Metadata metadata = new Metadata();
-                final List<MetadataEntry> entries = header.getMetadataList();
+                final List<MetadataEntry> entries = start.getMetadataList();
                 for (MetadataEntry entry : entries) {
                     final Metadata.Key<String> key = Metadata.Key.of(entry.getKey(), Metadata.ASCII_STRING_MARSHALLER);
                     metadata.put(key, entry.getValue());
@@ -484,6 +479,8 @@ public class MessageServer implements ServerMessageListener {
             public void sendMessage(RespT message) {
                 //Send the response up to the client
 
+                sequence++;
+
                 ByteString valueByteString;
                 if (message instanceof MessageLite) {
                     valueByteString = ((MessageLite) message).toByteString();
@@ -492,27 +489,14 @@ public class MessageServer implements ServerMessageListener {
                     valueByteString = ByteString.copyFrom((byte[]) message);
                 }
 
-                sequence++;
-                int seq;
-                if (methodDescriptor.getType().serverSendsOneMessage()) {
-                    //If there is only one message in the stream set seq to SINGLE_MESSAGE_STREAM
-                    //The client will recognise this and close the call immediately after receiving the single message
-                    //This speeds up the client response because it does not have to wait for a second completed message
-                    //and it saves bandwidth/costs because the server does not have to send a second mqtt message.
-                    seq = SINGLE_MESSAGE_STREAM;
-                } else {
-                    seq = sequence;
-                }
-
-                Value value = Value.newBuilder()
-                        .setContents(valueByteString).build();
                 RpcMessage rpcMessage = RpcMessage.newBuilder()
-                        .setValue(value)
+                        .setValue(Value.newBuilder().setContents(valueByteString))
                         .setCallId(callId)
-                        .setSequence(seq).build();
+                        .setSequence(sequence).build();
 
                 try {
-                    send(header.getOutTopic(), channelId, callId, methodDescriptor.getFullMethodName(), rpcMessage);
+                    send(start.getOutTopic(), channelId, callId, methodDescriptor.getFullMethodName(),
+                            methodDescriptor.getType().serverSendsOneMessage(), rpcMessage);
                 } catch (MessagingException e) {
                     throw new StatusRuntimeException(Status.UNAVAILABLE);//.withCause(e));
                 }
@@ -527,20 +511,9 @@ public class MessageServer implements ServerMessageListener {
             @Override
             public void close(Status status, Metadata trailers) {
                 //close will be called when the service implementation calls onCompleted (among other things)
-                //The service implementation will call onCompleted (and hence close()) even if it is a unary call
-                //If the call is unary (serverSendsOneMessage) then  in this case we do not want to send an extra
-                //unnecessary mqtt message to indicate completion provided that the server did already
-                //send a value message (i.e. the service implementation did not just call onCompleted() without
-                //first calling onNext() for some reason) and provided that this close is not being called as a result
-                //of the client calling onError. This is ok because the client channel will have
-                //closed the call automatically because the first message the server sent will have
-                //sequence==SINGLE_MESSAGE_STREAM which the client will check for.
-                if (methodDescriptor.getType().serverSendsOneMessage() && status.isOk() && sequence > 0) {
-                    ;//It's clearer to have empty statement here than express the if conditions negatively
-                } else {
-                    sequence++;
-                    sendStatus(header.getOutTopic(), channelId, methodDescriptor.getFullMethodName(), callId, sequence, status);
-                }
+                sequence++;
+                sendStatus(start.getOutTopic(), channelId, methodDescriptor.getFullMethodName(),
+                        methodDescriptor.getType().serverSendsOneMessage(), callId, sequence, status);
                 cancelTimeouts();
                 MgMessageHandler.this.remove();
                 transport.onCallClose(channelId, callId);

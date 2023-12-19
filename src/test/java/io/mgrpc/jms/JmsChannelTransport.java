@@ -1,5 +1,6 @@
 package io.mgrpc.jms;
 
+import com.google.protobuf.InvalidProtocolBufferException;
 import io.grpc.CallOptions;
 import io.grpc.MethodDescriptor;
 import io.grpc.Status;
@@ -50,6 +51,8 @@ import java.util.concurrent.*;
 public class JmsChannelTransport implements ChannelMessageTransport {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
+
+    private static final com.google.rpc.Status GOOGLE_RPC_OK_STATUS = io.grpc.protobuf.StatusProto.fromStatusAndTrailers(Status.OK, null);
 
     private final Connection client;
     private Session session;
@@ -109,9 +112,13 @@ public class JmsChannelTransport implements ChannelMessageTransport {
             MessageConsumer consumer = session.createConsumer(replyQueue);
             consumer.setMessageListener(message -> {
                 try {
-                    channel.onMessage(JmsUtils.byteArrayFromMessage(session, message));
-                } catch (Exception ex) {
-                    log.error("Failed to process reply", ex);
+                    final RpcBatch rpcBatch = RpcBatch.parseFrom(JmsUtils.byteArrayFromMessage(session, message));
+                    for (RpcMessage rpcMessage : rpcBatch.getMessagesList()) {
+                        channel.onMessage(rpcMessage);
+                    }
+                } catch (Exception e) {
+                    log.error("Failed to parse RpcMessage", e);
+                    return;
                 }
             });
 
@@ -184,6 +191,8 @@ public class JmsChannelTransport implements ChannelMessageTransport {
     @Override
     public void onCallStart(MethodDescriptor methodDescriptor, CallOptions callOptions, String callId) {
 
+        if(true)return;
+
         if (!methodDescriptor.getType().clientSendsOneMessage()
                 || !methodDescriptor.getType().serverSendsOneMessage()) {
             //This method has input or output streams (it's not just request response)
@@ -208,9 +217,13 @@ public class JmsChannelTransport implements ChannelMessageTransport {
                     //Listen for messages on the specific queue
                     callQueues.consumer.setMessageListener(message -> {
                         try {
-                            channel.onMessage(JmsUtils.byteArrayFromMessage(session, message));
-                        } catch (Exception ex) {
-                            log.error("Failed to process reply", ex);
+                            final RpcBatch rpcBatch = RpcBatch.parseFrom(JmsUtils.byteArrayFromMessage(session, message));
+                            for (RpcMessage rpcMessage : rpcBatch.getMessagesList()) {
+                                channel.onMessage(rpcMessage);
+                            }
+                        } catch (Exception e) {
+                            log.error("Failed to parse RpcMessage", e);
+                            return;
                         }
                     });
                 }
@@ -272,11 +285,10 @@ public class JmsChannelTransport implements ChannelMessageTransport {
             }
             batchBuilder.addMessages(startBuilder);
             batchBuilder.addMessages(messageBuilder);
-            final com.google.rpc.Status okStatus = io.grpc.protobuf.StatusProto.fromStatusAndTrailers(io.grpc.Status.OK, null);
             final RpcMessage.Builder statusBuilder = RpcMessage.newBuilder()
                     .setCallId(messageBuilder.getCallId())
                     .setSequence(messageBuilder.getSequence() + 1)
-                    .setStatus(okStatus);
+                    .setStatus(GOOGLE_RPC_OK_STATUS);
             batchBuilder.addMessages(statusBuilder);
         } else {
             batchBuilder.addMessages(messageBuilder);

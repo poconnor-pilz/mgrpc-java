@@ -5,7 +5,6 @@ import io.grpc.Status;
 import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.protobuf.StatusProto;
-import io.mgrpc.Header;
 import io.mgrpc.RpcMessage;
 import io.mgrpc.Start;
 import io.mgrpc.Value;
@@ -27,14 +26,10 @@ public class RpcMessageBuilder {
     }
 
     public static RpcMessage makeStart(String methodName, String callId, int sequence, String replyTo, MessageLite payload){
-        Header header = Header.newBuilder()
+        Start start = Start.newBuilder()
                 .setOutTopic(replyTo)
                 .setMethodName(methodName)
                 .build();
-        Value value = Value.newBuilder().setContents(payload.toByteString()).build();
-        Start start = Start.newBuilder()
-                .setHeader(header)
-                .setValue(value).build();
         RpcMessage rpcMessage = RpcMessage.newBuilder()
                 .setCallId(callId)
                 .setSequence(sequence)

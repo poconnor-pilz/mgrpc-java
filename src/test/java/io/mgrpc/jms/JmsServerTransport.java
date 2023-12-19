@@ -2,6 +2,7 @@ package io.mgrpc.jms;
 
 import com.google.protobuf.Empty;
 import com.google.protobuf.InvalidProtocolBufferException;
+import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
 import io.mgrpc.messaging.MessagingException;
@@ -20,6 +21,8 @@ import java.util.concurrent.Executors;
 public class JmsServerTransport implements ServerMessageTransport {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
+
+    private static final com.google.rpc.Status GOOGLE_RPC_OK_STATUS = io.grpc.protobuf.StatusProto.fromStatusAndTrailers(Status.OK, null);
 
     private final Connection client;
 
@@ -232,11 +235,12 @@ public class JmsServerTransport implements ServerMessageTransport {
 
 
     @Override
-    public void send(String channelId, String callId,  String methodName, byte[] buffer) throws MessagingException {
+    public void send(String channelId, String methodName,
+                     boolean serverSendsOneMessage, RpcMessage message) throws MessagingException {
 
         try {
             MessageProducer producer = null;
-            final JmsCallQueues callQueues = getCallQueues(channelId, callId);
+            final JmsCallQueues callQueues = getCallQueues(channelId, message.getCallId());
             if(callQueues!=null && callQueues.producer!=null){
                 //There is a specific queue for this call
                 producer = callQueues.producer;
@@ -249,8 +253,31 @@ public class JmsServerTransport implements ServerMessageTransport {
                     channelProducers.put(channelId, producer);
                 }
             }
-            log.debug("Sending response for call " + callId + " on " + producer.getDestination().toString());
-            producer.send(JmsUtils.messageFromByteArray(session, buffer));
+            log.debug("Sending response for call " + message.getCallId() + " on " + producer.getDestination().toString());
+            final RpcBatch.Builder batchBuilder = RpcBatch.newBuilder();
+            if (serverSendsOneMessage) {
+                if (message.hasValue()) {
+                    //Send the value and the status as on batch message to the broker
+                    batchBuilder.addMessages(message);
+                    final RpcMessage.Builder statusBuilder = RpcMessage.newBuilder()
+                            .setCallId(message.getCallId())
+                            .setSequence(message.getSequence() + 1)
+                            .setStatus(GOOGLE_RPC_OK_STATUS);
+                    batchBuilder.addMessages(statusBuilder);
+                } else {
+                    if (message.getStatus().getCode() != Status.OK.getCode().value()) {
+                        batchBuilder.addMessages(message);
+                    } else {
+                        //Ignore non error status values (non cancel values) as the status will already have been sent automatically above
+                        return;
+                    }
+                }
+            } else {
+                batchBuilder.addMessages(message);
+            }
+
+            producer.send(JmsUtils.messageFromByteArray(session, batchBuilder.build().toByteArray()));
+
         } catch (JMSException e) {
             log.error("Failed to send jms message", e);
             throw new MessagingException(e);

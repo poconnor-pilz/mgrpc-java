@@ -4,6 +4,7 @@ import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.protobuf.Parser;
 import io.grpc.CallOptions;
 import io.grpc.MethodDescriptor;
+import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
 import io.mgrpc.messaging.ChannelMessageListener;
@@ -67,6 +68,8 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
     private final MqttAsyncClient client;
     private final static long SUBSCRIBE_TIMEOUT_MILLIS = 5000;
 
+    private static final com.google.rpc.Status GOOGLE_RPC_OK_STATUS = io.grpc.protobuf.StatusProto.fromStatusAndTrailers(Status.OK, null);
+
     private final ServerTopics serverTopics;
 
     private CountDownLatch serverConnectedLatch;
@@ -122,7 +125,15 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
             final String replyTopicPrefix = serverTopics.servicesOutForChannel(this.channel.getChannelId()) + "/#";
             log.debug("Subscribing for responses on: " + replyTopicPrefix);
             client.subscribe(replyTopicPrefix, 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
-                channel.onMessage(mqttMessage.getPayload());
+                try {
+                    final RpcBatch rpcBatch = RpcBatch.parseFrom(mqttMessage.getPayload());
+                    for (RpcMessage rpcMessage : rpcBatch.getMessagesList()) {
+                        channel.onMessage(rpcMessage);
+                    }
+                } catch (InvalidProtocolBufferException e) {
+                    log.error("Failed to parse RpcMessage", e);
+                    return;
+                }
             })).waitForCompletion(SUBSCRIBE_TIMEOUT_MILLIS);
 
             client.subscribe(serverTopics.status, 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
@@ -205,23 +216,27 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
                 cachedStartMessages.put(messageBuilder.getCallId(), messageBuilder);
                 return;
             }
-            if(messageBuilder.hasStatus()){
-                //Ignore status values as the status will already have been sent automatically below
-                return;
+            if (messageBuilder.hasStatus()) {
+                if (messageBuilder.getStatus().getCode() != Status.OK.getCode().value()) {
+                    batchBuilder.addMessages(messageBuilder);
+                } else {
+                    //Ignore non error status values (non cancel values) as the status will already have been sent automatically below
+                    return;
+                }
+            } else {
+                final RpcMessage.Builder startBuilder = cachedStartMessages.remove(messageBuilder.getCallId());
+                if (startBuilder == null) {
+                    log.error("Request received but no cached start message"); //should never happen
+                    return;
+                }
+                batchBuilder.addMessages(startBuilder);
+                batchBuilder.addMessages(messageBuilder);
+                final RpcMessage.Builder statusBuilder = RpcMessage.newBuilder()
+                        .setCallId(messageBuilder.getCallId())
+                        .setSequence(messageBuilder.getSequence() + 1)
+                        .setStatus(GOOGLE_RPC_OK_STATUS);
+                batchBuilder.addMessages(statusBuilder);
             }
-            final RpcMessage.Builder startBuilder = cachedStartMessages.remove(messageBuilder.getCallId());
-            if (startBuilder == null) {
-                log.error("Request received but no cached start message"); //should never happen
-                return;
-            }
-            batchBuilder.addMessages(startBuilder);
-            batchBuilder.addMessages(messageBuilder);
-            final com.google.rpc.Status okStatus = io.grpc.protobuf.StatusProto.fromStatusAndTrailers(io.grpc.Status.OK, null);
-            final RpcMessage.Builder statusBuilder = RpcMessage.newBuilder()
-                    .setCallId(messageBuilder.getCallId())
-                    .setSequence(messageBuilder.getSequence() + 1)
-                    .setStatus(okStatus);
-            batchBuilder.addMessages(statusBuilder);
         } else {
             batchBuilder.addMessages(messageBuilder);
         }

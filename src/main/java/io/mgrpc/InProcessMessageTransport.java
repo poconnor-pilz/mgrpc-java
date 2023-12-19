@@ -73,14 +73,14 @@ public class InProcessMessageTransport {
         }
 
         @Override
-        public void send(String channelId, String callId, String methodName, byte[] buffer) throws MessagingException {
+        public void send(String channelId, String methodName, boolean serverSendsOneMessage, RpcMessage message) throws MessagingException {
             final ChannelMessageListener channel = channelsById.get(channelId);
             if(channel == null){
                 String err = "Channel " + channelId +  " does not exist";
                 log.error(err);
                 throw new MessagingException(err);
             }
-            channel.onMessage(buffer);
+            channel.onMessage(message);
         }
 
         @Override

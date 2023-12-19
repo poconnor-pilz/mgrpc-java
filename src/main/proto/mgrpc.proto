@@ -23,20 +23,17 @@ message  RpcMessage{
   //If there is potentially more than one message in a stream then the first message in a stream should
   //have a sequence number 1 and each subsequent message in that stream (including the completed message)
   //should increase the number by 1
-  //If there is only one non-error message in a stream then that message should have a sequence number 0
-  //This indicates that there is only one message in the stream and that it terminates the stream
-  //(For request/response the client sends one message with sequence=0 and the server sends one message with sequence=0)
   uint32 sequence = 2;
 
   //A message is either Start, Value or Status (where Start contains a Value for a unary call (single request/response))
   //Examples:
-  //Request response:
-  //    client stream:   start with non-null value.
-  //    server stream:   value or status.
-  //A client stream with 1 value:      start, value, status.
+  //A client stream with 1 value:      start, value, status(ok).
   //A client stream with 2 values:     start, value, value, status.
   //A server stream with 1 value:      value, status.
   //A client stream with two values and a cancellation:    start, value, value, status(cancelled).
+  //Request response:
+  //    client stream:   start, value, status(ok).
+  //    server stream:   value and/or status.
   oneof message {
     Start start = 3;
     Value value = 4;
@@ -47,21 +44,6 @@ message  RpcMessage{
 
 //The first message in a client stream must be a Start message
 message Start{
-  Header header = 1;
-  //For a unary call the value is included in the start message to minimise the amount of messages sent.
-  //For all other calls the value will be null.
-  Value value = 2;
-}
-
-//Any message that is not a Status or the first message in a client stream is a Value
-message Value{
-  //This the message/protobuf that is sent to/from the service method call as part of its request/response stream
-  bytes contents = 1;
-
-}
-
-message Header{
-
   //A unique id corresponding to the Channel on the client side. Used to identify ongoing calls that must be
   //cleaned up when a client is disconnected or closed. See comments about ConnectionStatus below
   string channelId = 1;
@@ -85,7 +67,12 @@ message Header{
   //Topic or queue that should be used for the output stream for this call
   //Will not be set for a unary call and may not be set depending on the transport strategy
   string outTopic = 6;
+}
 
+//Any message that is not a Status or the first message in a client stream is a Value
+message Value{
+  //This the message/protobuf that is sent to/from the service method call as part of its request/response stream
+  bytes contents = 1;
 }
 
 message MetadataEntry{
