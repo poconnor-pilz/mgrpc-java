@@ -7,7 +7,6 @@ import io.grpc.protobuf.StatusProto;
 import io.mgrpc.messaging.MessagingException;
 import io.mgrpc.messaging.ServerMessageListener;
 import io.mgrpc.messaging.ServerMessageTransport;
-import io.mgrpc.messaging.pubsub.MessagePublisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -187,7 +186,7 @@ public class MessageServer implements ServerMessageListener {
             log.debug("Sending completed: " + status);
         }
         try {
-            send(topic, channelId, callId, fullMethodName, serverSendsOneMessage, message);
+            send(topic, channelId, message);
         } catch (MessagingException e) {
             //We cannot do anything here to help the client because there is no way of sending a message so just log.
             log.error("Failed to send status", e);
@@ -195,25 +194,13 @@ public class MessageServer implements ServerMessageListener {
     }
 
 
-    private void send(String topic, String channelId, String callId, String fullMethodName,
-                      boolean serverSendsOneMessage, RpcMessage message) throws MessagingException {
+    private void send(String topic, String fullMethodName, RpcMessage message) throws MessagingException {
 
-        log.debug("Sending {} {} {} for {} on topic {} ",
+        log.debug("Sending {} {} {} for {} ",
                 new Object[]{message.getMessageCase(), message.getSequence(),
-                        message.getCallId(), fullMethodName, topic});
+                        message.getCallId(), fullMethodName});
 
-        if (topic != null && !topic.trim().isEmpty()) {
-            //The client has overridden the replyTo
-            if (transport instanceof MessagePublisher) {
-                MessagePublisher publisher = (MessagePublisher) transport;
-                publisher.publish(topic, message.toByteArray());
-            } else {
-                //The client tried to override topic but provider does not support publishing
-                throw new MessagingException("Provider does not support MessagingPublisher");
-            }
-        } else {
-            transport.send(channelId, fullMethodName, serverSendsOneMessage, message);
-        }
+        transport.send(message);
     }
 
     public Stats getStats() {
@@ -427,7 +414,7 @@ public class MessageServer implements ServerMessageListener {
             @Override
             public void request(int numMessages) {
                 log.debug("request(" + numMessages + ")");
-                transport.request(channelId, callId, numMessages);
+                transport.request(callId, numMessages);
             }
 
             @Override
@@ -495,9 +482,9 @@ public class MessageServer implements ServerMessageListener {
                         .setSequence(sequence).build();
 
                 try {
-                    send(start.getOutTopic(), channelId, callId, methodDescriptor.getFullMethodName(),
-                            methodDescriptor.getType().serverSendsOneMessage(), rpcMessage);
+                    send(start.getOutTopic(), channelId, rpcMessage);
                 } catch (MessagingException e) {
+                    log.error("Failed to send", e);
                     throw new StatusRuntimeException(Status.UNAVAILABLE);//.withCause(e));
                 }
             }
@@ -516,7 +503,7 @@ public class MessageServer implements ServerMessageListener {
                         methodDescriptor.getType().serverSendsOneMessage(), callId, sequence, status);
                 cancelTimeouts();
                 MgMessageHandler.this.remove();
-                transport.onCallClose(channelId, callId);
+                transport.onCallClosed(callId);
             }
 
             public void cancel() {

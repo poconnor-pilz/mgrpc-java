@@ -2,8 +2,6 @@ package io.mgrpc.mqtt;
 
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.protobuf.Parser;
-import io.grpc.CallOptions;
-import io.grpc.MethodDescriptor;
 import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
@@ -70,6 +68,8 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
 
     private static final com.google.rpc.Status GOOGLE_RPC_OK_STATUS = io.grpc.protobuf.StatusProto.fromStatusAndTrailers(Status.OK, null);
 
+    private Map<String, RpcMessage.Builder> startMessages = new ConcurrentHashMap<>();
+
     private final ServerTopics serverTopics;
 
     private CountDownLatch serverConnectedLatch;
@@ -77,11 +77,8 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
 
     private ChannelMessageListener channel;
 
-    private static volatile Executor executorSingleton;
-
     private final Map<String, List<StreamObserver>> subscribersByTopic = new ConcurrentHashMap<>();
 
-    private final Map<String, RpcMessage.Builder> cachedStartMessages = new ConcurrentHashMap<>();
 
     public static class Stats {
         private final int subscribers;
@@ -96,6 +93,22 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
 
     }
 
+    private static volatile Executor executorSingleton;
+    @Override
+    public Executor getExecutor() {
+        return getExecutorInstance();
+    }
+    private static Executor getExecutorInstance() {
+        if (executorSingleton == null) {
+            synchronized (MessageServer.class) {
+                if (executorSingleton == null) {
+                    //TODO: What kind of thread pool should we use here. It should probably be limited to a fixed maximum or maybe it should be passed as a constructor parameter?
+                    executorSingleton = Executors.newCachedThreadPool();
+                }
+            }
+        }
+        return executorSingleton;
+    }
 
     /**
      * @param client
@@ -115,7 +128,7 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
 
 
     @Override
-    public void start(MessageChannel channel) throws MessagingException {
+    public void start(ChannelMessageListener channel) throws MessagingException {
 
         if (this.channel != null) {
             throw new MessagingException("Listener already connected");
@@ -126,8 +139,8 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
             log.debug("Subscribing for responses on: " + replyTopicPrefix);
             client.subscribe(replyTopicPrefix, 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
                 try {
-                    final RpcBatch rpcBatch = RpcBatch.parseFrom(mqttMessage.getPayload());
-                    for (RpcMessage rpcMessage : rpcBatch.getMessagesList()) {
+                    final RpcSet rpcSet = RpcSet.parseFrom(mqttMessage.getPayload());
+                    for (RpcMessage rpcMessage : rpcSet.getMessagesList()) {
                         channel.onMessage(rpcMessage);
                     }
                 } catch (InvalidProtocolBufferException e) {
@@ -159,12 +172,12 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
     }
 
     @Override
-    public void onCallStart(MethodDescriptor methodDescriptor, CallOptions callOptions, String callId) {
+    public void onCallClosed(String callId) {
+        startMessages.remove(callId);
     }
 
     @Override
-    public void onCallClose(String callId) {
-    }
+    public void request(String callId, int numMessages){}
 
     @Override
     public void close() {
@@ -183,37 +196,30 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
         }
     }
 
-
     @Override
-    public Executor getExecutor() {
-        return getExecutorInstance();
-    }
+    public void send(RpcMessage.Builder messageBuilder) throws MessagingException {
 
-
-    private static Executor getExecutorInstance() {
-        if (executorSingleton == null) {
-            synchronized (MessageServer.class) {
-                if (executorSingleton == null) {
-                    //TODO: What kind of thread pool should we use here. It should probably be limited to a fixed maximum or maybe it should be passed as a constructor parameter?
-                    executorSingleton = Executors.newCachedThreadPool();
+        RpcMessage.Builder start = startMessages.get(messageBuilder.getCallId());
+        if(start == null){
+            if(messageBuilder.hasStart()){
+                start = startMessages.put(messageBuilder.getCallId(), messageBuilder);
+            } else {
+                if(messageBuilder.hasStatus() && (messageBuilder.getStatus().getCode() == Status.CANCELLED.getCode().value())){
+                    log.warn("Call cancelled before start. An exception may have occurred");
+                    return;
+                } else {
+                    throw new RuntimeException("First message sent to transport must be a start message. Call " + messageBuilder.getCallId());
                 }
             }
         }
-        return executorSingleton;
-    }
 
+        final RpcSet.Builder batchBuilder = RpcSet.newBuilder();
 
-    @Override
-    public void send(MethodDescriptor methodDescriptor, RpcMessage.Builder messageBuilder) throws MessagingException {
-
-        final RpcBatch.Builder batchBuilder = RpcBatch.newBuilder();
-
-        if (methodDescriptor.getType().clientSendsOneMessage()) {
+        if (MethodTypeConverter.fromStart(start).clientSendsOneMessage()) {
             //If clientSendsOneMessage we only want to send one broker message containing
             //start, request, status.
             if (messageBuilder.hasStart()) {
-                //Cache the start message here and wait for the request
-                cachedStartMessages.put(messageBuilder.getCallId(), messageBuilder);
+                //Wait for the request
                 return;
             }
             if (messageBuilder.hasStatus()) {
@@ -224,12 +230,7 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
                     return;
                 }
             } else {
-                final RpcMessage.Builder startBuilder = cachedStartMessages.remove(messageBuilder.getCallId());
-                if (startBuilder == null) {
-                    log.error("Request received but no cached start message"); //should never happen
-                    return;
-                }
-                batchBuilder.addMessages(startBuilder);
+                batchBuilder.addMessages(start);
                 batchBuilder.addMessages(messageBuilder);
                 final RpcMessage.Builder statusBuilder = RpcMessage.newBuilder()
                         .setCallId(messageBuilder.getCallId())
@@ -258,7 +259,7 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
                 throw new MessagingException("Server is not connected");
             }
         }
-        final String topic = serverTopics.methodIn(methodDescriptor.getFullMethodName());
+        final String topic = serverTopics.methodIn(start.getStart().getMethodName());
         try {
             client.publish(topic, new MqttMessage(buffer));
         } catch (MqttException e) {

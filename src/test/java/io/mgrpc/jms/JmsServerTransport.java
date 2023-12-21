@@ -1,9 +1,7 @@
 package io.mgrpc.jms;
 
-import com.google.protobuf.Empty;
 import com.google.protobuf.InvalidProtocolBufferException;
 import io.grpc.Status;
-import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
 import io.mgrpc.messaging.MessagingException;
 import io.mgrpc.messaging.ServerMessageListener;
@@ -33,13 +31,33 @@ public class JmsServerTransport implements ServerMessageTransport {
 
     private final Map<String, MessageProducer> channelProducers = new ConcurrentHashMap<>();
 
+    private Map<String, RpcMessage> startMessages = new ConcurrentHashMap<>();
+
     private Map<String, JmsCallQueues> callQueuesMap = new ConcurrentHashMap<>();
 
     private final ServerTopics serverTopics;
 
     private static volatile Executor executorSingleton;
 
-    private MessageServer server;
+    @Override
+    public Executor getExecutor() {
+        return getExecutorInstance();
+    }
+
+    private static Executor getExecutorInstance() {
+        if (executorSingleton == null) {
+            synchronized (MessageServer.class) {
+                if (executorSingleton == null) {
+                    //TODO: What kind of thread pool should we use here. It should probably be limited to a fixed maximum or maybe it should be passed as a constructor parameter?
+                    executorSingleton = Executors.newCachedThreadPool();
+                }
+            }
+        }
+        return executorSingleton;
+    }
+
+
+    private ServerMessageListener server;
 
     /**
      * @param client
@@ -55,7 +73,7 @@ public class JmsServerTransport implements ServerMessageTransport {
 
 
     @Override
-    public void start(MessageServer server) throws MessagingException {
+    public void start(ServerMessageListener server) throws MessagingException {
         if (this.server != null) {
             throw new MessagingException("Listener already connected");
         }
@@ -72,8 +90,34 @@ public class JmsServerTransport implements ServerMessageTransport {
                 try {
                     final byte[] bytes = JmsUtils.byteArrayFromMessage(session, message);
                     try {
-                        final RpcBatch rpcBatch = RpcBatch.parseFrom(bytes);
-                        for(RpcMessage rpcMessage: rpcBatch.getMessagesList()){
+                        final RpcSet rpcSet = RpcSet.parseFrom(bytes);
+                        for (RpcMessage rpcMessage : rpcSet.getMessagesList()) {
+                            if (rpcMessage.hasStart()) {
+                                startMessages.put(rpcMessage.getCallId(), rpcMessage);
+                                JmsCallQueues callQueues = new JmsCallQueues();
+                                try {
+                                    final Start start = rpcMessage.getStart();
+                                    if (start.getInTopic() != null && !start.getInTopic().isEmpty()) {
+                                        //This call has a specific queue for the input stream so we need to subscribe to it
+                                        log.debug("Subscribing for input stream for call " + rpcMessage.getCallId() + " on topic " + start.getInTopic());
+                                        String inQ = serverTopics.make(start.getInTopic());
+                                        callQueues.consumerQueue = session.createQueue(inQ);
+                                        callQueues.consumer = session.createConsumer(callQueues.consumerQueue);
+                                        callQueuesMap.put(rpcMessage.getCallId(), callQueues);
+                                    }
+                                    if (start.getOutTopic() != null && !start.getOutTopic().isEmpty()) {
+                                        log.debug("Will send output stream for call " + rpcMessage.getCallId() + " to topic " + start.getOutTopic());
+                                        String outQ = serverTopics.make(start.getOutTopic());
+                                        callQueues.producerQueue = session.createQueue(outQ);
+                                        callQueues.producer = session.createProducer(callQueues.producerQueue);
+                                        callQueuesMap.put(rpcMessage.getCallId(), callQueues);
+                                    }
+                                } catch (JMSException ex) {
+                                    log.error("Failed to set up dedicated queue(s) for call " + rpcMessage.getCallId());
+                                    return;
+                                }
+
+                            }
                             server.onMessage(rpcMessage);
                         }
                     } catch (InvalidProtocolBufferException e) {
@@ -113,45 +157,7 @@ public class JmsServerTransport implements ServerMessageTransport {
                 }
             });
 
-//            server.addService(new CallTopicsServiceGrpc.CallTopicsServiceImplBase() {
-//                @Override
-//                public void setCallTopics(CallTopics request, StreamObserver<Empty> responseObserver) {
-//                    JmsCallQueues callQueues = new JmsCallQueues();
-//                    callQueuesMap.put(request.getChannelId() + request.getCallId(), callQueues);
-//                    try {
-//                        if (request.getTopicIn() != null && !request.getTopicIn().isEmpty()) {
-//                            log.debug("Subscribing for input stream for call " + request.getCallId() + " on topic " + request.getTopicIn());
-//                            String inQ = serverTopics.make(request.getTopicIn());
-//                            callQueues.consumerQueue = session.createQueue(inQ);
-//                            callQueues.consumer = session.createConsumer(callQueues.consumerQueue);
-//                            //Pull one message from the input queue. Further messages will be pulled in request()
-//                            getExecutor().execute(()->{
-//                                try {
-//                                    final Message message = callQueues.consumer.receive();
-//                                    server.onMessage(JmsUtils.byteArrayFromMessage(session, message));
-//                                } catch (Exception ex){
-//                                    log.error("Error processing start message for queued call");
-//                                }
-//                            });
-//                        }
-//                        if (request.getTopicOut() != null && !request.getTopicOut().isEmpty()) {
-//                            log.debug("Will send output stream for call " + request.getCallId() + " to topic " + request.getTopicOut());
-//                            String outQ = serverTopics.make(request.getTopicOut());
-//                            callQueues.producerQueue = session.createQueue(outQ);
-//                            callQueues.producer = session.createProducer(callQueues.producerQueue);
-//                        }
-//                    } catch (JMSException ex) {
-//                        responseObserver.onError(ex);
-//                        return;
-//                    }
-//                    responseObserver.onNext(Empty.newBuilder().build());
-//                    responseObserver.onCompleted();
-//                }
-//            });
-
-
             notifyConnected(true);
-
 
         } catch (JMSException ex) {
             throw new MessagingException(ex);
@@ -170,36 +176,41 @@ public class JmsServerTransport implements ServerMessageTransport {
 
 
     @Override
-    public void onCallClose(String channelId, String callId) {
-        final JmsCallQueues callQueues = getCallQueues(channelId, callId);
-        try{
-            if(callQueues != null){
+    public void onCallClosed(String callId) {
+        startMessages.remove(callId);
+        final JmsCallQueues callQueues = callQueuesMap.get(callId);
+        try {
+            if (callQueues != null) {
                 log.debug("Transport releasing resources for call " + callId);
-                if(callQueues.producer != null){
+                if (callQueues.producer != null) {
                     callQueues.producer.close();
                 }
-                if(callQueues.consumer != null){
+                if (callQueues.consumer != null) {
                     callQueues.consumer.close();
                 }
             }
-        } catch (Exception ex){
+        } catch (Exception ex) {
             log.error("Exception closing call queues", ex);
         }
     }
 
     @Override
-    public void request(String channelId, String callId, int numMessages) {
-        final JmsCallQueues callQueues = getCallQueues(channelId, callId);
-        try{
-            if(callQueues != null){
-                if(callQueues.consumer != null){
-                    for(int i=0; i < numMessages; i++){
+    public void request(String callId, int numMessages) {
+        final JmsCallQueues callQueues = callQueuesMap.get(callId);
+        if (callQueues != null) {
+            if (callQueues.consumer != null) {
+                getExecutor().execute(() -> {
+                    //This will block until a message is available so we need to run it on a thread
+                    //to prevent the channel from blocking
+                    //We ignore numMessages and just get the next message from the queue
+                    //After it is processed the service will call request() again.
+                    try {
                         final Message message = callQueues.consumer.receive();
-                        if(message != null) {
+                        if (message != null) {
                             final byte[] bytes = JmsUtils.byteArrayFromMessage(session, message);
                             try {
-                                final RpcBatch rpcBatch = RpcBatch.parseFrom(bytes);
-                                for(RpcMessage rpcMessage: rpcBatch.getMessagesList()){
+                                final RpcSet rpcSet = RpcSet.parseFrom(bytes);
+                                for (RpcMessage rpcMessage : rpcSet.getMessagesList()) {
                                     server.onMessage(rpcMessage);
                                 }
                             } catch (InvalidProtocolBufferException e) {
@@ -207,44 +218,33 @@ public class JmsServerTransport implements ServerMessageTransport {
                                 return;
                             }
                         }
+                    } catch (Exception ex) {
+                        log.error("Exception processing or waiting for message", ex);
                     }
-                }
-            }
-        } catch (Exception ex){
-            log.error("Exception closing call queues", ex);
-        }
-    }
-
-    @Override
-    public Executor getExecutor() {
-        return getExecutorInstance();
-    }
-
-
-    private static Executor getExecutorInstance() {
-        if (executorSingleton == null) {
-            synchronized (MessageServer.class) {
-                if (executorSingleton == null) {
-                    //TODO: What kind of thread pool should we use here. It should probably be limited to a fixed maximum or maybe it should be passed as a constructor parameter?
-                    executorSingleton = Executors.newCachedThreadPool();
-                }
+                });
             }
         }
-        return executorSingleton;
     }
 
 
     @Override
-    public void send(String channelId, String methodName,
-                     boolean serverSendsOneMessage, RpcMessage message) throws MessagingException {
+    public void send(RpcMessage message) throws MessagingException {
+
+        final RpcMessage startMessage = startMessages.get(message.getCallId());
+        if (startMessage == null) {
+            String err = "No cached start message for call " + message.getCallId();
+            log.error(err);
+            throw new MessagingException(err);
+        }
 
         try {
             MessageProducer producer = null;
-            final JmsCallQueues callQueues = getCallQueues(channelId, message.getCallId());
-            if(callQueues!=null && callQueues.producer!=null){
+            final JmsCallQueues callQueues = callQueuesMap.get(message.getCallId());
+            if (callQueues != null && callQueues.producer != null) {
                 //There is a specific queue for this call
                 producer = callQueues.producer;
             } else {
+                final String channelId = startMessage.getStart().getChannelId();
                 //Use the general producer for the channel
                 producer = channelProducers.get(channelId);
                 if (producer == null) {
@@ -254,29 +254,29 @@ public class JmsServerTransport implements ServerMessageTransport {
                 }
             }
             log.debug("Sending response for call " + message.getCallId() + " on " + producer.getDestination().toString());
-            final RpcBatch.Builder batchBuilder = RpcBatch.newBuilder();
-            if (serverSendsOneMessage) {
+            final RpcSet.Builder setBuilder = RpcSet.newBuilder();
+            if (MethodTypeConverter.fromStart(startMessage).serverSendsOneMessage()) {
                 if (message.hasValue()) {
-                    //Send the value and the status as on batch message to the broker
-                    batchBuilder.addMessages(message);
+                    //Send the value and the status as on as a set in a single message to the broker
+                    setBuilder.addMessages(message);
                     final RpcMessage.Builder statusBuilder = RpcMessage.newBuilder()
                             .setCallId(message.getCallId())
                             .setSequence(message.getSequence() + 1)
                             .setStatus(GOOGLE_RPC_OK_STATUS);
-                    batchBuilder.addMessages(statusBuilder);
+                    setBuilder.addMessages(statusBuilder);
                 } else {
                     if (message.getStatus().getCode() != Status.OK.getCode().value()) {
-                        batchBuilder.addMessages(message);
+                        setBuilder.addMessages(message);
                     } else {
                         //Ignore non error status values (non cancel values) as the status will already have been sent automatically above
                         return;
                     }
                 }
             } else {
-                batchBuilder.addMessages(message);
+                setBuilder.addMessages(message);
             }
 
-            producer.send(JmsUtils.messageFromByteArray(session, batchBuilder.build().toByteArray()));
+            producer.send(JmsUtils.messageFromByteArray(session, setBuilder.build().toByteArray()));
 
         } catch (JMSException e) {
             log.error("Failed to send jms message", e);
@@ -299,8 +299,5 @@ public class JmsServerTransport implements ServerMessageTransport {
         }
     }
 
-    private JmsCallQueues getCallQueues(String channelId, String callId){
-        return callQueuesMap.get(channelId + callId);
-    }
 
 }

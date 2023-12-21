@@ -9,7 +9,7 @@ import io.mgrpc.RpcMessage;
 import io.mgrpc.Start;
 import io.mgrpc.Value;
 
-public class RpcMessageBuilder {
+public class TestRpcMessageBuilder {
     public static RpcMessage makeStartRequest(String methodName, String callId, int sequence, String replyTo){
         HelloRequest request = HelloRequest.newBuilder().setName(""+sequence).build();
         return makeStart(methodName, callId, sequence, replyTo, request);

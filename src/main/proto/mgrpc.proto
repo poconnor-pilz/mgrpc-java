@@ -9,8 +9,8 @@ option java_multiple_files = true;
 option java_package = "io.mgrpc";
 option java_outer_classname = "MGrpc";
 
-message RpcBatch{
-  //A batch of messages. A transport can decide how many messages to include in a batch.
+message RpcSet{
+  //A set of messages. A transport can decide how many messages to include in a set.
   repeated RpcMessage messages = 1;
 }
 
@@ -44,6 +44,16 @@ message  RpcMessage{
 
 //The first message in a client stream must be a Start message
 message Start{
+
+  //This enum corresponds to io.grpc.MethodDescriptor.MethodType
+  enum MethodType {
+    UNARY = 0;
+    CLIENT_STREAMING = 1;
+    SERVER_STREAMING = 2;
+    BIDI_STREAMING = 3;
+    UNKNOWN = 4;
+  }
+
   //A unique id corresponding to the Channel on the client side. Used to identify ongoing calls that must be
   //cleaned up when a client is disconnected or closed. See comments about ConnectionStatus below
   string channelId = 1;
@@ -51,22 +61,24 @@ message Start{
   //The full name of the method to call e.g. "helloworld.ExampleHelloService/SayHello"
   string methodName = 2;
 
+  MethodType methodType = 3;
+
   //Timeout in milliseconds. If not 0 then the server call should timeout after this interval.
-  uint64 timeoutMillis = 3;
+  uint64 timeoutMillis = 4;
 
   //A list of metadata entries. Metadata can be used for things like security tokens etc.
   //Note that when using security tokens it is important to secure access to topics on the broker
   //so that only the server has access to topics that could include a message containing a token
   //(to prevent other clients stealing the tokens and using them)
-  repeated MetadataEntry metadata = 4;
+  repeated MetadataEntry metadata = 5;
 
   //Topic or queue that should be used for the input stream for this call
   //Will not be set for a unary call and may not be set depending on the transport strategy
-  string inTopic = 5;
+  string inTopic = 6;
 
   //Topic or queue that should be used for the output stream for this call
   //Will not be set for a unary call and may not be set depending on the transport strategy
-  string outTopic = 6;
+  string outTopic = 7;
 }
 
 //Any message that is not a Status or the first message in a client stream is a Value
@@ -74,6 +86,7 @@ message Value{
   //This the message/protobuf that is sent to/from the service method call as part of its request/response stream
   bytes contents = 1;
 }
+
 
 message MetadataEntry{
 
@@ -94,25 +107,6 @@ message MetadataEntry{
   string key = 1;
   string value = 2;
 }
-
-
-
-service CallTopicsService {
-  //A server transport may implement this service. If it does then a channel transport can use
-  //this service to inform a server to use special topics or queues for a call
-  //In this case the channel transport should call this method before it sends the first message for the call.
-  rpc SetCallTopics(CallTopics) returns (google.protobuf.Empty);
-}
-
-message CallTopics {
-  string channelId = 1;
-  string callId = 2;
-  //Topic or queue that should be used by the server for the input stream for this call
-  string topicIn = 3;
-  //Topic or queue that should be used by the server for the output stream for this call
-  string topicOut = 4;
-}
-
 
 message ConnectionStatus{
   bool connected = 1;

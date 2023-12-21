@@ -20,7 +20,6 @@ public interface MessageSubscriber {
      * channel.subscribe("mydevice/o/myresponsetopic", HelloReply.parser(), myStreamObserver);
      * The subscription will automatically be closed when the response stream is completed but the client
      * can unsubscribe at any time using channel.unsubscribe("mydevice/o/myresponsetopic");
-     * Note that if the server provider does not support {@link MessagePublisher} then this will fail
      *
      * @param responseTopic  The topic to which to send responses. All responses will be sent to this topic and the
      *                       stub will not receive any direct responses.

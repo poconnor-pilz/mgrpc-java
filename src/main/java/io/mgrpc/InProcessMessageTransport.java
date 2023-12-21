@@ -26,6 +26,8 @@ public class InProcessMessageTransport {
 
     private final ServerMessageTransport serverTransport = new InprocServerTransport();
 
+    private final Map<String, String> callIdToChannelIdMap = new ConcurrentHashMap<>();
+
     private static volatile Executor executorSingleton;
 
 
@@ -53,7 +55,7 @@ public class InProcessMessageTransport {
 
 
         @Override
-        public void start(MessageServer server) throws MessagingException {
+        public void start(ServerMessageListener server) throws MessagingException {
             if(InProcessMessageTransport.this.server != null){
                 String err = "InProcessMessageTransport instance can only be associated with one Server";
                 log.error(err);
@@ -66,14 +68,23 @@ public class InProcessMessageTransport {
         public void close() {}
 
         @Override
-        public void onCallClose(String channelId, String callId) {}
-
-        @Override
-        public void request(String channelId, String callId, int numMessages) {
+        public void onCallClosed(String callId) {
+            callIdToChannelIdMap.remove(callId);
         }
 
         @Override
-        public void send(String channelId, String methodName, boolean serverSendsOneMessage, RpcMessage message) throws MessagingException {
+        public void request(String callId, int numMessages) {
+        }
+
+        @Override
+        public void send(RpcMessage message) throws MessagingException {
+            final String channelId = callIdToChannelIdMap.get(message.getCallId());
+            if(channelId == null){
+                String err = "Channel " + channelId +  " does not exist";
+                log.error(err);
+                throw new MessagingException(err);
+            }
+
             final ChannelMessageListener channel = channelsById.get(channelId);
             if(channel == null){
                 String err = "Channel " + channelId +  " does not exist";
@@ -95,16 +106,16 @@ public class InProcessMessageTransport {
         private String channelId;
 
         @Override
-        public void start(MessageChannel channel) throws MessagingException {
+        public void start(ChannelMessageListener channel) throws MessagingException {
             this.channelId = channel.getChannelId();
             channelsById.put(channelId, channel);
         }
 
         @Override
-        public void onCallStart(MethodDescriptor methodDescriptor, CallOptions callOptions, String callId) {}
+        public void onCallClosed(String callId){}
 
         @Override
-        public void onCallClose(String callId){}
+        public void request(String callId, int numMessages) {}
 
         @Override
         public void close() {
@@ -112,7 +123,10 @@ public class InProcessMessageTransport {
         }
 
         @Override
-        public void send(MethodDescriptor methodDescriptor, RpcMessage.Builder rpcMessageBuilder) throws MessagingException {
+        public void send(RpcMessage.Builder rpcMessageBuilder) throws MessagingException {
+            if(rpcMessageBuilder.hasStart()){
+                callIdToChannelIdMap.put(rpcMessageBuilder.getCallId(), rpcMessageBuilder.getStart().getChannelId());
+            }
             server.onMessage(rpcMessageBuilder.build());
         }
 

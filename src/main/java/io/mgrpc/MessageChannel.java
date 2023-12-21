@@ -207,10 +207,8 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
 
         @Override
         public void start(Listener<RespT> responseListener, Metadata headers) {
+
             this.responseListener = responseListener;
-
-            transport.onCallStart(methodDescriptor, callOptions, callId);
-
             //If the client specified authentication details then merge them into the metadata
             final CallCredentials credentials = this.callOptions.getCredentials();
             if (credentials != null) {
@@ -266,6 +264,7 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
             Start.Builder start = Start.newBuilder();
             start.setChannelId(channelId);
             start.setMethodName(methodDescriptor.getFullMethodName());
+            start.setMethodType(MethodTypeConverter.toStart(methodDescriptor.getType()));
             if (effectiveDeadline != null) {
                 start.setTimeoutMillis(effectiveDeadline.timeRemaining(TimeUnit.MILLISECONDS));
             }
@@ -290,7 +289,7 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
 
             msgBuilder.setStart(start);
             try {
-                transport.send(methodDescriptor, msgBuilder);
+                transport.send(msgBuilder);
             } catch (MessagingException ex) {
                 throw new StatusRuntimeException(Status.INTERNAL.withDescription(ex.getMessage()).withCause(ex));
             }
@@ -411,7 +410,7 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
             cancelTimeouts();
             clientExec(() -> responseListener.onClose(status, EMPTY_METADATA));
             clientCallsById.remove(this.callId);
-            transport.onCallClose(callId);
+            transport.onCallClosed(callId);
         }
 
         public void cancelTimeouts() {
@@ -427,6 +426,7 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
             //This would be used to send a message to the service to tell it to sent on numMessages
             //But our services will send on messages when they have them (for the moment anyway)
             log.debug("request({})", numMessages);
+            transport.request(callId, numMessages);
         }
 
         @Override
@@ -495,7 +495,7 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
             final RpcMessage message = messageBuilder.build();
             log.debug("Sending {} {} {} {} ",
                     new Object[]{message.getMessageCase(), message.getSequence(), message.getCallId(), methodDescriptor.getFullMethodName()});
-            transport.send(methodDescriptor, messageBuilder);
+            transport.send(messageBuilder);
         }
 
 

@@ -16,7 +16,7 @@ public interface ServerMessageTransport {
      * @param server The server
      * @throws MessagingException
      */
-    void start(MessageServer server) throws MessagingException;
+    void start(ServerMessageListener server) throws MessagingException;
 
     /**
      * Called by the server when the server closes. The transport should release any resources here.
@@ -27,24 +27,19 @@ public interface ServerMessageTransport {
      * Called by the server after the call has closed.
      * The transport can clean up any resources here for the call.
      */
-    void onCallClose(String channelId, String callId);
+    void onCallClosed(String callId);
 
     /**
      * Request the transport to send on a number of messages for a call
      * If the transport does not implement buffering it can ignore this and just send the messages
      * whenever they arrive.
      */
-    void request(String channelId, String callId, int numMessages);
+    void request(String callId, int numMessages);
 
     /**
-     * Send a message reply to a channel.
-     * @param channelId The id of the channel.
-     * @param methodName The full method name of the gRPC service method e.g.
-     *                   helloworld.ExampleHelloService/SayHello
-     * @param message The message to send
-     * @exception
+     * Send a reply message to a channel.
      */
-    void send(String channelId, String methodName, boolean serverSendsOneMessage, RpcMessage message) throws MessagingException;
+    void send(RpcMessage message) throws MessagingException;
 
     /**
      * @return The executor with which to execute calls

@@ -1,7 +1,5 @@
 package io.mgrpc.errors;
 
-import com.google.protobuf.InvalidProtocolBufferException;
-import com.google.protobuf.MessageLite;
 import io.grpc.Status;
 import io.grpc.examples.helloworld.ExampleHelloServiceGrpc;
 import io.grpc.examples.helloworld.HelloReply;
@@ -12,7 +10,7 @@ import io.mgrpc.mqtt.MqttChannelTransport;
 import io.mgrpc.mqtt.MqttExceptionLogger;
 import io.mgrpc.mqtt.MqttServerTransport;
 import io.mgrpc.mqtt.MqttUtils;
-import io.mgrpc.utils.RpcMessageBuilder;
+import io.mgrpc.utils.TestRpcMessageBuilder;
 import io.mgrpc.utils.ToList;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
@@ -99,12 +97,12 @@ public class TestOrderAndDuplicates {
         log.debug(topic);
         String replyTo = serverTopics.replyTopic(channelId, fullMethodName);
         log.debug(replyTo);
-        publishAndPause(clientMqtt, topic, RpcMessageBuilder.makeStartRequest(fullMethodName, callId, 1, replyTo));
-        publishAndPause(clientMqtt, topic, RpcMessageBuilder.makeValueRequest(callId, 5));
-        publishAndPause(clientMqtt, topic, RpcMessageBuilder.makeValueRequest(callId, 2));
-        publishAndPause(clientMqtt, topic, RpcMessageBuilder.makeValueRequest(callId, 3));
-        publishAndPause(clientMqtt, topic, RpcMessageBuilder.makeValueRequest(callId, 4));
-        publishAndPause(clientMqtt, topic, RpcMessageBuilder.makeStatus(callId, 6, Status.OK));
+        publishAndPause(clientMqtt, topic, TestRpcMessageBuilder.makeStartRequest(fullMethodName, callId, 1, replyTo));
+        publishAndPause(clientMqtt, topic, TestRpcMessageBuilder.makeValueRequest(callId, 5));
+        publishAndPause(clientMqtt, topic, TestRpcMessageBuilder.makeValueRequest(callId, 2));
+        publishAndPause(clientMqtt, topic, TestRpcMessageBuilder.makeValueRequest(callId, 3));
+        publishAndPause(clientMqtt, topic, TestRpcMessageBuilder.makeValueRequest(callId, 4));
+        publishAndPause(clientMqtt, topic, TestRpcMessageBuilder.makeStatus(callId, 6, Status.OK));
         accumulator.latch.await();
         assertEquals(4, accumulator.requests.size());
         int seq = 1;
@@ -125,7 +123,7 @@ public class TestOrderAndDuplicates {
 
     public void publishAndPause(MqttAsyncClient client, String topic, RpcMessage rpcMessage) throws Exception{
 
-        final RpcBatch.Builder batchBuilder = RpcBatch.newBuilder();
+        final RpcSet.Builder batchBuilder = RpcSet.newBuilder();
         batchBuilder.addMessages(rpcMessage);
         clientMqtt.publish(topic, new MqttMessage(batchBuilder.build().toByteArray()));
         //Introduce slight pause between messages to simulate a real system
@@ -154,14 +152,14 @@ public class TestOrderAndDuplicates {
         ServerTopics serverTopics = new ServerTopics(SERVER);
         String topic = serverTopics.methodIn(fullMethodName);
         String replyTo = serverTopics.replyTopic(channelId, fullMethodName);
-        publishAndPause(clientMqtt, topic, RpcMessageBuilder.makeValueRequest(callId, 5));
-        publishAndPause(clientMqtt, topic, RpcMessageBuilder.makeValueRequest(callId, 5));
-        publishAndPause(clientMqtt, topic, RpcMessageBuilder.makeValueRequest(callId, 2));
-        publishAndPause(clientMqtt, topic, RpcMessageBuilder.makeValueRequest(callId, 3));
-        publishAndPause(clientMqtt, topic, RpcMessageBuilder.makeStartRequest(fullMethodName, callId, 1, replyTo));
-        publishAndPause(clientMqtt, topic, RpcMessageBuilder.makeValueRequest(callId, 2));
-        publishAndPause(clientMqtt, topic, RpcMessageBuilder.makeStatus(callId, 6, Status.OK));
-        publishAndPause(clientMqtt, topic, RpcMessageBuilder.makeValueRequest(callId, 4));
+        publishAndPause(clientMqtt, topic, TestRpcMessageBuilder.makeValueRequest(callId, 5));
+        publishAndPause(clientMqtt, topic, TestRpcMessageBuilder.makeValueRequest(callId, 5));
+        publishAndPause(clientMqtt, topic, TestRpcMessageBuilder.makeValueRequest(callId, 2));
+        publishAndPause(clientMqtt, topic, TestRpcMessageBuilder.makeValueRequest(callId, 3));
+        publishAndPause(clientMqtt, topic, TestRpcMessageBuilder.makeStartRequest(fullMethodName, callId, 1, replyTo));
+        publishAndPause(clientMqtt, topic, TestRpcMessageBuilder.makeValueRequest(callId, 2));
+        publishAndPause(clientMqtt, topic, TestRpcMessageBuilder.makeStatus(callId, 6, Status.OK));
+        publishAndPause(clientMqtt, topic, TestRpcMessageBuilder.makeValueRequest(callId, 4));
 
         accumulator.latch.await();
         assertEquals(4, accumulator.requests.size());
@@ -190,20 +188,20 @@ public class TestOrderAndDuplicates {
         final String channelId = Id.random();
 
         serverMqtt.subscribe(servicesInFilter, 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
-            final RpcBatch rpcBatch = RpcBatch.parseFrom(mqttMessage.getPayload());
-            final RpcMessage message = rpcBatch.getMessages(0);
+            final RpcSet rpcSet = RpcSet.parseFrom(mqttMessage.getPayload());
+            final RpcMessage message = rpcSet.getMessages(0);
             log.debug("Received {} with sequence {} message on : {}", new Object[]{message.getMessageCase(), message.getSequence(), topic});
             final String callId = message.getCallId();
             String methodName = "helloworld.ExampleHelloService/LotsOfReplies";
             final String replyTo = new ServerTopics(SERVER).replyTopic(channelId, methodName);
-            publishAndPause(serverMqtt, replyTo, RpcMessageBuilder.makeValueResponse(callId, 5));
-            publishAndPause(serverMqtt, replyTo, RpcMessageBuilder.makeValueResponse(callId, 5));
-            publishAndPause(serverMqtt, replyTo, RpcMessageBuilder.makeValueResponse(callId, 2));
-            publishAndPause(serverMqtt, replyTo, RpcMessageBuilder.makeValueResponse(callId, 3));
-            publishAndPause(serverMqtt, replyTo, RpcMessageBuilder.makeValueResponse(callId, 1));
-            publishAndPause(serverMqtt, replyTo, RpcMessageBuilder.makeValueResponse(callId, 2));
-            publishAndPause(serverMqtt, replyTo, RpcMessageBuilder.makeStatus(callId, 6, Status.OK));
-            publishAndPause(serverMqtt, replyTo, RpcMessageBuilder.makeValueResponse(callId, 4));
+            publishAndPause(serverMqtt, replyTo, TestRpcMessageBuilder.makeValueResponse(callId, 5));
+            publishAndPause(serverMqtt, replyTo, TestRpcMessageBuilder.makeValueResponse(callId, 5));
+            publishAndPause(serverMqtt, replyTo, TestRpcMessageBuilder.makeValueResponse(callId, 2));
+            publishAndPause(serverMqtt, replyTo, TestRpcMessageBuilder.makeValueResponse(callId, 3));
+            publishAndPause(serverMqtt, replyTo, TestRpcMessageBuilder.makeValueResponse(callId, 1));
+            publishAndPause(serverMqtt, replyTo, TestRpcMessageBuilder.makeValueResponse(callId, 2));
+            publishAndPause(serverMqtt, replyTo, TestRpcMessageBuilder.makeStatus(callId, 6, Status.OK));
+            publishAndPause(serverMqtt, replyTo, TestRpcMessageBuilder.makeValueResponse(callId, 4));
         }));
 
         final MqttChannelTransport mqttChannelMessageProvider = new MqttChannelTransport(clientMqtt, SERVER);

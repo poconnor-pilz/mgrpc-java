@@ -6,7 +6,6 @@ import io.mgrpc.*;
 import io.mgrpc.messaging.MessagingException;
 import io.mgrpc.messaging.ServerMessageListener;
 import io.mgrpc.messaging.ServerMessageTransport;
-import io.mgrpc.messaging.pubsub.MessagePublisher;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
@@ -14,10 +13,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.lang.invoke.MethodHandles;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 
-public class MqttServerTransport implements ServerMessageTransport, MessagePublisher {
+public class MqttServerTransport implements ServerMessageTransport {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -26,10 +27,26 @@ public class MqttServerTransport implements ServerMessageTransport, MessagePubli
     private final MqttAsyncClient client;
     private final static long SUBSCRIBE_TIMEOUT_MILLIS = 5000;
 
+    private Map<String, RpcMessage> startMessages = new ConcurrentHashMap<>();
 
     private final ServerTopics serverTopics;
 
     private static volatile Executor executorSingleton;
+    @Override
+    public Executor getExecutor() {
+        return getExecutorInstance();
+    }
+    private static Executor getExecutorInstance() {
+        if (executorSingleton == null) {
+            synchronized (MessageServer.class) {
+                if (executorSingleton == null) {
+                    //TODO: What kind of thread pool should we use here. It should probably be limited to a fixed maximum or maybe it should be passed as a constructor parameter?
+                    executorSingleton = Executors.newCachedThreadPool();
+                }
+            }
+        }
+        return executorSingleton;
+    }
 
     private ServerMessageListener server;
 
@@ -50,7 +67,7 @@ public class MqttServerTransport implements ServerMessageTransport, MessagePubli
 
 
     @Override
-    public void start(MessageServer server) throws MessagingException {
+    public void start(ServerMessageListener server) throws MessagingException {
         if (this.server != null) {
             throw new MessagingException("Listener already connected");
         }
@@ -61,9 +78,14 @@ public class MqttServerTransport implements ServerMessageTransport, MessagePubli
             log.debug("Subscribing for requests on " + inTopicFilter);
             client.subscribe(inTopicFilter, 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
                 try {
-                    final RpcBatch rpcBatch = RpcBatch.parseFrom(mqttMessage.getPayload());
-                    for (RpcMessage rpcMessage : rpcBatch.getMessagesList()) {
-                        server.onMessage(rpcMessage);
+                    final RpcSet rpcSet = RpcSet.parseFrom(mqttMessage.getPayload());
+                    for (RpcMessage message : rpcSet.getMessagesList()) {
+                        if (message.hasStart()) {
+                            //Cache the start message so that we can use it to get information
+                            //about the call later.
+                            startMessages.put(message.getCallId(), message);
+                        }
+                        server.onMessage(message);
                     }
                 } catch (InvalidProtocolBufferException e) {
                     log.error("Failed to parse RpcMessage", e);
@@ -107,59 +129,48 @@ public class MqttServerTransport implements ServerMessageTransport, MessagePubli
     }
 
     @Override
-    public void onCallClose(String channelId, String callId) {
+    public void onCallClosed(String callId) {
+        startMessages.remove(callId);
     }
 
     @Override
-    public void request(String channelId, String callId, int numMessages) {
+    public void request(String callId, int numMessages) {
     }
 
     @Override
-    public Executor getExecutor() {
-        return getExecutorInstance();
-    }
+    public void send(RpcMessage message) throws MessagingException {
 
-
-    private static Executor getExecutorInstance() {
-        if (executorSingleton == null) {
-            synchronized (MessageServer.class) {
-                if (executorSingleton == null) {
-                    //TODO: What kind of thread pool should we use here. It should probably be limited to a fixed maximum or maybe it should be passed as a constructor parameter?
-                    executorSingleton = Executors.newCachedThreadPool();
-                }
-            }
+        final RpcMessage startMessage = startMessages.get(message.getCallId());
+        if (startMessage == null) {
+            String err = "No cached start message for call " + message.getCallId();
+            log.error(err);
+            throw new MessagingException(err);
         }
-        return executorSingleton;
-    }
-
-
-    @Override
-    public void send(String channelId, String methodName,
-                     boolean serverSendsOneMessage, RpcMessage message) throws MessagingException {
-
-        final RpcBatch.Builder batchBuilder = RpcBatch.newBuilder();
-        if (serverSendsOneMessage) {
+        final RpcSet.Builder setBuilder = RpcSet.newBuilder();
+        if (MethodTypeConverter.fromStart(startMessage).serverSendsOneMessage()) {
             if (message.hasValue()) {
-                //Send the value and the status as on batch message to the broker
-                batchBuilder.addMessages(message);
+                //Send the value and the status as a set in one message to the broker
+                setBuilder.addMessages(message);
                 final RpcMessage.Builder statusBuilder = RpcMessage.newBuilder()
                         .setCallId(message.getCallId())
                         .setSequence(message.getSequence() + 1)
                         .setStatus(GOOGLE_RPC_OK_STATUS);
-                batchBuilder.addMessages(statusBuilder);
+                setBuilder.addMessages(statusBuilder);
             } else {
                 if (message.getStatus().getCode() != Status.OK.getCode().value()) {
-                    batchBuilder.addMessages(message);
+                    setBuilder.addMessages(message);
                 } else {
                     //Ignore non error status values (non cancel values) as the status will already have been sent automatically above
                     return;
                 }
             }
         } else {
-            batchBuilder.addMessages(message);
+            setBuilder.addMessages(message);
         }
         try {
-            client.publish(serverTopics.replyTopic(channelId, methodName), new MqttMessage(batchBuilder.build().toByteArray()));
+            client.publish(serverTopics.replyTopic(startMessage.getStart().getChannelId(),
+                            startMessage.getStart().getMethodName()),
+                    new MqttMessage(setBuilder.build().toByteArray()));
         } catch (MqttException e) {
             log.error("Failed to send mqtt message", e);
             throw new MessagingException(e);
@@ -177,13 +188,5 @@ public class MqttServerTransport implements ServerMessageTransport, MessagePubli
     }
 
 
-    @Override
-    public void publish(String topic, byte[] buffer) throws MessagingException {
-        try {
-            client.publish(topic, new MqttMessage(buffer));
-        } catch (MqttException e) {
-            log.error("Failed to send mqtt message", e);
-            throw new MessagingException(e);
-        }
-    }
+
 }
