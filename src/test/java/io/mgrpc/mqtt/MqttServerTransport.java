@@ -81,9 +81,10 @@ public class MqttServerTransport implements ServerMessageTransport {
                     final RpcSet rpcSet = RpcSet.parseFrom(mqttMessage.getPayload());
                     for (RpcMessage message : rpcSet.getMessagesList()) {
                         if (message.hasStart()) {
-                            //Cache the start message so that we can use it to get information
-                            //about the call later.
+                            //Cache the start message so that we can use it to get information about the call later.
                             startMessages.put(message.getCallId(), message);
+                            log.debug("Will send output messages for call " + message.getCallId() + " to "
+                            + getTopicForSend(message));
                         }
                         server.onMessage(message);
                     }
@@ -146,6 +147,8 @@ public class MqttServerTransport implements ServerMessageTransport {
             log.error(err);
             throw new MessagingException(err);
         }
+
+
         final RpcSet.Builder setBuilder = RpcSet.newBuilder();
         if (MethodTypeConverter.fromStart(startMessage).serverSendsOneMessage()) {
             if (message.hasValue()) {
@@ -168,12 +171,20 @@ public class MqttServerTransport implements ServerMessageTransport {
             setBuilder.addMessages(message);
         }
         try {
-            client.publish(serverTopics.replyTopic(startMessage.getStart().getChannelId(),
-                            startMessage.getStart().getMethodName()),
-                    new MqttMessage(setBuilder.build().toByteArray()));
+            client.publish(getTopicForSend(startMessage), new MqttMessage(setBuilder.build().toByteArray()));
         } catch (MqttException e) {
             log.error("Failed to send mqtt message", e);
             throw new MessagingException(e);
+        }
+    }
+
+    private String getTopicForSend(RpcMessage startMessage){
+        String topic = startMessage.getStart().getOutTopic();
+        if(topic == null || topic.isEmpty()){
+            return serverTopics.replyTopic(startMessage.getStart().getChannelId(),
+                    startMessage.getStart().getMethodName());
+        } else {
+            return topic;
         }
     }
 

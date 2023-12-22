@@ -97,7 +97,7 @@ public class TestOrderAndDuplicates {
         log.debug(topic);
         String replyTo = serverTopics.replyTopic(channelId, fullMethodName);
         log.debug(replyTo);
-        publishAndPause(clientMqtt, topic, TestRpcMessageBuilder.makeStartRequest(fullMethodName, callId, 1, replyTo));
+        publishAndPause(clientMqtt, topic, TestRpcMessageBuilder.makeStartRequest(fullMethodName, Start.MethodType.CLIENT_STREAMING, callId, 1, replyTo));
         publishAndPause(clientMqtt, topic, TestRpcMessageBuilder.makeValueRequest(callId, 5));
         publishAndPause(clientMqtt, topic, TestRpcMessageBuilder.makeValueRequest(callId, 2));
         publishAndPause(clientMqtt, topic, TestRpcMessageBuilder.makeValueRequest(callId, 3));
@@ -156,7 +156,7 @@ public class TestOrderAndDuplicates {
         publishAndPause(clientMqtt, topic, TestRpcMessageBuilder.makeValueRequest(callId, 5));
         publishAndPause(clientMqtt, topic, TestRpcMessageBuilder.makeValueRequest(callId, 2));
         publishAndPause(clientMqtt, topic, TestRpcMessageBuilder.makeValueRequest(callId, 3));
-        publishAndPause(clientMqtt, topic, TestRpcMessageBuilder.makeStartRequest(fullMethodName, callId, 1, replyTo));
+        publishAndPause(clientMqtt, topic, TestRpcMessageBuilder.makeStartRequest(fullMethodName, Start.MethodType.CLIENT_STREAMING, callId, 1, replyTo));
         publishAndPause(clientMqtt, topic, TestRpcMessageBuilder.makeValueRequest(callId, 2));
         publishAndPause(clientMqtt, topic, TestRpcMessageBuilder.makeStatus(callId, 6, Status.OK));
         publishAndPause(clientMqtt, topic, TestRpcMessageBuilder.makeValueRequest(callId, 4));

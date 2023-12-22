@@ -19,21 +19,14 @@ public class BufferToStreamObserver {
     /**
      * Helper method to take a protocol buffer and push it to a stream
      * @param parser The parser corresponding to the stream type type e.g. HelloReply.parser()
-     * @param buffer Protocol buffer
+     * @param message  rpc message
      * @param observer The stream
      * @return true if the stream is finished and associated resources should be closed
      * @param <T> Stream type
      * @throws MessagingException
      */
-    public static <T> boolean convert(Parser<T> parser, byte[] buffer, final StreamObserver<T> observer) throws MessagingException {
+    public static <T> boolean convert(Parser<T> parser, RpcMessage message, final StreamObserver<T> observer) throws MessagingException {
 
-        final RpcMessage message;
-        try {
-            message = RpcMessage.parseFrom(buffer);
-        } catch (InvalidProtocolBufferException e) {
-            log.error("Failed to parse RpcMessage", e);
-            throw new MessagingException(e);
-        }
 
         switch (message.getMessageCase()) {
             case VALUE:

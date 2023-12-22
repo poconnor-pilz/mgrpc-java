@@ -253,7 +253,6 @@ public class JmsServerTransport implements ServerMessageTransport {
                     channelProducers.put(channelId, producer);
                 }
             }
-            log.debug("Sending response for call " + message.getCallId() + " on " + producer.getDestination().toString());
             final RpcSet.Builder setBuilder = RpcSet.newBuilder();
             if (MethodTypeConverter.fromStart(startMessage).serverSendsOneMessage()) {
                 if (message.hasValue()) {
@@ -275,6 +274,11 @@ public class JmsServerTransport implements ServerMessageTransport {
             } else {
                 setBuilder.addMessages(message);
             }
+
+            log.debug("Sending {} {} {} for {} on {} topic ",
+                    new Object[]{message.getMessageCase(), message.getSequence(),
+                            message.getCallId(), startMessage.getStart().getMethodName(),
+                            producer.getDestination()});
 
             producer.send(JmsUtils.messageFromByteArray(session, setBuilder.build().toByteArray()));
 

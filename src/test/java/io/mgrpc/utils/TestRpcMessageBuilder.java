@@ -10,9 +10,9 @@ import io.mgrpc.Start;
 import io.mgrpc.Value;
 
 public class TestRpcMessageBuilder {
-    public static RpcMessage makeStartRequest(String methodName, String callId, int sequence, String replyTo){
+    public static RpcMessage makeStartRequest(String methodName, Start.MethodType methodType, String callId, int sequence, String replyTo){
         HelloRequest request = HelloRequest.newBuilder().setName(""+sequence).build();
-        return makeStart(methodName, callId, sequence, replyTo, request);
+        return makeStart(methodName, methodType, callId, sequence, replyTo, request);
     }
 
     public static RpcMessage makeValueRequest(String callId, int sequence){
@@ -25,10 +25,11 @@ public class TestRpcMessageBuilder {
         return makeValue(callId, sequence,  reply);
     }
 
-    public static RpcMessage makeStart(String methodName, String callId, int sequence, String replyTo, MessageLite payload){
+    public static RpcMessage makeStart(String methodName, Start.MethodType methodType, String callId, int sequence, String replyTo, MessageLite payload){
         Start start = Start.newBuilder()
                 .setOutTopic(replyTo)
                 .setMethodName(methodName)
+                .setMethodType(methodType)
                 .build();
         RpcMessage rpcMessage = RpcMessage.newBuilder()
                 .setCallId(callId)

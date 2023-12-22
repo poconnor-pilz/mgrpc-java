@@ -106,7 +106,7 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
     public void onMessage(RpcMessage message)  {
         final MsgClientCall call = clientCallsById.get(message.getCallId());
         if (call == null) {
-            log.error("Could not find call with callId: " + message.getCallId() + " for message " + message.getSequence());
+            log.error("Could not find call " + message.getCallId() + " for message " + message.getSequence());
             return;
         }
         call.queueServerMessage(message);
@@ -385,7 +385,6 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
         @Override
         public void onQueueCapacityExceeded() {
             log.error("Client queue capacity exceeded for call " + callId);
-            this.close(Status.RESOURCE_EXHAUSTED.withDescription("Client queue capacity exceeded."));
 
             //Send a cancel on to the server. We cannot send it an error on its input stream as it may only expect one message
             //On the server side the listener.onCancel will cause an error to be sent to the server input stream if it has one.
@@ -401,6 +400,7 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
                 log.error("onQueueCapacityExceeded() failed to send cancelled status", e);
             }
 
+            this.close(Status.RESOURCE_EXHAUSTED.withDescription("Client queue capacity exceeded."));
         }
 
         public void close(Status status) {
@@ -455,7 +455,6 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
             if (cause != null) {
                 status = status.withCause(cause);
             }
-            close(status);
 
             final com.google.rpc.Status cancelled = io.grpc.protobuf.StatusProto.fromStatusAndTrailers(Status.CANCELLED, null);
             sequence++;
@@ -468,6 +467,8 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
             } catch (MessagingException ex) {
                 throw new StatusRuntimeException(Status.UNAVAILABLE.withDescription(ex.getMessage()).withCause(ex));
             }
+
+            close(status);
 
         }
 

@@ -216,7 +216,7 @@ public class JmsChannelTransport implements ChannelMessageTransport {
                 try {
                     if (!methodType.clientSendsOneMessage()) {
                         String inQ = serverTopics.make(serverTopics.servicesIn, channel.getChannelId(), messageBuilder.getCallId());
-                        log.debug("Will publish input stream to " + inQ);
+                        log.debug("Will publish input stream for call " + messageBuilder.getCallId() + " to " + inQ);
                         callQueues.producerQueue = session.createQueue(inQ);
                         callQueues.producer = session.createProducer(callQueues.producerQueue);
                         //The server will subscribe on inTopic for the input stream
@@ -224,8 +224,14 @@ public class JmsChannelTransport implements ChannelMessageTransport {
                         callQueuesMap.put(messageBuilder.getCallId(), callQueues);
                     }
                     if (!methodType.serverSendsOneMessage()) {
-                        String outQ = serverTopics.make(serverTopics.servicesOutForChannel(channel.getChannelId()), messageBuilder.getCallId());
-                        log.debug("Will subscribe for output stream on " + outQ);
+                        String outQ;
+                        if(start.getStart().getOutTopic() != null && !start.getStart().getOutTopic().isEmpty()){
+                            //The client has used withOption MessageChannel.OUT_TOPIC
+                            outQ = start.getStart().getOutTopic();
+                        } else {
+                            outQ = serverTopics.make(serverTopics.servicesOutForChannel(channel.getChannelId()), messageBuilder.getCallId());
+                        }
+                        log.debug("Will subscribe for output stream for call " + messageBuilder.getCallId() + " on " + outQ);
                         callQueues.consumerQueue = session.createQueue(outQ);
                         callQueues.consumer = session.createConsumer(callQueues.consumerQueue);
                         //The server will publish output stream messages to outTopic
@@ -246,7 +252,7 @@ public class JmsChannelTransport implements ChannelMessageTransport {
         }
 
         final RpcSet.Builder setBuilder = RpcSet.newBuilder();
-        if (MethodTypeConverter.fromStart(start) == MethodDescriptor.MethodType.UNARY) {
+        if (MethodTypeConverter.fromStart(start).clientSendsOneMessage()) {
             //If clientSendsOneMessage we only want to send one broker message containing
             //start, request, status.
             if (messageBuilder.hasStart()) {
@@ -310,7 +316,8 @@ public class JmsChannelTransport implements ChannelMessageTransport {
             if (callQueues.consumer != null) {
                 getExecutor().execute(() -> {
                     //This will block until a message is available so we need to run it on a thread
-                    //to prevent the channel from blocking
+                    //to prevent the channel from blocking. This will effectively block the thread for the duration
+                    //of the whole call even if
                     //We ignore numMessages and just get the next message from the queue
                     //After it is processed the service will call request() again.
                     try {

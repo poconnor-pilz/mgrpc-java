@@ -119,7 +119,6 @@ public class MessageProcessor {
                     return;
                 }
             }
-
             if (recents.contains(sequence)) {
                 log.warn("{} with sequence {}, is duplicate. Ignoring.", message.getMessageCase(), sequence);
             } else {
@@ -138,7 +137,6 @@ public class MessageProcessor {
                     //only add to recents if it has not been put back on queue
                     recents.add(sequence);
                 }
-
                 log.debug("Handling {} {} {}", new Object[]{message.getMessageCase(), message.getSequence(),
                         message.getCallId()});
                 try {

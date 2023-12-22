@@ -202,7 +202,10 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
         RpcMessage.Builder start = startMessages.get(messageBuilder.getCallId());
         if(start == null){
             if(messageBuilder.hasStart()){
-                start = startMessages.put(messageBuilder.getCallId(), messageBuilder);
+                start = messageBuilder;
+                startMessages.put(messageBuilder.getCallId(), messageBuilder);
+                log.debug("Will send input messages for call " + messageBuilder.getCallId()
+                        + " to " + serverTopics.methodIn(start.getStart().getMethodName()));
             } else {
                 if(messageBuilder.hasStatus() && (messageBuilder.getStatus().getCode() == Status.CANCELLED.getCode().value())){
                     log.warn("Call cancelled before start. An exception may have occurred");
@@ -311,7 +314,10 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
             }
             boolean remove = false;
             for (StreamObserver observer : observers) {
-                remove = BufferToStreamObserver.convert(parser, mqttMessage.getPayload(), observer);
+                final RpcSet rpcSet = RpcSet.parseFrom(mqttMessage.getPayload());
+                for(RpcMessage message: rpcSet.getMessagesList()) {
+                    remove = BufferToStreamObserver.convert(parser, message, observer);
+                }
             }
             if (remove) {
                 subscribersByTopic.remove(topic);

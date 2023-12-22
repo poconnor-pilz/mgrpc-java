@@ -166,14 +166,7 @@ public class MessageServer implements ServerMessageListener {
 
 
 
-
-    private void sendStatus(String channelId, String fullMethodName,
-                            boolean serverSendsOneMessage, String callId, int sequence, Status status) {
-        sendStatus(null, channelId, fullMethodName, serverSendsOneMessage, callId, sequence, status);
-    }
-
-    private void sendStatus(String topic, String channelId, String fullMethodName,
-                            boolean serverSendsOneMessage, String callId, int sequence, Status status) {
+    private void sendStatus(String callId, int sequence, Status status) {
         final com.google.rpc.Status grpcStatus = StatusProto.fromStatusAndTrailers(status, null);
         RpcMessage message = RpcMessage.newBuilder()
                 .setStatus(grpcStatus)
@@ -186,7 +179,7 @@ public class MessageServer implements ServerMessageListener {
             log.debug("Sending completed: " + status);
         }
         try {
-            send(topic, channelId, message);
+            transport.send(message);
         } catch (MessagingException e) {
             //We cannot do anything here to help the client because there is no way of sending a message so just log.
             log.error("Failed to send status", e);
@@ -194,14 +187,7 @@ public class MessageServer implements ServerMessageListener {
     }
 
 
-    private void send(String topic, String fullMethodName, RpcMessage message) throws MessagingException {
 
-        log.debug("Sending {} {} {} for {} ",
-                new Object[]{message.getMessageCase(), message.getSequence(),
-                        message.getCallId(), fullMethodName});
-
-        transport.send(message);
-    }
 
     public Stats getStats() {
         return new Stats(handlersByCallId.size());
@@ -314,10 +300,16 @@ public class MessageServer implements ServerMessageListener {
                     }
                 }
                 if (serverMethodDefinition == null) {
-                    sendStatus(start.getChannelId(), fullMethodName, false, callId, 1,
+                    sendStatus(callId, 1,
                             Status.UNIMPLEMENTED.withDescription("No method registered for " + fullMethodName));
                     return;
                 }
+//Cannot check type at the moment because when using GrpcProxy it sets the type to UNKNOWN
+//                if(serverMethodDefinition.getMethodDescriptor().getType() != MethodTypeConverter.fromStart(start.getMethodType())){
+//                    sendStatus(callId, 1,
+//                            Status.UNIMPLEMENTED.withDescription("Server method type does not match requested method type for " + fullMethodName));
+//                    return;
+//                }
                 final ServerCallHandler<?, ?> serverCallHandler = serverMethodDefinition.getServerCallHandler();
 
                 serverCall = new MsgServerCall<>(serverMethodDefinition.getMethodDescriptor(),
@@ -482,7 +474,7 @@ public class MessageServer implements ServerMessageListener {
                         .setSequence(sequence).build();
 
                 try {
-                    send(start.getOutTopic(), channelId, rpcMessage);
+                    transport.send(rpcMessage);
                 } catch (MessagingException e) {
                     log.error("Failed to send", e);
                     throw new StatusRuntimeException(Status.UNAVAILABLE);//.withCause(e));
@@ -499,8 +491,7 @@ public class MessageServer implements ServerMessageListener {
             public void close(Status status, Metadata trailers) {
                 //close will be called when the service implementation calls onCompleted (among other things)
                 sequence++;
-                sendStatus(start.getOutTopic(), channelId, methodDescriptor.getFullMethodName(),
-                        methodDescriptor.getType().serverSendsOneMessage(), callId, sequence, status);
+                sendStatus(callId, sequence, status);
                 cancelTimeouts();
                 MgMessageHandler.this.remove();
                 transport.onCallClosed(callId);
