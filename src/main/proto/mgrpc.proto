@@ -11,6 +11,11 @@ option java_outer_classname = "MGrpc";
 
 message RpcSet{
   //A set of messages. A transport can decide how many messages to include in a set.
+  //For example, in the case of a unary message call the channel transport could send a single broker message
+  //consisting of an RpcSet containing the RpcMessages {Start, Value, Status}
+  //Then the server transport could respond with a single broker message
+  //consisting of an RpcSet containing the RpcMessages {Value, Status}
+  //In total for this unary call only two broker messages (each containing a set) are sent.
   repeated RpcMessage messages = 1;
 }
 

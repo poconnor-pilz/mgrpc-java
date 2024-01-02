@@ -5,37 +5,85 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayInputStream;
+import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.invoke.MethodHandles;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 /** A grpc-level proxy.
  * This class is copied (with a couple of small changes)  from
  * https://github.com/ejona86/grpc-java/blob/grpc-proxy/examples/src/main/java/io/grpc/examples/grpcproxy/GrpcProxy.java
  */
-public class GrpcProxy<ReqT, RespT> implements ServerCallHandler<ReqT, RespT> {
+public class GrpcProxy extends HandlerRegistry implements ServerCallHandler<byte[], byte[]>{
 
     private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
 
     private final Channel channel;
 
+
+    private Map<String, MethodDescriptor> methodsRegistry = new HashMap<>();
+
+    private final MethodDescriptor.Marshaller<byte[]> byteMarshaller = new ByteMarshaller();
+
+
     public GrpcProxy(Channel channel) {
         this.channel = channel;
     }
 
+    /**
+     * A client can choose to inform the proxy about services using this method.
+     * This can help where the proxy is being connected to a MessageChannel. It means that the MessageChannel
+     * will know about the method type which can help the ChannelMessageTransport to transport the messages more
+     * efficiently.
+     * @param serviceDescriptor
+     */
+    public void registerServiceDescriptor(ServiceDescriptor serviceDescriptor) {
+        for(MethodDescriptor methodDescriptor: serviceDescriptor.getMethods()){
+            methodsRegistry.put(methodDescriptor.getFullMethodName(), methodDescriptor);
+        }
+    }
+
+
     @Override
-    public ServerCall.Listener<ReqT> startCall(
-            ServerCall<ReqT, RespT> serverCall, Metadata headers) {
-        ClientCall<ReqT, RespT> clientCall
+    public ServerMethodDefinition<?,?> lookupMethod(String methodName, String authority) {
+
+        //If the client has registered a method type already then use that.
+        final MethodDescriptor registeredMethodDescriptor = methodsRegistry.get(methodName);
+        final MethodDescriptor.MethodType methodType;
+        if(registeredMethodDescriptor != null){
+            methodType = registeredMethodDescriptor.getType();
+        } else {
+            methodType = MethodDescriptor.MethodType.UNKNOWN;
+        }
+
+        MethodDescriptor<byte[], byte[]> methodDescriptor
+                =  MethodDescriptor.newBuilder(byteMarshaller, byteMarshaller)
+                .setFullMethodName(methodName)
+                .setType(methodType)
+                .build();
+
+        if(registeredMethodDescriptor != null){
+            methodDescriptor = registeredMethodDescriptor;
+        }
+        return ServerMethodDefinition.create(methodDescriptor, this);
+    }
+
+    @Override
+    public ServerCall.Listener<byte[]> startCall(
+            ServerCall<byte[], byte[]> serverCall, Metadata headers) {
+        ClientCall<byte[], byte[]> clientCall
                 = channel.newCall(serverCall.getMethodDescriptor(), CallOptions.DEFAULT);
-        CallProxy<ReqT, RespT> proxy = new CallProxy<ReqT, RespT>(serverCall, clientCall);
+        CallProxy<byte[], byte[]> proxy = new CallProxy<byte[], byte[]>(serverCall, clientCall);
         clientCall.start(proxy.clientCallListener, headers);
         serverCall.request(1);
         clientCall.request(1);
         return proxy.serverCallListener;
     }
+
 
     private static class CallProxy<ReqT, RespT> {
         final RequestProxy serverCallListener;
@@ -130,9 +178,12 @@ public class GrpcProxy<ReqT, RespT> implements ServerCallHandler<ReqT, RespT> {
     private static class ByteMarshaller implements MethodDescriptor.Marshaller<byte[]> {
         @Override public byte[] parse(InputStream stream) {
             try {
-                return stream.readAllBytes();
+                byte[] bytes = new byte[stream.available()];
+                DataInputStream dataInputStream = new DataInputStream(stream);
+                dataInputStream.readFully(bytes);
+                return bytes;
             } catch (IOException ex) {
-                throw new RuntimeException();
+                throw new RuntimeException(ex);
             }
         }
 
@@ -141,24 +192,6 @@ public class GrpcProxy<ReqT, RespT> implements ServerCallHandler<ReqT, RespT> {
         }
     };
 
-    public static class Registry extends HandlerRegistry {
-        private final MethodDescriptor.Marshaller<byte[]> byteMarshaller = new ByteMarshaller();
-        private final ServerCallHandler<byte[], byte[]> handler;
-
-        public Registry(ServerCallHandler<byte[], byte[]> handler) {
-            this.handler = handler;
-        }
-
-        @Override
-        public ServerMethodDefinition<?,?> lookupMethod(String methodName, String authority) {
-            MethodDescriptor<byte[], byte[]> methodDescriptor
-                    = MethodDescriptor.newBuilder(byteMarshaller, byteMarshaller)
-                    .setFullMethodName(methodName)
-                    .setType(MethodDescriptor.MethodType.UNKNOWN)
-                    .build();
-            return ServerMethodDefinition.create(methodDescriptor, handler);
-        }
-    }
 
     public static void main(String[] args) throws IOException, InterruptedException {
         String target = "localhost:8980";
@@ -166,10 +199,10 @@ public class GrpcProxy<ReqT, RespT> implements ServerCallHandler<ReqT, RespT> {
                 .usePlaintext()
                 .build();
         logger.info("Proxy will connect to " + target);
-        GrpcProxy<byte[], byte[]> proxy = new GrpcProxy<byte[], byte[]>(channel);
+        GrpcProxy proxy = new GrpcProxy(channel);
         int port = 8981;
         Server server = ServerBuilder.forPort(port)
-                .fallbackHandlerRegistry(new Registry(proxy))
+                .fallbackHandlerRegistry(proxy)
                 .build()
                 .start();
         logger.info("Proxy started, listening on " + port);

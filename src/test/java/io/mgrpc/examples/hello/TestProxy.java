@@ -58,15 +58,26 @@ public class TestProxy {
         MessageChannel messageChannel = new MessageChannel(new MqttChannelTransport(clientMqttConnection, SERVER));
         messageChannel.start();
 
-        GrpcProxy<byte[], byte[]> proxy = new GrpcProxy<>(messageChannel);
+        //We want to wire this:
+        //HttpServer -> GrpcProxy -> MqttChannel
 
+        //Connect the proxy to the MessageChannel
+        GrpcProxy proxy = new GrpcProxy(messageChannel);
+
+        //Connect the proxy to the http server
         Server httpServer = ServerBuilder.forPort(port)
-                .fallbackHandlerRegistry(new GrpcProxy.Registry(proxy))
+                .fallbackHandlerRegistry(proxy)
                 .build().start();
+
+
+        //Tell the proxy about the method types so that the message transport can transport the messages
+        //more efficiently (the test would still work without this but more mqtt messages would be transferred)
+        proxy.registerServiceDescriptor(ExampleHelloServiceGrpc.getServiceDescriptor());
 
         final ServerServiceDefinition serviceWithIntercept = ServerInterceptors.intercept(
                 new ListenForHello(),
                 new ServerAuthInterceptor());
+
 
         final MqttAsyncClient serverMqttConnection = MqttUtils.makeClient();
         MessageServer messageServer = new MessageServer(new MqttServerTransport(serverMqttConnection, SERVER));
@@ -119,11 +130,9 @@ public class TestProxy {
         MessageChannel messageChannel = new MessageChannel(new MqttChannelTransport(clientMqttConnection, SERVER));
         messageChannel.start();
 
-
         final ServerServiceDefinition serviceWithIntercept = ServerInterceptors.intercept(
                 new ListenForHello(),
                 new ServerAuthInterceptor());
-
 
         Server httpServer = ServerBuilder.forPort(port)
                 .addService(serviceWithIntercept)
@@ -131,11 +140,18 @@ public class TestProxy {
 
         ManagedChannel httpChannel = ManagedChannelBuilder.forTarget(target)
                 .usePlaintext().build();
-        final GrpcProxy<byte[], byte[]> proxy = new GrpcProxy<>(httpChannel);
 
         final MqttAsyncClient serverMqttConnection = MqttUtils.makeClient();
         MessageServer messageServer = new MessageServer(new MqttServerTransport(serverMqttConnection, SERVER));
-        messageServer.setFallBackRegistry(new GrpcProxy.Registry(proxy));
+
+        //We want to wire this:
+        //MqttServer ->  GrpcProxy -> HttpChannel
+
+        //Connect the proxy to the http channel
+        final GrpcProxy proxy = new GrpcProxy(httpChannel);
+        //Connect the MessageServer to the proxy
+        messageServer.setFallBackRegistry(proxy);
+
         messageServer.start();
 
         //Make a jwt token and add it to the call credentials
