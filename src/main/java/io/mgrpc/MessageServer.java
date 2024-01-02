@@ -304,12 +304,12 @@ public class MessageServer implements ServerMessageListener {
                             Status.UNIMPLEMENTED.withDescription("No method registered for " + fullMethodName));
                     return;
                 }
-//Cannot check type at the moment because when using GrpcProxy it sets the type to UNKNOWN
-//                if(serverMethodDefinition.getMethodDescriptor().getType() != MethodTypeConverter.fromStart(start.getMethodType())){
-//                    sendStatus(callId, 1,
-//                            Status.UNIMPLEMENTED.withDescription("Server method type does not match requested method type for " + fullMethodName));
-//                    return;
-//                }
+
+                //Note that we cannot validate the type of the method here with something like
+                //serverMethodDefinition.getMethodDescriptor().getType() != MethodTypeConverter.fromStart(start.getMethodType())
+                //Because the type may not be set in the case of GrpcProxy  where the proxy cannot know the type of the
+                //method being implemented by the remote server (whether the remote server is http or message/mqtt)
+
                 final ServerCallHandler<?, ?> serverCallHandler = serverMethodDefinition.getServerCallHandler();
 
                 serverCall = new MsgServerCall<>(serverMethodDefinition.getMethodDescriptor(),

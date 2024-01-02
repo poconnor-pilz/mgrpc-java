@@ -207,16 +207,16 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
                 log.debug("Will send input messages for call " + messageBuilder.getCallId()
                         + " to " + serverTopics.methodIn(start.getStart().getMethodName()));
             } else {
-                if(messageBuilder.hasStatus() && (messageBuilder.getStatus().getCode() == Status.CANCELLED.getCode().value())){
-                    log.warn("Call cancelled before start. An exception may have occurred");
-                    return;
+                if(messageBuilder.hasStatus()){
+                    log.warn("Call cancelled or half closed  before start. An exception may have occurred");
+                return;
                 } else {
-                    throw new RuntimeException("First message sent to transport must be a start message. Call " + messageBuilder.getCallId());
+                    throw new RuntimeException("First message sent to transport must be a start message. Call " + messageBuilder.getCallId() + " type " + messageBuilder.getMessageCase());
                 }
             }
         }
 
-        final RpcSet.Builder batchBuilder = RpcSet.newBuilder();
+        final RpcSet.Builder rpcSet = RpcSet.newBuilder();
 
         if (MethodTypeConverter.fromStart(start).clientSendsOneMessage()) {
             //If clientSendsOneMessage we only want to send one broker message containing
@@ -227,26 +227,26 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
             }
             if (messageBuilder.hasStatus()) {
                 if (messageBuilder.getStatus().getCode() != Status.OK.getCode().value()) {
-                    batchBuilder.addMessages(messageBuilder);
+                    rpcSet.addMessages(messageBuilder);
                 } else {
                     //Ignore non error status values (non cancel values) as the status will already have been sent automatically below
                     return;
                 }
             } else {
-                batchBuilder.addMessages(start);
-                batchBuilder.addMessages(messageBuilder);
+                rpcSet.addMessages(start);
+                rpcSet.addMessages(messageBuilder);
                 final RpcMessage.Builder statusBuilder = RpcMessage.newBuilder()
                         .setCallId(messageBuilder.getCallId())
                         .setSequence(messageBuilder.getSequence() + 1)
                         .setStatus(GOOGLE_RPC_OK_STATUS);
-                batchBuilder.addMessages(statusBuilder);
+                rpcSet.addMessages(statusBuilder);
             }
         } else {
-            batchBuilder.addMessages(messageBuilder);
+            rpcSet.addMessages(messageBuilder);
         }
 
 
-        final byte[] buffer = batchBuilder.build().toByteArray();
+        final byte[] buffer = rpcSet.build().toByteArray();
 
         if (!serverConnected) {
             //The server should have an mqtt LWT that reliably sends a message when it is disconnected.

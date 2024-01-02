@@ -123,9 +123,9 @@ public class TestOrderAndDuplicates {
 
     public void publishAndPause(MqttAsyncClient client, String topic, RpcMessage rpcMessage) throws Exception{
 
-        final RpcSet.Builder batchBuilder = RpcSet.newBuilder();
-        batchBuilder.addMessages(rpcMessage);
-        clientMqtt.publish(topic, new MqttMessage(batchBuilder.build().toByteArray()));
+        final RpcSet.Builder setBuilder = RpcSet.newBuilder();
+        setBuilder.addMessages(rpcMessage);
+        clientMqtt.publish(topic, new MqttMessage(setBuilder.build().toByteArray()));
         //Introduce slight pause between messages to simulate a real system
         //If we don't do this then the thread pool that processes the messages won't get activated
         //until after all the messages are received by which time they are automatically ordered by the queue
