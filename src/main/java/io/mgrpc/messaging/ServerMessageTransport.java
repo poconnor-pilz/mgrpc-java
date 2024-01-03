@@ -1,6 +1,5 @@
 package io.mgrpc.messaging;
 
-import io.mgrpc.MessageServer;
 import io.mgrpc.RpcMessage;
 
 import java.util.concurrent.Executor;

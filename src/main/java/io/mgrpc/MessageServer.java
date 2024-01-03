@@ -37,7 +37,7 @@ public class MessageServer implements ServerMessageListener {
 
     private final ServerMessageTransport transport;
 
-    private final Map<String, MgMessageHandler> handlersByCallId = new ConcurrentHashMap<>();
+    private final Map<String, MessageHandler> handlersByCallId = new ConcurrentHashMap<>();
 
     /**
      * For various reasons a message might come in for a call that has been removed/is finished
@@ -115,8 +115,6 @@ public class MessageServer implements ServerMessageListener {
     @Override
     public void onMessage(RpcMessage message) {
 
-        log.debug("Received {} {} {} ", new Object[]{message.getMessageCase(),
-                message.getSequence(), message.getCallId()});
         final String callId = message.getCallId();
         if (callId.isEmpty()) {
             log.error("Every message sent from the client must have a callId");
@@ -133,9 +131,9 @@ public class MessageServer implements ServerMessageListener {
             return;
         }
 
-        MgMessageHandler handler = handlersByCallId.get(callId);
+        MessageHandler handler = handlersByCallId.get(callId);
         if (handler == null) {
-            handler = new MgMessageHandler(callId, transport.getExecutor(), queueSize);
+            handler = new MessageHandler(callId, transport.getExecutor(), queueSize);
             handlersByCallId.put(callId, handler);
         }
         //put the message on the handler's queue
@@ -147,7 +145,7 @@ public class MessageServer implements ServerMessageListener {
     public void onChannelDisconnected(String channelId) {
         //When a client is disconnected we need to cancel all calls for it so that they get cleaned up.
         for (String callId : this.handlersByCallId.keySet()) {
-            MgMessageHandler messageHandler = this.handlersByCallId.get(callId);
+            MessageHandler messageHandler = this.handlersByCallId.get(callId);
             String foundChannelId = messageHandler.getChannelId();
             if (foundChannelId != null && foundChannelId.equals(channelId)) {
                 final Status status = Status.CANCELLED.withDescription("Client disconnected");
@@ -194,7 +192,7 @@ public class MessageServer implements ServerMessageListener {
     }
 
     public void removeCall(String callId) {
-        final MgMessageHandler handler = handlersByCallId.get(callId);
+        final MessageHandler handler = handlersByCallId.get(callId);
         if (handler != null && handler.serverCall != null) {
             handlersByCallId.remove(callId);
             //Only put handlers that take a client stream in the recentlyRemovedCallIds
@@ -207,7 +205,7 @@ public class MessageServer implements ServerMessageListener {
     }
 
 
-    private class MgMessageHandler implements MessageProcessor.MessageHandler {
+    private class MessageHandler implements MessageProcessor.MessageHandler {
         private final String callId;
         private String channelId;
 
@@ -222,7 +220,7 @@ public class MessageServer implements ServerMessageListener {
 
         private final MessageProcessor messageProcessor;
 
-        private MgMessageHandler(String callId, Executor executor, int queueSize) {
+        private MessageHandler(String callId, Executor executor, int queueSize) {
             this.callId = callId;
             messageProcessor = new MessageProcessor(executor, queueSize, this);
         }
@@ -292,7 +290,6 @@ public class MessageServer implements ServerMessageListener {
 
                 String fullMethodName = start.getMethodName();
                 //fullMethodName is e.g. "helloworld.ExampleHelloService/SayHello"
-                log.debug("fullMethodName for call " + callId + " is: " + fullMethodName);
                 ServerMethodDefinition<?, ?> serverMethodDefinition = registry.lookupMethod(fullMethodName);
                 if (serverMethodDefinition == null) {
                     if (fallBackRegistry != null) {
@@ -304,6 +301,12 @@ public class MessageServer implements ServerMessageListener {
                             Status.UNIMPLEMENTED.withDescription("No method registered for " + fullMethodName));
                     return;
                 }
+
+                log.debug("Received {} {} {} on {}", new Object[]{message.getCallId(),
+                        message.getSequence(),
+                        message.getMessageCase(),
+                        serverMethodDefinition.getMethodDescriptor().getFullMethodName()});
+
 
                 //Note that we cannot validate the type of the method here with something like
                 //serverMethodDefinition.getMethodDescriptor().getType() != MethodTypeConverter.fromStart(start.getMethodType())
@@ -377,7 +380,7 @@ public class MessageServer implements ServerMessageListener {
                     Deadline deadline = Deadline.after(start.getTimeoutMillis(), TimeUnit.MILLISECONDS);
                     this.deadlineCancellationFuture = DeadlineTimer.start(deadline, (String deadlineMessage) -> {
                         cancel();
-                        MgMessageHandler.this.remove();
+                        MessageHandler.this.remove();
                     });
                 }
                 //TODO: Populate the key,value pairs of cancellableContext with e.g. auth credentials from this.header
@@ -405,7 +408,7 @@ public class MessageServer implements ServerMessageListener {
 
             @Override
             public void request(int numMessages) {
-                log.debug("request(" + numMessages + ")");
+                //log.debug("request(" + numMessages + ")");
                 transport.request(callId, numMessages);
             }
 
@@ -474,6 +477,8 @@ public class MessageServer implements ServerMessageListener {
                         .setSequence(sequence).build();
 
                 try {
+                    log.debug("Sending {} {} {} to {} ",
+                            new Object[]{rpcMessage.getCallId(), rpcMessage.getSequence(), rpcMessage.getMessageCase(), methodDescriptor.getFullMethodName()});
                     transport.send(rpcMessage);
                 } catch (MessagingException e) {
                     log.error("Failed to send", e);
@@ -493,7 +498,7 @@ public class MessageServer implements ServerMessageListener {
                 sequence++;
                 sendStatus(callId, sequence, status);
                 cancelTimeouts();
-                MgMessageHandler.this.remove();
+                MessageHandler.this.remove();
                 transport.onCallClosed(callId);
             }
 
@@ -506,7 +511,7 @@ public class MessageServer implements ServerMessageListener {
                 }
                 cancelled = true;
                 cancelTimeouts();
-                MgMessageHandler.this.remove();
+                MessageHandler.this.remove();
                 //listener or cancellableContext could be null here in the case where a cancel
                 //gets in so quickly that the call hasn't even been fully started yet.
                 //This only seems to happen in bad test code that doesn't wait for the call to start.

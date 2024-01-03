@@ -97,17 +97,17 @@ public class JmsServerTransport implements ServerMessageTransport {
                                 JmsCallQueues callQueues = new JmsCallQueues();
                                 try {
                                     final Start start = rpcMessage.getStart();
-                                    if (start.getInTopic() != null && !start.getInTopic().isEmpty()) {
-                                        //This call has a specific queue for the input stream so we need to subscribe to it
-                                        log.debug("Subscribing for input stream for call " + rpcMessage.getCallId() + " on topic " + start.getInTopic());
-                                        String inQ = serverTopics.make(start.getInTopic());
+                                    if (start.getClientStreamTopic() != null && !start.getClientStreamTopic().isEmpty()) {
+                                        //This call has a specific queue for the client stream so we need to subscribe to it
+                                        log.debug("Subscribing for client stream for call " + rpcMessage.getCallId() + " on topic " + start.getClientStreamTopic());
+                                        String inQ = serverTopics.make(start.getClientStreamTopic());
                                         callQueues.consumerQueue = session.createQueue(inQ);
                                         callQueues.consumer = session.createConsumer(callQueues.consumerQueue);
                                         callQueuesMap.put(rpcMessage.getCallId(), callQueues);
                                     }
-                                    if (start.getOutTopic() != null && !start.getOutTopic().isEmpty()) {
-                                        log.debug("Will send output stream for call " + rpcMessage.getCallId() + " to topic " + start.getOutTopic());
-                                        String outQ = serverTopics.make(start.getOutTopic());
+                                    if (start.getServerStreamTopic() != null && !start.getServerStreamTopic().isEmpty()) {
+                                        log.debug("Will send server stream for call " + rpcMessage.getCallId() + " to topic " + start.getServerStreamTopic());
+                                        String outQ = serverTopics.make(start.getServerStreamTopic());
                                         callQueues.producerQueue = session.createQueue(outQ);
                                         callQueues.producer = session.createProducer(callQueues.producerQueue);
                                         callQueuesMap.put(rpcMessage.getCallId(), callQueues);
@@ -167,6 +167,7 @@ public class JmsServerTransport implements ServerMessageTransport {
     @Override
     public void close() {
         try {
+            log.debug("Closing transport");
             notifyConnected(false);
             session.close();
         } catch (JMSException exception) {
@@ -188,6 +189,7 @@ public class JmsServerTransport implements ServerMessageTransport {
                 if (callQueues.consumer != null) {
                     callQueues.consumer.close();
                 }
+                callQueuesMap.remove(callId);
             }
         } catch (Exception ex) {
             log.error("Exception closing call queues", ex);
@@ -219,7 +221,7 @@ public class JmsServerTransport implements ServerMessageTransport {
                             }
                         }
                     } catch (Exception ex) {
-                        log.error("Exception processing or waiting for message", ex);
+                        log.error("Exception processing or waiting for message for call " + callId, ex);
                     }
                 });
             }
@@ -274,11 +276,6 @@ public class JmsServerTransport implements ServerMessageTransport {
             } else {
                 setBuilder.addMessages(message);
             }
-
-            log.debug("Sending {} {} {} for {} on {} topic ",
-                    new Object[]{message.getMessageCase(), message.getSequence(),
-                            message.getCallId(), startMessage.getStart().getMethodName(),
-                            producer.getDestination()});
 
             producer.send(JmsUtils.messageFromByteArray(session, setBuilder.build().toByteArray()));
 

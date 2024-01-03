@@ -1,11 +1,11 @@
-package io.mgrpc.examples.hello;
+package io.mgrpc.jms;
 
 import io.mgrpc.EmbeddedBroker;
 import io.mgrpc.Id;
 import io.mgrpc.MessageChannel;
 import io.mgrpc.MessageServer;
-import io.mgrpc.jms.JmsChannelTransport;
-import io.mgrpc.jms.JmsServerTransport;
+import io.mgrpc.examples.hello.HelloServiceForTest;
+import io.mgrpc.examples.hello.TestHelloBase;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -61,7 +61,7 @@ public class TestHelloJms extends TestHelloBase {
         server.start();
         server.addService(new HelloServiceForTest());
         Thread.sleep(1000);
-        channel = new MessageChannel(new JmsChannelTransport(clientConnection, SERVER));
+        channel = new MessageChannel(new JmsChannelTransport(clientConnection, SERVER, true));
         channel.start();
     }
 

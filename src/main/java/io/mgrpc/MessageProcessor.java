@@ -137,8 +137,8 @@ public class MessageProcessor {
                     //only add to recents if it has not been put back on queue
                     recents.add(sequence);
                 }
-                log.debug("Handling {} {} {}", new Object[]{message.getMessageCase(), message.getSequence(),
-                        message.getCallId()});
+//                log.debug("Handling {} {} {}", new Object[]{message.getMessageCase(), message.getSequence(),
+//                        message.getCallId()});
                 try {
                     this.messageHandler.onProviderMessage(message);
                 } catch (Exception ex){

@@ -1,10 +1,8 @@
 package io.mgrpc.jms;
 
 import com.google.protobuf.InvalidProtocolBufferException;
-import io.grpc.CallOptions;
 import io.grpc.MethodDescriptor;
 import io.grpc.Status;
-import io.grpc.StatusRuntimeException;
 import io.mgrpc.*;
 import io.mgrpc.messaging.ChannelMessageListener;
 import io.mgrpc.messaging.ChannelMessageTransport;
@@ -66,6 +64,8 @@ public class JmsChannelTransport implements ChannelMessageTransport {
     private CountDownLatch serverConnectedLatch;
     private boolean serverConnected = false;
 
+    private final boolean useBrokerFlowControl;
+
     private ChannelMessageListener channel;
 
     private Map<String, JmsCallQueues> callQueuesMap = new ConcurrentHashMap<>();
@@ -99,9 +99,14 @@ public class JmsChannelTransport implements ChannelMessageTransport {
      *                    This topic should be unique to the broker.
      *                    Requests will be sent to {serverTopic}/i/svc
      *                    The channel will subscribe for replies on {serverTopic}/o/svc/{channelId}
+     * @param useBrokerFlowControl If this is true then for non-unary calls the transport will create
+     *                             an individual broker queue for the server or client streams and only
+     *                             pull from this queue when the next message is required meaning that the
+     *                             channel and the server do not need to use their internal buffers.
      */
-    public JmsChannelTransport(Connection client, String serverTopic) {
+    public JmsChannelTransport(Connection client, String serverTopic, boolean useBrokerFlowControl) {
         this.client = client;
+        this.useBrokerFlowControl = useBrokerFlowControl;
         this.serverTopics = new ServerTopics(serverTopic, TOPIC_SEPARATOR);
     }
 
@@ -195,6 +200,7 @@ public class JmsChannelTransport implements ChannelMessageTransport {
                 if (callQueues.consumer != null) {
                     callQueues.consumer.close();
                 }
+                callQueuesMap.remove(callId);
             }
         } catch (Exception ex) {
             log.error("Exception closing call queues", ex);
@@ -209,37 +215,39 @@ public class JmsChannelTransport implements ChannelMessageTransport {
             if (messageBuilder.hasStart()) {
                 start = messageBuilder;
                 startMessages.put(messageBuilder.getCallId(), messageBuilder);
-                //If this method has input or output streams (it's not just request response)
-                //Create specific queues for these so that the broker can buffer messages using broker queues
-                JmsCallQueues callQueues = new JmsCallQueues();
-                final MethodDescriptor.MethodType methodType = MethodTypeConverter.fromStart(start.getStart().getMethodType());
-                try {
-                    if (!methodType.clientSendsOneMessage()) {
-                        String inQ = serverTopics.make(serverTopics.servicesIn, channel.getChannelId(), messageBuilder.getCallId());
-                        log.debug("Will publish input stream for call " + messageBuilder.getCallId() + " to " + inQ);
-                        callQueues.producerQueue = session.createQueue(inQ);
-                        callQueues.producer = session.createProducer(callQueues.producerQueue);
-                        //The server will subscribe on inTopic for the input stream
-                        start.getStartBuilder().setInTopic(inQ);
-                        callQueuesMap.put(messageBuilder.getCallId(), callQueues);
-                    }
-                    if (!methodType.serverSendsOneMessage()) {
-                        String outQ;
-                        if(start.getStart().getOutTopic() != null && !start.getStart().getOutTopic().isEmpty()){
-                            //The client has used withOption MessageChannel.OUT_TOPIC
-                            outQ = start.getStart().getOutTopic();
-                        } else {
-                            outQ = serverTopics.make(serverTopics.servicesOutForChannel(channel.getChannelId()), messageBuilder.getCallId());
+                if(useBrokerFlowControl) {
+                    //If this method has client or server streams (it's not just request response)
+                    //Create specific queues for these so that the broker can buffer messages using broker queues
+                    JmsCallQueues callQueues = new JmsCallQueues();
+                    final MethodDescriptor.MethodType methodType = MethodTypeConverter.fromStart(start.getStart().getMethodType());
+                    try {
+                        if (!methodType.clientSendsOneMessage()) {
+                            String inQ = serverTopics.make(serverTopics.servicesIn, channel.getChannelId(), messageBuilder.getCallId());
+                            log.debug("Will publish client stream for call " + messageBuilder.getCallId() + " to " + inQ);
+                            callQueues.producerQueue = session.createQueue(inQ);
+                            callQueues.producer = session.createProducer(callQueues.producerQueue);
+                            //The server will subscribe on clientStreamTopic for the client stream
+                            start.getStartBuilder().setClientStreamTopic(inQ);
+                            callQueuesMap.put(messageBuilder.getCallId(), callQueues);
                         }
-                        log.debug("Will subscribe for output stream for call " + messageBuilder.getCallId() + " on " + outQ);
-                        callQueues.consumerQueue = session.createQueue(outQ);
-                        callQueues.consumer = session.createConsumer(callQueues.consumerQueue);
-                        //The server will publish output stream messages to outTopic
-                        start.getStartBuilder().setOutTopic(outQ);
-                        callQueuesMap.put(messageBuilder.getCallId(), callQueues);
+                        if (!methodType.serverSendsOneMessage()) {
+                            String outQ;
+                            if (start.getStart().getServerStreamTopic() != null && !start.getStart().getServerStreamTopic().isEmpty()) {
+                                //The client has used withOption MessageChannel.OUT_TOPIC
+                                outQ = start.getStart().getServerStreamTopic();
+                            } else {
+                                outQ = serverTopics.make(serverTopics.servicesOutForChannel(channel.getChannelId()), messageBuilder.getCallId());
+                            }
+                            log.debug("Will subscribe for server stream for call " + messageBuilder.getCallId() + " on " + outQ);
+                            callQueues.consumerQueue = session.createQueue(outQ);
+                            callQueues.consumer = session.createConsumer(callQueues.consumerQueue);
+                            //The server will publish server stream messages to serverStreamTopic
+                            start.getStartBuilder().setServerStreamTopic(outQ);
+                            callQueuesMap.put(messageBuilder.getCallId(), callQueues);
+                        }
+                    } catch (JMSException ex) {
+                        throw new MessagingException("Failed to create queues for call " + messageBuilder.getCallId());
                     }
-                } catch (JMSException ex) {
-                    throw new MessagingException("Failed to create queues for call " + messageBuilder.getCallId());
                 }
             } else {
                 if (messageBuilder.hasStatus() && (messageBuilder.getStatus().getCode() == Status.CANCELLED.getCode().value())) {
@@ -317,7 +325,7 @@ public class JmsChannelTransport implements ChannelMessageTransport {
                 getExecutor().execute(() -> {
                     //This will block until a message is available so we need to run it on a thread
                     //to prevent the channel from blocking. This will effectively block the thread for the duration
-                    //of the whole call even if
+                    //of the whole call.
                     //We ignore numMessages and just get the next message from the queue
                     //After it is processed the service will call request() again.
                     try {

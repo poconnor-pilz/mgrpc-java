@@ -6,6 +6,7 @@ import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.stub.ServerCallStreamObserver;
 import io.grpc.stub.StreamObserver;
+import io.mgrpc.utils.StatusObserver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -17,7 +18,7 @@ class ListenForCancel extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBas
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-    public ErrorObserver errorObserver = new ErrorObserver("server");
+    public StatusObserver statusObserver = new StatusObserver("server");
     public CountDownLatch contextListenerCancelled = new CountDownLatch(1);
     final CountDownLatch serverCancelHandlerCalled = new CountDownLatch(1);
 
@@ -37,6 +38,6 @@ class ListenForCancel extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBas
             serverCancelHandlerCalled.countDown();
             log.debug("Latch toggled");
         });
-        return this.errorObserver;
+        return this.statusObserver;
     }
 }

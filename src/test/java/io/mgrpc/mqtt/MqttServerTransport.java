@@ -179,7 +179,7 @@ public class MqttServerTransport implements ServerMessageTransport {
     }
 
     private String getTopicForSend(RpcMessage startMessage){
-        String topic = startMessage.getStart().getOutTopic();
+        String topic = startMessage.getStart().getServerStreamTopic();
         if(topic == null || topic.isEmpty()){
             return serverTopics.replyTopic(startMessage.getStart().getChannelId(),
                     startMessage.getStart().getMethodName());

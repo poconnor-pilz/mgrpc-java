@@ -1,8 +1,5 @@
 package io.mgrpc.messaging;
 
-import io.grpc.CallOptions;
-import io.grpc.MethodDescriptor;
-import io.mgrpc.MessageChannel;
 import io.mgrpc.RpcMessage;
 
 import java.util.concurrent.Executor;

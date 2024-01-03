@@ -274,7 +274,7 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
                 //close the call. The client should have already done a subscribe to receive the responses
                 //Note that deadlines will be ignored in this case (although they will be passed to the server)
                 log.debug("replyTo topic = " + responseTopic);
-                start.setOutTopic(responseTopic);
+                start.setServerStreamTopic(responseTopic);
                 close(Status.OK);
             }
             //Add metadata to start
@@ -355,13 +355,17 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
         @Override
         public void onProviderMessage(RpcMessage message) {
 
+            log.debug("Received {} {} {} on {}", new Object[]{message.getCallId(),
+                    message.getSequence(),
+                    message.getMessageCase(),
+                    methodDescriptor.getFullMethodName()
+                    });
+
             switch (message.getMessageCase()) {
                 case STATUS:
-                    log.debug("Received completed response");
                     close(googleRpcStatusToGrpcStatus(message.getStatus()));
                     return;
                 case VALUE:
-                    log.debug("Received message response");
                     clientExec(() -> {
                         responseListener.onHeaders(EMPTY_METADATA);
                         responseListener.onMessage(methodDescriptor.parseResponse(message.getValue().getContents().newInput()));
@@ -386,8 +390,8 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
         public void onQueueCapacityExceeded() {
             log.error("Client queue capacity exceeded for call " + callId);
 
-            //Send a cancel on to the server. We cannot send it an error on its input stream as it may only expect one message
-            //On the server side the listener.onCancel will cause an error to be sent to the server input stream if it has one.
+            //Send a cancel on to the server. We cannot send it an error on its client stream as it may only expect one message
+            //On the server side the listener.onCancel will cause an error to be sent to the client stream if it has one.
             final com.google.rpc.Status cancelled = io.grpc.protobuf.StatusProto.fromStatusAndTrailers(Status.CANCELLED, null);
             sequence++;
             final RpcMessage.Builder msgBuilder = RpcMessage.newBuilder()
@@ -425,7 +429,7 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
             //Do nothing here as we don't implement backpressure.
             //This would be used to send a message to the service to tell it to sent on numMessages
             //But our services will send on messages when they have them (for the moment anyway)
-            log.debug("request({})", numMessages);
+//            log.debug("request({})", numMessages);
             transport.request(callId, numMessages);
         }
 
@@ -493,9 +497,9 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
             if (!initialized) {
                 throw new MessagingException("channel.init() was not called");
             }
-            final RpcMessage message = messageBuilder.build();
-            log.debug("Sending {} {} {} {} ",
-                    new Object[]{message.getMessageCase(), message.getSequence(), message.getCallId(), methodDescriptor.getFullMethodName()});
+            final RpcMessage rpcMessage = messageBuilder.build();
+            log.debug("Sending {} {} {} to {} ",
+                    new Object[]{rpcMessage.getCallId(), rpcMessage.getSequence(), rpcMessage.getMessageCase(), methodDescriptor.getFullMethodName()});
             transport.send(messageBuilder);
         }
 

@@ -9,6 +9,7 @@ import io.mgrpc.*;
 import io.mgrpc.mqtt.MqttChannelTransport;
 import io.mgrpc.mqtt.MqttServerTransport;
 import io.mgrpc.mqtt.MqttUtils;
+import io.mgrpc.utils.StatusObserver;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -48,6 +49,12 @@ public class TestCommsErrors {
                 }
             }
         }
+
+        @Override
+        public void sayHello(HelloRequest request, StreamObserver<HelloReply> responseObserver) {
+            responseObserver.onNext(HelloReply.newBuilder().setMessage("hi").build());
+            responseObserver.onCompleted();
+        }
     }
 
 
@@ -61,14 +68,13 @@ public class TestCommsErrors {
 
         MessageChannel channel = new MessageChannel(new MqttChannelTransport(clientMqtt, serverName));
         channel.start();
-        ErrorObserver errorObserver = new ErrorObserver("obs");
+        StatusObserver statusObserver = new StatusObserver("obs");
 
         final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
-        stub.lotsOfReplies(joe, errorObserver);
+        stub.lotsOfReplies(joe, statusObserver);
 
-        assertTrue(errorObserver.errorLatch.await(2, TimeUnit.SECONDS));
-        assertEquals(Status.UNAVAILABLE.getCode().value(), errorObserver.exception.getStatus().getCode().value());
+        checkStatus(Status.UNAVAILABLE, statusObserver.waitForStatus(2, TimeUnit.SECONDS));
         channel.close();
 
     }
@@ -84,7 +90,7 @@ public class TestCommsErrors {
 
         MessageChannel channel = new MessageChannel(new MqttChannelTransport(clientMqtt, serverName));
         channel.start();
-        ErrorObserver errorObserver = new ErrorObserver("obs");
+        StatusObserver statusObserver = new StatusObserver("obs");
 
         //Allow enough time for the initial ping to the server to fail
         Thread.sleep(500);
@@ -96,9 +102,9 @@ public class TestCommsErrors {
 
         final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
-        stub.lotsOfReplies(joe, errorObserver);
+        stub.sayHello(joe, statusObserver);
 
-        assertFalse(errorObserver.errorLatch.await(2, TimeUnit.SECONDS));
+        checkStatus(Status.OK, statusObserver.waitForStatus(2, TimeUnit.SECONDS));
         channel.close();
         server.close();
 
@@ -127,16 +133,15 @@ public class TestCommsErrors {
         server.start();
         server.addService(new HelloService());
 
-        ErrorObserver errorObserver = new ErrorObserver("obs");
+        StatusObserver statusObserver = new StatusObserver("obs");
 
         final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
-        stub.lotsOfReplies(joe, errorObserver);
+        stub.lotsOfReplies(joe, statusObserver);
 
         Thread.sleep(500);
         server.close();
-        assertTrue(errorObserver.errorLatch.await(2, TimeUnit.SECONDS));
-        assertEquals(Status.UNAVAILABLE.getCode().value(), errorObserver.exception.getStatus().getCode().value());
+        checkStatus(Status.UNAVAILABLE, statusObserver.waitForStatus(2, TimeUnit.SECONDS));
 
         channel.close();
 
@@ -166,20 +171,19 @@ public class TestCommsErrors {
         server.start();
         server.addService(new HelloService());
 
-        ErrorObserver errorObserver = new ErrorObserver("obs");
+        StatusObserver statusObserver = new StatusObserver("obs");
 
         final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
-        stub.lotsOfReplies(joe, errorObserver);
+        stub.lotsOfReplies(joe, statusObserver);
 
         Thread.sleep(500);
         assertEquals(1, channel.getStats().getActiveCalls());
         //This should cause an LWT message which will send on the disconnected status
         sf.disableAndCloseAll();
-        assertTrue(errorObserver.errorLatch.await(2, TimeUnit.SECONDS));
+        checkStatus(Status.UNAVAILABLE, statusObserver.waitForStatus(2, TimeUnit.SECONDS));
         //Calls should be cleaned up because the server is out of contact.
         assertEquals(0, channel.getStats().getActiveCalls());
-        assertEquals(Status.UNAVAILABLE.getCode().value(), errorObserver.exception.getStatus().getCode().value());
 
         channel.close();
         server.close();
@@ -209,11 +213,11 @@ public class TestCommsErrors {
         final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
 
-        final StreamObserver<HelloRequest> inStream = stub.bidiHello(new ErrorObserver("test"));
+        final StreamObserver<HelloRequest> inStream = stub.bidiHello(new StatusObserver("test"));
         inStream.onNext(joe);
 
         //Wait for at least one message to go through before canceling to make sure the call is fully started.
-        listenForCancel.errorObserver.waitForNext(2, TimeUnit.SECONDS);
+        listenForCancel.statusObserver.waitForNext(2, TimeUnit.SECONDS);
         assertEquals(server.getStats().getActiveCalls(), 1);
 
         //Close the channel. The server cancel handler should get called
@@ -223,7 +227,7 @@ public class TestCommsErrors {
         //assertTrue(listenForCancel.contextListenerCancelled.await(5, TimeUnit.SECONDS));
 
         //The client stream returned by the server should receive a onError() CANCELLED
-        assertEquals(listenForCancel.errorObserver.waitForStatus(10, TimeUnit.SECONDS).getCode(), Status.CANCELLED.getCode());
+        checkStatus(Status.CANCELLED, listenForCancel.statusObserver.waitForStatus(10, TimeUnit.SECONDS));
 
         //The call should be cleaned up on the server.
         assertEquals(server.getStats().getActiveCalls(), 0);
@@ -260,11 +264,11 @@ public class TestCommsErrors {
         final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
 
-        final StreamObserver<HelloRequest> inStream = stub.bidiHello(new ErrorObserver("test"));
+        final StreamObserver<HelloRequest> inStream = stub.bidiHello(new StatusObserver("test"));
         inStream.onNext(joe);
 
         //Wait for at least one message to go through before canceling to make sure the call is fully started.
-        listenForCancel.errorObserver.waitForNext(2, TimeUnit.SECONDS);
+        listenForCancel.statusObserver.waitForNext(2, TimeUnit.SECONDS);
         assertEquals(server.getStats().getActiveCalls(), 1);
 
         //Break the client connection. The broker should send the LWT and the server cancel handler should get called
@@ -274,7 +278,7 @@ public class TestCommsErrors {
         //assertTrue(listenForCancel.contextListenerCancelled.await(5, TimeUnit.SECONDS));
 
         //The client stream returned by the server should receive a onError() CANCELLED
-        assertEquals(listenForCancel.errorObserver.waitForStatus(10, TimeUnit.SECONDS).getCode(), Status.CANCELLED.getCode());
+        checkStatus(Status.CANCELLED, listenForCancel.statusObserver.waitForStatus(10, TimeUnit.SECONDS));
 
         //The call should be cleaned up on the server.
         assertEquals(server.getStats().getActiveCalls(), 0);
@@ -285,5 +289,8 @@ public class TestCommsErrors {
     }
 
 
+    private void checkStatus(Status expected, Status actual){
+        assertEquals(expected.getCode(), actual.getCode());
+    }
 
 }

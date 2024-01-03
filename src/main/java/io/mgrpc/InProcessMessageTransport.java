@@ -1,7 +1,5 @@
 package io.mgrpc;
 
-import io.grpc.CallOptions;
-import io.grpc.MethodDescriptor;
 import io.mgrpc.messaging.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

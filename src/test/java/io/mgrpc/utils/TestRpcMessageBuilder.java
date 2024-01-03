@@ -27,7 +27,7 @@ public class TestRpcMessageBuilder {
 
     public static RpcMessage makeStart(String methodName, Start.MethodType methodType, String callId, int sequence, String replyTo, MessageLite payload){
         Start start = Start.newBuilder()
-                .setOutTopic(replyTo)
+                .setServerStreamTopic(replyTo)
                 .setMethodName(methodName)
                 .setMethodType(methodType)
                 .build();
