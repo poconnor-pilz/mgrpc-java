@@ -28,9 +28,6 @@ public abstract class TestHelloBase {
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
 
-    //Make server name short but random to prevent stray status messages from previous tests affecting this test
-    private static final String SERVER = Id.shortRandom();
-
     private static final long REQUEST_TIMEOUT = 2000;
 
 

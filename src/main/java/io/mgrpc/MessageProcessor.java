@@ -18,12 +18,13 @@ import java.util.concurrent.PriorityBlockingQueue;
  * used to call it (so it can't use thread locals)
  * This is used to cater for messging systems that do not guarantee ordering or duplicates e.g.
  * https://docs.aws.amazon.com/iot/latest/developerguide/mqtt.html#mqtt-differences
- *
  */
 public class MessageProcessor {
 
     private static final int UNINITIALISED_SEQUENCE = -1;
     public static final int INTERRUPT_SEQUENCE = -2;
+
+    public static final int TERMINATE_SEQUENCE = -3;
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
     //Messages are ordered by sequence
@@ -31,7 +32,6 @@ public class MessageProcessor {
             Comparator.comparingInt(o -> o.getSequence()));
 
     private final int queueSize;
-
 
     /**
      * List of recent sequence ids, Used for checking for duplicate messages
@@ -42,6 +42,8 @@ public class MessageProcessor {
     private final MessageHandler messageHandler;
 
     private boolean queueCapacityExceeded = false;
+
+    private boolean processingThreadStarted = false;
 
     private int sequenceOfLastProcessedMessage = UNINITIALISED_SEQUENCE;
 
@@ -56,6 +58,7 @@ public class MessageProcessor {
         /**
          * onMessage() may be called from multiple threads but only one onMessage will be active at a time.
          * So it is thread safe with respect to itself but cannot use thread locals
+         *
          * @param message
          */
         void onProviderMessage(RpcMessage message);
@@ -67,22 +70,21 @@ public class MessageProcessor {
         void onQueueCapacityExceeded();
     }
 
+    public void close() {
+        if (!processingThreadStarted) {
+            return;
+        }
+
+        try {
+            messageQueue.put(RpcMessage.newBuilder().setSequence(TERMINATE_SEQUENCE).build());
+        } catch (InterruptedException e) {
+            log.error("Interrupted while putting termination message on queue", e);
+        }
+    }
 
     public void queueMessage(RpcMessage message) {
-        //It would be simpler here to dedicate a single thread to a call
-        //But this would mean that a call with low activity would hog that thread for its duration
-        //With java project loom this would not matter as threads are cheap.
-        //So it might be worth doing that when loom becomes available.
-
-        //(Note that this is more like the actor model than classic gRPC because we are using a queue instead
-        // of flow control. Although we may implement flow control later)
-        //"In Akka, actors are purely reactive components: an actor is passive until a message is sent to it.
-        //When a message arrives to the actor's mailbox one thread is allocated to the actor,
-        //the message is extracted from the mailbox and the actor applies the behavior.
-        //When the processing is done, the thread is returned to the pool.
-        //This way actors don't occupy any CPU resources when they are inactive."
         try {
-            if(queueCapacityExceeded){
+            if (queueCapacityExceeded) {
                 //Some messages may come in from the broker after the queue is exceeded, ignore them.
                 log.warn("Ignoring message after queue exceeded");
                 return;
@@ -98,23 +100,33 @@ public class MessageProcessor {
 //                    messageWithTopic.message.getSequence());
             messageQueue.put(message);
             //Process queue on thread pool
-            this.executor.execute(() -> processQueue());
+            if (!processingThreadStarted) {
+                processingThreadStarted = true;
+                this.executor.execute(() -> processQueue());
+            }
         } catch (InterruptedException e) {
             log.error("Interrupted while putting message on queue", e);
         }
     }
 
-    private synchronized void processQueue() {
-        //This method will be called by multiple threads but it is synchronized so that the
-        //service method call will only process one message in a stream at a time i.e. the
-        //service method *call* behaves like an actor. However, the service method itself may have
-        //many calls ongoing concurrently (unless the service developer synchronizes it).
-        RpcMessage message  = messageQueue.poll();
-        while (message != null && !queueCapacityExceeded) {
+    private void processQueue() {
+        RpcMessage message = null;
+        try {
+            message = messageQueue.take();
+        } catch (InterruptedException e) {
+            log.error("Interrupted while processing queue", e);
+            return;
+        }
+        while (!queueCapacityExceeded) {
 
             final int sequence = message.getSequence();
+
+            if (sequence == TERMINATE_SEQUENCE) {
+                return;
+            }
+
             if (sequence < 0) {
-                if(sequence != INTERRUPT_SEQUENCE) {
+                if (sequence != INTERRUPT_SEQUENCE) {
                     log.error("Non-interrupt message received with sequence less than zero");
                     return;
                 }
@@ -127,33 +139,39 @@ public class MessageProcessor {
                     try {
                         log.warn("{} with sequence {}, is out of order. Putting back on queue.", message.getMessageCase(), sequence);
                         messageQueue.put(message);
+                        //Give it some time for the right message to arrive and be ordered by the queue
+                        Thread.sleep(500);
                     } catch (InterruptedException e) {
                         log.error("Interrupted while putting message back on queue", e);
+                        return;
                     }
-                    return;
-                }
-                if(sequence != INTERRUPT_SEQUENCE) {
-                    sequenceOfLastProcessedMessage = sequence;
-                    //only add to recents if it has not been put back on queue
-                    recents.add(sequence);
-                }
-//                log.debug("Handling {} {} {}", new Object[]{message.getMessageCase(), message.getSequence(),
-//                        message.getCallId()});
-                try {
-                    this.messageHandler.onProviderMessage(message);
-                } catch (Exception ex){
-                    log.error("Exception processing message in thread: " + Thread.currentThread().getName(), ex);
+                } else {
+                    if (sequence != INTERRUPT_SEQUENCE) {
+                        sequenceOfLastProcessedMessage = sequence;
+                        //only add to recents if it has not been put back on queue
+                        recents.add(sequence);
+                    }
+                    try {
+                        this.messageHandler.onProviderMessage(message);
+                    } catch (Exception ex) {
+                        log.error("Exception processing message in thread: " + Thread.currentThread().getName(), ex);
+                    }
                 }
             }
 
             //get the next message and process it.
-            message = messageQueue.poll();
+            try {
+                message = messageQueue.take();
+            } catch (InterruptedException e) {
+                log.error("Interrupted while processing queue", e);
+                return;
+            }
         }
     }
 
     private boolean outOfOrder(int sequence) {
-        if(sequence == INTERRUPT_SEQUENCE){
-            //An interrupt message should be processed immediately
+        if (sequence == INTERRUPT_SEQUENCE || sequence == TERMINATE_SEQUENCE) {
+            //An interrupt or terminate message should be processed immediately
             return false;
         }
         if (sequenceOfLastProcessedMessage == UNINITIALISED_SEQUENCE) {

@@ -249,7 +249,7 @@ public class MessageServer implements ServerMessageListener {
                         } else {
                             log.debug("ServerCall null in queueClientMessage() for cancel message. Call" + callId);
                         }
-                        this.remove();
+                        this.close();
                     });
                     return;
                 }
@@ -277,7 +277,7 @@ public class MessageServer implements ServerMessageListener {
                     if (serverCall == null) {
                         //We never received a valid first message for this call or the first message is not of type START
                         log.error("Unrecognised call id: " + callId);
-                        this.remove();
+                        this.close();
                         return;
                     }
                     //This is a non-start message so just send it on to the service
@@ -343,7 +343,8 @@ public class MessageServer implements ServerMessageListener {
         }
 
 
-        public void remove() {
+        public void close() {
+            messageProcessor.close();
             MessageServer.this.removeCall(this.callId);
             this.removed = true;
         }
@@ -380,7 +381,7 @@ public class MessageServer implements ServerMessageListener {
                     Deadline deadline = Deadline.after(start.getTimeoutMillis(), TimeUnit.MILLISECONDS);
                     this.deadlineCancellationFuture = DeadlineTimer.start(deadline, (String deadlineMessage) -> {
                         cancel();
-                        MessageHandler.this.remove();
+                        MessageHandler.this.close();
                     });
                 }
                 //TODO: Populate the key,value pairs of cancellableContext with e.g. auth credentials from this.header
@@ -498,7 +499,7 @@ public class MessageServer implements ServerMessageListener {
                 sequence++;
                 sendStatus(callId, sequence, status);
                 cancelTimeouts();
-                MessageHandler.this.remove();
+                MessageHandler.this.close();
                 transport.onCallClosed(callId);
             }
 
@@ -511,7 +512,7 @@ public class MessageServer implements ServerMessageListener {
                 }
                 cancelled = true;
                 cancelTimeouts();
-                MessageHandler.this.remove();
+                MessageHandler.this.close();
                 //listener or cancellableContext could be null here in the case where a cancel
                 //gets in so quickly that the call hasn't even been fully started yet.
                 //This only seems to happen in bad test code that doesn't wait for the call to start.

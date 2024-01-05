@@ -409,6 +409,7 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
 
         public void close(Status status) {
             closed = true;
+            messageProcessor.close();
             log.debug("Closing call {} with status: {} {}", new Object[]{this.callId, status.getCode(), status.getDescription()});
             context.removeListener(cancellationListener);
             cancelTimeouts();
