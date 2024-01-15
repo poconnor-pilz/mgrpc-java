@@ -198,7 +198,7 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
             this.callOptions = callOptions;
             this.context = Context.current().withCancellation();
             this.callId = Id.random();
-            messageProcessor = new MessageProcessor(executor, queueSize, this);
+            messageProcessor = new MessageProcessor(executor, callId, queueSize, this);
         }
 
         public String getCallId() {
@@ -353,7 +353,7 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
          * @param message
          */
         @Override
-        public void onProviderMessage(RpcMessage message) {
+        public void onProcessorMessage(RpcMessage message) {
 
             log.debug("Received {} {} {} on {}", new Object[]{message.getCallId(),
                     message.getSequence(),
@@ -387,7 +387,7 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
          * ongoing onMessage() call
          */
         @Override
-        public void onQueueCapacityExceeded() {
+        public void onProcessorQueueCapacityExceeded(String callId) {
             log.error("Client queue capacity exceeded for call " + callId);
 
             //Send a cancel on to the server. We cannot send it an error on its client stream as it may only expect one message

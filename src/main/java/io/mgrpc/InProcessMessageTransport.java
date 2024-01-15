@@ -125,7 +125,7 @@ public class InProcessMessageTransport {
             if(rpcMessageBuilder.hasStart()){
                 callIdToChannelIdMap.put(rpcMessageBuilder.getCallId(), rpcMessageBuilder.getStart().getChannelId());
             }
-            server.onMessage(rpcMessageBuilder.build());
+            server.onProcessorMessage(rpcMessageBuilder.build());
         }
 
         @Override

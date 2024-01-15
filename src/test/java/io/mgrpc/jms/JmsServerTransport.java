@@ -16,6 +16,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 
+import static io.mgrpc.MethodTypeConverter.methodType;
+
 public class JmsServerTransport implements ServerMessageTransport {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
@@ -118,7 +120,7 @@ public class JmsServerTransport implements ServerMessageTransport {
                                 }
 
                             }
-                            server.onMessage(rpcMessage);
+                            server.onProcessorMessage(rpcMessage);
                         }
                     } catch (InvalidProtocolBufferException e) {
                         log.error("Failed to parse RpcMessage", e);
@@ -213,7 +215,7 @@ public class JmsServerTransport implements ServerMessageTransport {
                             try {
                                 final RpcSet rpcSet = RpcSet.parseFrom(bytes);
                                 for (RpcMessage rpcMessage : rpcSet.getMessagesList()) {
-                                    server.onMessage(rpcMessage);
+                                    server.onProcessorMessage(rpcMessage);
                                 }
                             } catch (InvalidProtocolBufferException e) {
                                 log.error("Failed to parse RpcMessage", e);
@@ -256,7 +258,7 @@ public class JmsServerTransport implements ServerMessageTransport {
                 }
             }
             final RpcSet.Builder setBuilder = RpcSet.newBuilder();
-            if (MethodTypeConverter.fromStart(startMessage).serverSendsOneMessage()) {
+            if (methodType(startMessage).serverSendsOneMessage()) {
                 if (message.hasValue()) {
                     //Send the value and the status as on as a set in a single message to the broker
                     setBuilder.addMessages(message);

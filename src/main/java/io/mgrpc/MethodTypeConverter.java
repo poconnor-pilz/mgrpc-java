@@ -4,7 +4,7 @@ import io.grpc.MethodDescriptor;
 
 public class MethodTypeConverter {
 
-    public static MethodDescriptor.MethodType fromStart(Start.MethodType methodType) {
+    public static MethodDescriptor.MethodType methodType(Start.MethodType methodType) {
         switch (methodType) {
             case UNARY:
                 return MethodDescriptor.MethodType.UNARY;
@@ -19,11 +19,11 @@ public class MethodTypeConverter {
         }
     }
 
-    public static MethodDescriptor.MethodType fromStart(RpcMessageOrBuilder rpcMessage) {
+    public static MethodDescriptor.MethodType methodType(RpcMessageOrBuilder rpcMessage) {
         if(!rpcMessage.hasStart()){
             throw new RuntimeException("Not a start message");
         }
-        return fromStart(rpcMessage.getStart().getMethodType());
+        return methodType(rpcMessage.getStart().getMethodType());
     }
 
 

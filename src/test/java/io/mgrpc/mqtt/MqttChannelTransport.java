@@ -23,6 +23,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.*;
 
+import static io.mgrpc.MethodTypeConverter.methodType;
+
 //  Topics and connection status:
 
 //  The general topic structure is:
@@ -218,7 +220,7 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
 
         final RpcSet.Builder rpcSet = RpcSet.newBuilder();
 
-        if (MethodTypeConverter.fromStart(start).clientSendsOneMessage()) {
+        if (methodType(start).clientSendsOneMessage()) {
             //If clientSendsOneMessage we only want to send one broker message containing
             //start, request, status.
             if (messageBuilder.hasStart()) {

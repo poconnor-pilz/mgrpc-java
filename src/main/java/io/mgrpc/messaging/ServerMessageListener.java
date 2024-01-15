@@ -13,7 +13,9 @@ public interface ServerMessageListener {
      * a request from a channel
      * @param message An rpc message containing the request from a channel.
      */
-    void onMessage(RpcMessage message);
+    void onProcessorMessage(RpcMessage message);
+
+    void onProcessorQueueCapacityExceeded(String callId);
 
     /**
      * The ServerMessageTransport should call this message on the serer if it knows that a channel

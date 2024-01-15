@@ -18,16 +18,23 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 
-public class MqttServerTransport implements ServerMessageTransport {
+import static io.mgrpc.MethodTypeConverter.methodType;
+
+public class MqttServerTransport implements ServerMessageTransport, MessageProcessor.MessageHandler {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
     private static final com.google.rpc.Status GOOGLE_RPC_OK_STATUS = io.grpc.protobuf.StatusProto.fromStatusAndTrailers(Status.OK, null);
 
+    private static final int DEFAULT_QUEUE_SIZE = 100;
+
     private final MqttAsyncClient client;
     private final static long SUBSCRIBE_TIMEOUT_MILLIS = 5000;
 
     private Map<String, RpcMessage> startMessages = new ConcurrentHashMap<>();
+    private Map<String, MessageProcessor> processors = new ConcurrentHashMap<>();
+
+
 
     private final ServerTopics serverTopics;
 
@@ -80,13 +87,18 @@ public class MqttServerTransport implements ServerMessageTransport {
                 try {
                     final RpcSet rpcSet = RpcSet.parseFrom(mqttMessage.getPayload());
                     for (RpcMessage message : rpcSet.getMessagesList()) {
+                        MessageProcessor processor = processors.get(message.getCallId());
+                        if(processor == null){
+                            processor = new MessageProcessor(getExecutor(), message.getCallId(), DEFAULT_QUEUE_SIZE, this);
+                            processors.put(message.getCallId(), processor);
+                        }
                         if (message.hasStart()) {
                             //Cache the start message so that we can use it to get information about the call later.
                             startMessages.put(message.getCallId(), message);
                             log.debug("Will send output messages for call " + message.getCallId() + " to "
                             + getTopicForSend(message));
                         }
-                        server.onMessage(message);
+                        processor.queueMessage(message);
                     }
                 } catch (InvalidProtocolBufferException e) {
                     log.error("Failed to parse RpcMessage", e);
@@ -117,6 +129,18 @@ public class MqttServerTransport implements ServerMessageTransport {
         }
     }
 
+
+    @Override
+    public void onProcessorMessage(RpcMessage message) {
+        server.onProcessorMessage(message);
+    }
+
+    @Override
+    public void onProcessorQueueCapacityExceeded(String callId) {
+        server.onProcessorQueueCapacityExceeded(callId);
+    }
+
+
     @Override
     public void close() {
         try {
@@ -131,6 +155,10 @@ public class MqttServerTransport implements ServerMessageTransport {
 
     @Override
     public void onCallClosed(String callId) {
+        final MessageProcessor processor = processors.remove(callId);
+        if(processor != null){
+            processor.close();
+        }
         startMessages.remove(callId);
     }
 
@@ -150,7 +178,7 @@ public class MqttServerTransport implements ServerMessageTransport {
 
 
         final RpcSet.Builder setBuilder = RpcSet.newBuilder();
-        if (MethodTypeConverter.fromStart(startMessage).serverSendsOneMessage()) {
+        if (methodType(startMessage).serverSendsOneMessage()) {
             if (message.hasValue()) {
                 //Send the value and the status as a set in one message to the broker
                 setBuilder.addMessages(message);
@@ -197,7 +225,6 @@ public class MqttServerTransport implements ServerMessageTransport {
             log.error("Failed to notify connected", e);
         }
     }
-
 
 
 }

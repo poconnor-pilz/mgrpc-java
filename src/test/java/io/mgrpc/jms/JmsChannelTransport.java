@@ -15,6 +15,8 @@ import java.lang.invoke.MethodHandles;
 import java.util.Map;
 import java.util.concurrent.*;
 
+import static io.mgrpc.MethodTypeConverter.methodType;
+
 
 //  Topics and connection status:
 
@@ -219,9 +221,8 @@ public class JmsChannelTransport implements ChannelMessageTransport {
                     //If this method has client or server streams (it's not just request response)
                     //Create specific queues for these so that the broker can buffer messages using broker queues
                     JmsCallQueues callQueues = new JmsCallQueues();
-                    final MethodDescriptor.MethodType methodType = MethodTypeConverter.fromStart(start.getStart().getMethodType());
                     try {
-                        if (!methodType.clientSendsOneMessage()) {
+                        if (!methodType(start).clientSendsOneMessage()) {
                             String inQ = serverTopics.make(serverTopics.servicesIn, channel.getChannelId(), messageBuilder.getCallId());
                             log.debug("Will publish client stream for call " + messageBuilder.getCallId() + " to " + inQ);
                             callQueues.producerQueue = session.createQueue(inQ);
@@ -230,7 +231,7 @@ public class JmsChannelTransport implements ChannelMessageTransport {
                             start.getStartBuilder().setClientStreamTopic(inQ);
                             callQueuesMap.put(messageBuilder.getCallId(), callQueues);
                         }
-                        if (!methodType.serverSendsOneMessage()) {
+                        if (!methodType(start).serverSendsOneMessage()) {
                             String outQ;
                             if (start.getStart().getServerStreamTopic() != null && !start.getStart().getServerStreamTopic().isEmpty()) {
                                 //The client has used withOption MessageChannel.OUT_TOPIC
@@ -260,7 +261,7 @@ public class JmsChannelTransport implements ChannelMessageTransport {
         }
 
         final RpcSet.Builder setBuilder = RpcSet.newBuilder();
-        if (MethodTypeConverter.fromStart(start).clientSendsOneMessage()) {
+        if (methodType(start).clientSendsOneMessage()) {
             //If clientSendsOneMessage we only want to send one broker message containing
             //start, request, status.
             if (messageBuilder.hasStart()) {

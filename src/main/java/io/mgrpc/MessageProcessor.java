@@ -39,6 +39,8 @@ public class MessageProcessor {
     private final Recents recents = new Recents();
 
     private final Executor executor;
+
+    private final String callId;
     private final MessageHandler messageHandler;
 
     private boolean queueCapacityExceeded = false;
@@ -47,27 +49,28 @@ public class MessageProcessor {
 
     private int sequenceOfLastProcessedMessage = UNINITIALISED_SEQUENCE;
 
-    public MessageProcessor(Executor executor, int queueSize, MessageHandler messageHandler) {
+    public MessageProcessor(Executor executor, String callId, int queueSize, MessageHandler messageHandler) {
         this.queueSize = queueSize;
         this.executor = executor;
+        this.callId = callId;
         this.messageHandler = messageHandler;
     }
 
 
     public interface MessageHandler {
         /**
-         * onMessage() may be called from multiple threads but only one onMessage will be active at a time.
+         * onProviderMessage() may be called from multiple threads but only one onProviderMessage will be active at a time.
          * So it is thread safe with respect to itself but cannot use thread locals
          *
          * @param message
          */
-        void onProviderMessage(RpcMessage message);
+        void onProcessorMessage(RpcMessage message);
 
         /**
          * onQueueCapacityExceeded() is not thread safe and can be called at the same time as an
          * ongoing onMessage() call
          */
-        void onQueueCapacityExceeded();
+        void onProcessorQueueCapacityExceeded(String callId);
     }
 
     public void close() {
@@ -92,7 +95,7 @@ public class MessageProcessor {
             if ((messageQueue.size() + 1) > queueSize) {
                 log.error("Queue capacity ({}) exceeded for call {}",
                         queueSize, message.getCallId());
-                this.messageHandler.onQueueCapacityExceeded();
+                this.messageHandler.onProcessorQueueCapacityExceeded(callId);
                 queueCapacityExceeded = true;
                 return;
             }
@@ -152,7 +155,7 @@ public class MessageProcessor {
                         recents.add(sequence);
                     }
                     try {
-                        this.messageHandler.onProviderMessage(message);
+                        this.messageHandler.onProcessorMessage(message);
                     } catch (Exception ex) {
                         log.error("Exception processing message in thread: " + Thread.currentThread().getName(), ex);
                     }
