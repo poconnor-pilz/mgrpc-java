@@ -71,6 +71,8 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
     private static final com.google.rpc.Status GOOGLE_RPC_OK_STATUS = io.grpc.protobuf.StatusProto.fromStatusAndTrailers(Status.OK, null);
 
     private Map<String, RpcMessage.Builder> startMessages = new ConcurrentHashMap<>();
+    private final CallSequencer callSequencer = new CallSequencer();
+
 
     private final ServerTopics serverTopics;
 
@@ -80,6 +82,7 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
     private ChannelMessageListener channel;
 
     private final Map<String, List<StreamObserver>> subscribersByTopic = new ConcurrentHashMap<>();
+
 
 
     public static class Stats {
@@ -143,7 +146,7 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
                 try {
                     final RpcSet rpcSet = RpcSet.parseFrom(mqttMessage.getPayload());
                     for (RpcMessage rpcMessage : rpcSet.getMessagesList()) {
-                        channel.onMessage(rpcMessage);
+                        callSequencer.queueMessage(rpcMessage);
                     }
                 } catch (InvalidProtocolBufferException e) {
                     log.error("Failed to parse RpcMessage", e);
@@ -179,7 +182,22 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
     }
 
     @Override
-    public void request(String callId, int numMessages){}
+    public void request(String callId, int numMessages){
+        log.debug("Request(" + numMessages + ") for call " + callId);
+        getExecutor().execute(()->{
+            for(int i = 0; i < numMessages; i++){
+                final RpcMessage message = callSequencer.getNextMessage(callId);
+                if(message == null){
+                    //This could happen if call has been terminated
+                    log.warn("Failed to get next message for call " + callId);
+                    return;
+                }
+                channel.onRpcMessage(message);
+            }
+        });
+    }
+
+
 
     @Override
     public void close() {
@@ -206,6 +224,7 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
             if(messageBuilder.hasStart()){
                 start = messageBuilder;
                 startMessages.put(messageBuilder.getCallId(), messageBuilder);
+                callSequencer.makeQueue(messageBuilder.getCallId());
                 log.debug("Will send input messages for call " + messageBuilder.getCallId()
                         + " to " + serverTopics.methodIn(start.getStart().getMethodName()));
             } else {
@@ -224,7 +243,7 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
             //If clientSendsOneMessage we only want to send one broker message containing
             //start, request, status.
             if (messageBuilder.hasStart()) {
-                //Wait for the request
+                //Wait for the request value
                 return;
             }
             if (messageBuilder.hasStatus()) {

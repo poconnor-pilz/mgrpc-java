@@ -20,7 +20,7 @@ import java.util.concurrent.Executors;
 
 import static io.mgrpc.MethodTypeConverter.methodType;
 
-public class MqttServerTransport implements ServerMessageTransport, MessageProcessor.MessageHandler {
+public class MqttServerTransport implements ServerMessageTransport {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -32,8 +32,8 @@ public class MqttServerTransport implements ServerMessageTransport, MessageProce
     private final static long SUBSCRIBE_TIMEOUT_MILLIS = 5000;
 
     private Map<String, RpcMessage> startMessages = new ConcurrentHashMap<>();
-    private Map<String, MessageProcessor> processors = new ConcurrentHashMap<>();
 
+    private final CallSequencer callSequencer = new CallSequencer();
 
 
     private final ServerTopics serverTopics;
@@ -87,18 +87,18 @@ public class MqttServerTransport implements ServerMessageTransport, MessageProce
                 try {
                     final RpcSet rpcSet = RpcSet.parseFrom(mqttMessage.getPayload());
                     for (RpcMessage message : rpcSet.getMessagesList()) {
-                        MessageProcessor processor = processors.get(message.getCallId());
-                        if(processor == null){
-                            processor = new MessageProcessor(getExecutor(), message.getCallId(), DEFAULT_QUEUE_SIZE, this);
-                            processors.put(message.getCallId(), processor);
-                        }
                         if (message.hasStart()) {
                             //Cache the start message so that we can use it to get information about the call later.
                             startMessages.put(message.getCallId(), message);
                             log.debug("Will send output messages for call " + message.getCallId() + " to "
-                            + getTopicForSend(message));
+                                    + getTopicForSend(message));
                         }
-                        processor.queueMessage(message);
+                        callSequencer.makeQueue(message.getCallId());
+                        callSequencer.queueMessage(message);
+                        if (message.hasStart()) {
+                            //pump the queue. After the start message is processed grpc will do the rest of the pumping
+                            request(message.getCallId(), 1);
+                        }
                     }
                 } catch (InvalidProtocolBufferException e) {
                     log.error("Failed to parse RpcMessage", e);
@@ -130,15 +130,7 @@ public class MqttServerTransport implements ServerMessageTransport, MessageProce
     }
 
 
-    @Override
-    public void onProcessorMessage(RpcMessage message) {
-        server.onProcessorMessage(message);
-    }
 
-    @Override
-    public void onProcessorQueueCapacityExceeded(String callId) {
-        server.onProcessorQueueCapacityExceeded(callId);
-    }
 
 
     @Override
@@ -155,15 +147,25 @@ public class MqttServerTransport implements ServerMessageTransport, MessageProce
 
     @Override
     public void onCallClosed(String callId) {
-        final MessageProcessor processor = processors.remove(callId);
-        if(processor != null){
-            processor.close();
-        }
+        callSequencer.onCallClosed(callId);
         startMessages.remove(callId);
     }
 
     @Override
     public void request(String callId, int numMessages) {
+        log.debug("Request(" + numMessages + ") for call " + callId);
+        getExecutor().execute(()->{
+            for(int i = 0; i < numMessages; i++){
+                final RpcMessage message = callSequencer.getNextMessage(callId);
+                log.debug("got message from sequencer");
+                if(message == null){
+                    //This could happen if call has been terminated
+                    log.warn("Failed to get next message for call " + callId);
+                    return;
+                }
+                server.onRpcMessage(message);
+            }
+        });
     }
 
     @Override
@@ -175,7 +177,6 @@ public class MqttServerTransport implements ServerMessageTransport, MessageProce
             log.error(err);
             throw new MessagingException(err);
         }
-
 
         final RpcSet.Builder setBuilder = RpcSet.newBuilder();
         if (methodType(startMessage).serverSendsOneMessage()) {

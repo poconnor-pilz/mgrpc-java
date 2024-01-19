@@ -19,12 +19,15 @@ public class InProcessMessageTransport {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-    private final Map<String, ChannelMessageListener> channelsById = new ConcurrentHashMap<>();
-    private ServerMessageListener server;
+    private final Map<String, RpcMessageHandler> channelsById = new ConcurrentHashMap<>();
+    private RpcMessageHandler server;
 
     private final ServerMessageTransport serverTransport = new InprocServerTransport();
 
     private final Map<String, String> callIdToChannelIdMap = new ConcurrentHashMap<>();
+
+    private final CallSequencer serverCallSequencer = new CallSequencer();
+    private final CallSequencer channelCallSequencer = new CallSequencer();
 
     private static volatile Executor executorSingleton;
 
@@ -51,7 +54,6 @@ public class InProcessMessageTransport {
 
     private class InprocServerTransport implements ServerMessageTransport {
 
-
         @Override
         public void start(ServerMessageListener server) throws MessagingException {
             if(InProcessMessageTransport.this.server != null){
@@ -72,24 +74,17 @@ public class InProcessMessageTransport {
 
         @Override
         public void request(String callId, int numMessages) {
+            getExecutor().execute(()->{
+                for(int i = 0; i < numMessages; i++){
+                    final RpcMessage rpcMessage = serverCallSequencer.getNextMessage(callId);
+                    server.onRpcMessage(rpcMessage);
+                }
+            });
         }
 
         @Override
         public void send(RpcMessage message) throws MessagingException {
-            final String channelId = callIdToChannelIdMap.get(message.getCallId());
-            if(channelId == null){
-                String err = "Channel " + channelId +  " does not exist";
-                log.error(err);
-                throw new MessagingException(err);
-            }
-
-            final ChannelMessageListener channel = channelsById.get(channelId);
-            if(channel == null){
-                String err = "Channel " + channelId +  " does not exist";
-                log.error(err);
-                throw new MessagingException(err);
-            }
-            channel.onMessage(message);
+            channelCallSequencer.queueMessage(message);
         }
 
         @Override
@@ -113,7 +108,14 @@ public class InProcessMessageTransport {
         public void onCallClosed(String callId){}
 
         @Override
-        public void request(String callId, int numMessages) {}
+        public void request(String callId, int numMessages) {
+            getExecutor().execute(()->{
+                for(int i = 0; i < numMessages; i++){
+                    final RpcMessage rpcMessage = channelCallSequencer.getNextMessage(callId);
+                    channelsById.get(this.channelId).onRpcMessage(rpcMessage);
+                }
+            });
+        }
 
         @Override
         public void close() {
@@ -121,11 +123,17 @@ public class InProcessMessageTransport {
         }
 
         @Override
-        public void send(RpcMessage.Builder rpcMessageBuilder) throws MessagingException {
-            if(rpcMessageBuilder.hasStart()){
-                callIdToChannelIdMap.put(rpcMessageBuilder.getCallId(), rpcMessageBuilder.getStart().getChannelId());
+        public void send(RpcMessage.Builder rpcMessage) throws MessagingException {
+            if(rpcMessage.hasStart()){
+                serverCallSequencer.makeQueue(rpcMessage.getCallId());
+                channelCallSequencer.makeQueue(rpcMessage.getCallId());
+                callIdToChannelIdMap.put(rpcMessage.getCallId(), rpcMessage.getStart().getChannelId());
             }
-            server.onProcessorMessage(rpcMessageBuilder.build());
+            serverCallSequencer.queueMessage(rpcMessage.build());
+            if(rpcMessage.hasStart()){
+                //Pump the start message. After this grpc will pump the rest of the messages
+                serverTransport.request(rpcMessage.getCallId(), 1);
+            }
         }
 
         @Override

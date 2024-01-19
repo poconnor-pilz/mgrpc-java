@@ -14,14 +14,14 @@ import java.lang.invoke.MethodHandles;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executor;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 import static io.mgrpc.RpcMessage.MessageCase.START;
 
 
-public class MessageServer implements ServerMessageListener, MessageProcessor.MessageHandler {
+public class MessageServer implements ServerMessageListener, RpcMessageHandler {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
     private MInternalHandlerRegistry registry = new MInternalHandlerRegistry();
@@ -72,7 +72,6 @@ public class MessageServer implements ServerMessageListener, MessageProcessor.Me
 
 
     public void start() throws MessagingException {
-
 
         transport.start(this);
 
@@ -127,9 +126,7 @@ public class MessageServer implements ServerMessageListener, MessageProcessor.Me
                         .setCallId(callId)
                         .setSequence(MessageProcessor.INTERRUPT_SEQUENCE)
                         .build();
-                //Note that because this is a cancel it will get processed immediately by queueClientMessage
-                //so setting INTERRUPT_SEQUENCE above was strictly unnecessary.
-                msgServerCall.onClientMessage(rpcMessage);
+                msgServerCall.onRpcMessage(rpcMessage);
             }
         }
     }
@@ -174,7 +171,7 @@ public class MessageServer implements ServerMessageListener, MessageProcessor.Me
     }
 
     @Override
-    public void onProcessorMessage(RpcMessage message) {
+    public void onRpcMessage(RpcMessage message) {
 
         try {
             final String callId = message.getCallId();
@@ -199,7 +196,7 @@ public class MessageServer implements ServerMessageListener, MessageProcessor.Me
                 if (serverCall == null) {
                     log.error("Server call not found for call id " + callId);
                 } else {
-                    serverCall.onClientMessage(message);
+                    serverCall.onRpcMessage(message);
                 }
                 return;
             }
@@ -247,15 +244,6 @@ public class MessageServer implements ServerMessageListener, MessageProcessor.Me
 
     }
 
-    @Override
-    public void onProcessorQueueCapacityExceeded(String callId) {
-        log.error("Service queue capacity exceeded for call " + callId);
-        MsgServerCall serverCall = serverCalls.get(callId);
-        if (serverCall != null) {
-            serverCall.close(Status.RESOURCE_EXHAUSTED.withDescription("Service queue capacity exceeded."), EMPTY_METADATA);
-        }
-
-    }
 
     /**
      * This represents the call. start() will start the call and call the service method implementation.
@@ -263,7 +251,7 @@ public class MessageServer implements ServerMessageListener, MessageProcessor.Me
      * by calling listener.onMessage(). When the method implementation sends a message to the response/server
      * stream of the method it will call ServerCall.sendMessage()
      */
-    private class MsgServerCall<ReqT, RespT> extends ServerCall<ReqT, RespT> {
+    private class MsgServerCall<ReqT, RespT> extends ServerCall<ReqT, RespT> implements RpcMessageHandler {
 
         final MethodDescriptor<ReqT, RespT> methodDescriptor;
         final Start start;
@@ -271,6 +259,8 @@ public class MessageServer implements ServerMessageListener, MessageProcessor.Me
 
         int sequence = 0;
         private Listener listener;
+
+        private CountDownLatch startedLatch = new CountDownLatch(1);
         private boolean cancelled = false;
         private ScheduledFuture<?> deadlineCancellationFuture = null;
 
@@ -311,6 +301,9 @@ public class MessageServer implements ServerMessageListener, MessageProcessor.Me
             //the streams that sayHello returns and accepts
             context.run(() -> {
                 this.listener = serverCallHandler.startCall(this, metadata);
+                //serverCallHandler.startCall will cause the impl to call request which will prompt more messages
+                //from the queue. We need to make sure we don't try to handle these until the listener is set.
+                startedLatch.countDown();
             });
         }
 
@@ -326,7 +319,19 @@ public class MessageServer implements ServerMessageListener, MessageProcessor.Me
 
         }
 
-        public void onClientMessage(RpcMessage message) {
+        @Override
+        public void onRpcMessage(RpcMessage message) {
+
+            try {
+                if(!startedLatch.await(5, TimeUnit.SECONDS)){
+                    log.error("Timeout waiting for startedLatch");
+                    return;
+                }
+            } catch (InterruptedException e) {
+                log.error("Interrupted waiting for startedLatch", e);
+                return;
+            }
+
 
             Value value;
             switch (message.getMessageCase()) {
@@ -334,10 +339,13 @@ public class MessageServer implements ServerMessageListener, MessageProcessor.Me
                     value = message.getValue();
                     break;
                 case STATUS:
-                    //MgMessageHandler will have already checked for a cancel so this is just an ok end of stream
-                    //We do not call remove() here as the call needs to remain available to handle a cancel
-                    //It will be removed when close() is called by the listener/service implementation
-                    listener.onHalfClose();
+                    if(message.getStatus().getCode() == CANCELLED_CODE){
+                        this.cancel();
+                    } else {
+                        //We do not call remove() here as the call needs to remain available to handle a cancel
+                        //It will be removed when close() is called by the listener/service implementation
+                        listener.onHalfClose();
+                    }
                     return;
                 default:
                     log.error("Unrecognised message case " + message.getMessageCase());

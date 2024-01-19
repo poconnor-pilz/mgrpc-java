@@ -6,18 +6,11 @@ import org.slf4j.LoggerFactory;
 import java.lang.invoke.MethodHandles;
 import java.util.Comparator;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.Executor;
 import java.util.concurrent.PriorityBlockingQueue;
 
-
 /**
- * This class is used to re-order out of order messages from the broker,
- * remove duplicates and then call a MessageHandler.onMessage from a thread pool
- * such that only one instance of onMessage for a particular call is ongoing at a time.
- * i.e. MessageHandler.onMessage does not have to be thread safe but the same thread is not always
- * used to call it (so it can't use thread locals)
- * This is used to cater for messging systems that do not guarantee ordering or duplicates e.g.
- * https://docs.aws.amazon.com/iot/latest/developerguide/mqtt.html#mqtt-differences
+ * This class is used to re-order out of order messages from the broker
+ * and remove duplicates
  */
 public class MessageProcessor {
 
@@ -38,28 +31,21 @@ public class MessageProcessor {
      */
     private final Recents recents = new Recents();
 
-    private final Executor executor;
-
     private final String callId;
-    private final MessageHandler messageHandler;
 
     private boolean queueCapacityExceeded = false;
 
-    private boolean processingThreadStarted = false;
-
     private int sequenceOfLastProcessedMessage = UNINITIALISED_SEQUENCE;
 
-    public MessageProcessor(Executor executor, String callId, int queueSize, MessageHandler messageHandler) {
+    public MessageProcessor(String callId, int queueSize) {
         this.queueSize = queueSize;
-        this.executor = executor;
         this.callId = callId;
-        this.messageHandler = messageHandler;
     }
 
 
     public interface MessageHandler {
         /**
-         * onProviderMessage() may be called from multiple threads but only one onProviderMessage will be active at a time.
+         * onProcessorMessage() may be called from multiple threads but only one onProviderMessage will be active at a time.
          * So it is thread safe with respect to itself but cannot use thread locals
          *
          * @param message
@@ -74,10 +60,6 @@ public class MessageProcessor {
     }
 
     public void close() {
-        if (!processingThreadStarted) {
-            return;
-        }
-
         try {
             messageQueue.put(RpcMessage.newBuilder().setSequence(TERMINATE_SEQUENCE).build());
         } catch (InterruptedException e) {
@@ -95,43 +77,39 @@ public class MessageProcessor {
             if ((messageQueue.size() + 1) > queueSize) {
                 log.error("Queue capacity ({}) exceeded for call {}",
                         queueSize, message.getCallId());
-                this.messageHandler.onProcessorQueueCapacityExceeded(callId);
                 queueCapacityExceeded = true;
                 return;
             }
 //            log.debug("Queueing {} with sequence {}.", messageWithTopic.message.getMessageCase(),
 //                    messageWithTopic.message.getSequence());
             messageQueue.put(message);
-            //Process queue on thread pool
-            if (!processingThreadStarted) {
-                processingThreadStarted = true;
-                this.executor.execute(() -> processQueue());
-            }
         } catch (InterruptedException e) {
             log.error("Interrupted while putting message on queue", e);
         }
     }
 
-    private void processQueue() {
-        RpcMessage message = null;
-        try {
-            message = messageQueue.take();
-        } catch (InterruptedException e) {
-            log.error("Interrupted while processing queue", e);
-            return;
-        }
+    public RpcMessage getNextMessage() {
+
         while (!queueCapacityExceeded) {
+            RpcMessage message;
+            try {
+                message = messageQueue.take();
+            } catch (InterruptedException e) {
+                log.error("Interrupted while processing queue", e);
+                return null;
+            }
 
             final int sequence = message.getSequence();
 
             if (sequence == TERMINATE_SEQUENCE) {
-                return;
+                log.debug("processed terminate message");
+                return null;
             }
 
             if (sequence < 0) {
                 if (sequence != INTERRUPT_SEQUENCE) {
                     log.error("Non-interrupt message received with sequence less than zero");
-                    return;
+                    return null;
                 }
             }
             if (recents.contains(sequence)) {
@@ -146,7 +124,7 @@ public class MessageProcessor {
                         Thread.sleep(500);
                     } catch (InterruptedException e) {
                         log.error("Interrupted while putting message back on queue", e);
-                        return;
+                        return null;
                     }
                 } else {
                     if (sequence != INTERRUPT_SEQUENCE) {
@@ -154,23 +132,13 @@ public class MessageProcessor {
                         //only add to recents if it has not been put back on queue
                         recents.add(sequence);
                     }
-                    try {
-                        this.messageHandler.onProcessorMessage(message);
-                    } catch (Exception ex) {
-                        log.error("Exception processing message in thread: " + Thread.currentThread().getName(), ex);
-                    }
+                    return message;
                 }
             }
-
-            //get the next message and process it.
-            try {
-                message = messageQueue.take();
-            } catch (InterruptedException e) {
-                log.error("Interrupted while processing queue", e);
-                return;
-            }
         }
+        return null;
     }
+
 
     private boolean outOfOrder(int sequence) {
         if (sequence == INTERRUPT_SEQUENCE || sequence == TERMINATE_SEQUENCE) {

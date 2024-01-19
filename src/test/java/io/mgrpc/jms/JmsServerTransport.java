@@ -120,7 +120,7 @@ public class JmsServerTransport implements ServerMessageTransport {
                                 }
 
                             }
-                            server.onProcessorMessage(rpcMessage);
+                            server.onRpcMessage(rpcMessage);
                         }
                     } catch (InvalidProtocolBufferException e) {
                         log.error("Failed to parse RpcMessage", e);
@@ -215,7 +215,7 @@ public class JmsServerTransport implements ServerMessageTransport {
                             try {
                                 final RpcSet rpcSet = RpcSet.parseFrom(bytes);
                                 for (RpcMessage rpcMessage : rpcSet.getMessagesList()) {
-                                    server.onProcessorMessage(rpcMessage);
+                                    server.onRpcMessage(rpcMessage);
                                 }
                             } catch (InvalidProtocolBufferException e) {
                                 log.error("Failed to parse RpcMessage", e);

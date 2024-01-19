@@ -1,7 +1,6 @@
 package io.mgrpc.jms;
 
 import com.google.protobuf.InvalidProtocolBufferException;
-import io.grpc.MethodDescriptor;
 import io.grpc.Status;
 import io.mgrpc.*;
 import io.mgrpc.messaging.ChannelMessageListener;
@@ -137,7 +136,7 @@ public class JmsChannelTransport implements ChannelMessageTransport {
                 try {
                     final RpcSet rpcSet = RpcSet.parseFrom(JmsUtils.byteArrayFromMessage(session, message));
                     for (RpcMessage rpcMessage : rpcSet.getMessagesList()) {
-                        channel.onMessage(rpcMessage);
+                        channel.onRpcMessage(rpcMessage);
                     }
                 } catch (Exception e) {
                     log.error("Failed to parse RpcMessage", e);
@@ -336,7 +335,7 @@ public class JmsChannelTransport implements ChannelMessageTransport {
                             try {
                                 final RpcSet rpcSet = RpcSet.parseFrom(bytes);
                                 for (RpcMessage rpcMessage : rpcSet.getMessagesList()) {
-                                    channel.onMessage(rpcMessage);
+                                    channel.onRpcMessage(rpcMessage);
                                 }
                             } catch (InvalidProtocolBufferException e) {
                                 log.error("Failed to parse RpcMessage", e);

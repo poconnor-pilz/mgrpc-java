@@ -8,7 +8,10 @@ import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.inprocess.InProcessChannelBuilder;
 import io.grpc.inprocess.InProcessServerBuilder;
 import io.grpc.stub.StreamObserver;
-import io.mgrpc.*;
+import io.mgrpc.MessageChannel;
+import io.mgrpc.MessageServer;
+import io.mgrpc.NoopStreamObserver;
+import io.mgrpc.StreamWaiter;
 import io.mgrpc.utils.ToList;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
@@ -31,7 +34,7 @@ public abstract class TestHelloBase {
     private static final long REQUEST_TIMEOUT = 2000;
 
 
-    public void checkForLeaks(int numActiveCalls){
+    public void checkForLeaks(int numActiveCalls) {
         try {
             //Give the channel and server time to process messages and release resources
             Thread.sleep(50);
@@ -57,8 +60,9 @@ public abstract class TestHelloBase {
     }
 
 
+
     @Test
-    public void testLotsOfReplies() throws Throwable{
+    public void testLotsOfReplies() throws Throwable {
 
         final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub stub = ExampleHelloServiceGrpc
                 .newBlockingStub(getChannel())
@@ -72,13 +76,13 @@ public abstract class TestHelloBase {
     }
 
     @Test
-    public void testParallelReplies() throws Throwable{
+    public void testParallelReplies() throws Throwable {
 
         final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(getChannel());
         HelloRequest joe = HelloRequest.newBuilder().setName("10").build();
         int numRequests = 100;
         final CountDownLatch latch = new CountDownLatch(numRequests);
-        for(int i = 0; i < numRequests; i++) {
+        for (int i = 0; i < numRequests; i++) {
             final int index = i;
             stub.lotsOfReplies(joe, new NoopStreamObserver<HelloReply>() {
                 @Override
@@ -90,6 +94,7 @@ public abstract class TestHelloBase {
                         throw new RuntimeException(e);
                     }
                 }
+
                 @Override
                 public void onCompleted() {
                     latch.countDown();
@@ -103,7 +108,7 @@ public abstract class TestHelloBase {
 
 
     @Test
-    public void testLotsOfGreetings(){
+    public void testLotsOfGreetings() {
 
         log.debug("testLotsOfGreetings");
         final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(getChannel());
@@ -123,7 +128,7 @@ public abstract class TestHelloBase {
 
 
     @Test
-    public void testBidiHello() throws Throwable{
+    public void testBidiHello() throws Throwable {
 
         final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(getChannel());
 
@@ -166,10 +171,8 @@ public abstract class TestHelloBase {
     }
 
 
-
-
     @Test
-    public void testInProcess() throws Exception{
+    public void testInProcess() throws Exception {
         String uniqueName = InProcessServerBuilder.generateName();
         Server server = InProcessServerBuilder.forName(uniqueName)
                 .directExecutor()
@@ -189,8 +192,6 @@ public abstract class TestHelloBase {
         server.shutdown();
         checkForLeaks(0);
     }
-
-
 
 
 }

@@ -19,7 +19,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
-public class MessageChannel extends Channel implements ChannelMessageListener {
+public class MessageChannel extends Channel implements ChannelMessageListener, RpcMessageHandler {
 
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
@@ -103,13 +103,13 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
     }
 
     @Override
-    public void onMessage(RpcMessage message)  {
+    public void onRpcMessage(RpcMessage message)  {
         final MsgClientCall call = clientCallsById.get(message.getCallId());
         if (call == null) {
             log.error("Could not find call " + message.getCallId() + " for message " + message.getSequence());
             return;
         }
-        call.queueServerMessage(message);
+        call.onRpcMessage(message);
 
     }
 
@@ -127,7 +127,7 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
                     .setCallId(call.callId)
                     .setSequence(MessageProcessor.INTERRUPT_SEQUENCE)
                     .build();
-            call.queueServerMessage(rpcMessage);
+            call.onRpcMessage(rpcMessage);
         }
 
     }
@@ -166,7 +166,7 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
 
 
 
-    private class MsgClientCall<ReqT, RespT> extends ClientCall<ReqT, RespT> implements MessageProcessor.MessageHandler {
+    private class MsgClientCall<ReqT, RespT> extends ClientCall<ReqT, RespT> implements RpcMessageHandler {
 
         final MethodDescriptor<ReqT, RespT> methodDescriptor;
         final CallOptions callOptions;
@@ -198,7 +198,7 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
             this.callOptions = callOptions;
             this.context = Context.current().withCancellation();
             this.callId = Id.random();
-            messageProcessor = new MessageProcessor(executor, callId, queueSize, this);
+            messageProcessor = new MessageProcessor(callId, queueSize);
         }
 
         public String getCallId() {
@@ -347,13 +347,13 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
 
 
         /**
-         * onMessage() may be called from multiple threads but only one onMessage will be active at a time.
+         * onRpcMessage() may be called from multiple threads but only one onMessage will be active at a time.
          * So it is thread safe with respect to itself but cannot use thread locals
          *
          * @param message
          */
         @Override
-        public void onProcessorMessage(RpcMessage message) {
+        public void onRpcMessage(RpcMessage message) {
 
             log.debug("Received {} {} {} on {}", new Object[]{message.getCallId(),
                     message.getSequence(),
@@ -382,30 +382,6 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
             }
         }
 
-        /**
-         * onQueueCapacityExceeded() is not thread safe and can be called at the same time as an
-         * ongoing onMessage() call
-         */
-        @Override
-        public void onProcessorQueueCapacityExceeded(String callId) {
-            log.error("Client queue capacity exceeded for call " + callId);
-
-            //Send a cancel on to the server. We cannot send it an error on its client stream as it may only expect one message
-            //On the server side the listener.onCancel will cause an error to be sent to the client stream if it has one.
-            final com.google.rpc.Status cancelled = io.grpc.protobuf.StatusProto.fromStatusAndTrailers(Status.CANCELLED, null);
-            sequence++;
-            final RpcMessage.Builder msgBuilder = RpcMessage.newBuilder()
-                    .setCallId(callId)
-                    .setSequence(sequence)
-                    .setStatus(cancelled);
-            try {
-                send(methodDescriptor, msgBuilder);
-            } catch (MessagingException e) {
-                log.error("onQueueCapacityExceeded() failed to send cancelled status", e);
-            }
-
-            this.close(Status.RESOURCE_EXHAUSTED.withDescription("Client queue capacity exceeded."));
-        }
 
         public void close(Status status) {
             closed = true;
