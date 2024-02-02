@@ -19,15 +19,13 @@ public class InProcessMessageTransport {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-    private final Map<String, RpcMessageHandler> channelsById = new ConcurrentHashMap<>();
     private RpcMessageHandler server;
 
-    private final ServerMessageTransport serverTransport = new InprocServerTransport();
+    private final InprocServerTransport serverTransport = new InprocServerTransport();
 
+    private final Map<String, InprocChannelTransport> channelTransports = new ConcurrentHashMap<>();
     private final Map<String, String> callIdToChannelIdMap = new ConcurrentHashMap<>();
 
-    private final CallSequencer serverCallSequencer = new CallSequencer();
-    private final CallSequencer channelCallSequencer = new CallSequencer();
 
     private static volatile Executor executorSingleton;
 
@@ -52,7 +50,10 @@ public class InProcessMessageTransport {
         return executorSingleton;
     }
 
-    private class InprocServerTransport implements ServerMessageTransport {
+    private class InprocServerTransport implements ServerMessageTransport, RpcMessageHandler {
+
+        private final CallSequencer serverCallSequencer = new CallSequencer(getExecutorInstance(), this);
+
 
         @Override
         public void start(ServerMessageListener server) throws MessagingException {
@@ -70,21 +71,39 @@ public class InProcessMessageTransport {
         @Override
         public void onCallClosed(String callId) {
             callIdToChannelIdMap.remove(callId);
+            serverCallSequencer.onCallClosed(callId);
         }
+
+
+        public void queueMessage(RpcMessage message) {
+            serverCallSequencer.makeQueue(message.getCallId());
+            serverCallSequencer.queueMessage(message);
+            if(message.hasStart()){
+                //Pump the start message. After this grpc will pump the rest of the messages
+                serverTransport.request(message.getCallId(), 1);
+            }
+        }
+
+        @Override
+        public void onRpcMessage(RpcMessage message) {
+            server.onRpcMessage(message);
+        }
+
 
         @Override
         public void request(String callId, int numMessages) {
-            getExecutor().execute(()->{
-                for(int i = 0; i < numMessages; i++){
-                    final RpcMessage rpcMessage = serverCallSequencer.getNextMessage(callId);
-                    server.onRpcMessage(rpcMessage);
-                }
-            });
+            serverCallSequencer.request(callId, numMessages);
         }
+
 
         @Override
         public void send(RpcMessage message) throws MessagingException {
-            channelCallSequencer.queueMessage(message);
+            final String channelId = callIdToChannelIdMap.get(message.getCallId());
+            if(channelId == null){
+                throw new MessagingException("Channel not found for call " + message.getCallId());
+            }
+            final InprocChannelTransport inprocChannelTransport = channelTransports.get(channelId);
+            inprocChannelTransport.queueMessage(message);
         }
 
         @Override
@@ -94,53 +113,58 @@ public class InProcessMessageTransport {
 
     }
 
-    private class InprocChannelTransport implements ChannelMessageTransport {
+    private class InprocChannelTransport implements ChannelMessageTransport, RpcMessageHandler {
 
-        private String channelId;
+        private  String channelId;
+        private  ChannelMessageListener channel;
+
+        public final CallSequencer channelCallSequencer = new CallSequencer(getExecutorInstance(), this);
+
 
         @Override
         public void start(ChannelMessageListener channel) throws MessagingException {
             this.channelId = channel.getChannelId();
-            channelsById.put(channelId, channel);
+            this.channel = channel;
+            channelTransports.put(channelId, this);
         }
 
         @Override
-        public void onCallClosed(String callId){}
+        public void onCallClosed(String callId){
+            channelCallSequencer.onCallClosed(callId);
+        }
 
         @Override
         public void request(String callId, int numMessages) {
-            getExecutor().execute(()->{
-                for(int i = 0; i < numMessages; i++){
-                    final RpcMessage rpcMessage = channelCallSequencer.getNextMessage(callId);
-                    channelsById.get(this.channelId).onRpcMessage(rpcMessage);
-                }
-            });
+           channelCallSequencer.request(callId, numMessages);
+        }
+
+        public void queueMessage(RpcMessage message) {
+            channelCallSequencer.queueMessage(message);
+        }
+        @Override
+        public void send(RpcMessage.Builder rpcMessage) throws MessagingException {
+            if(rpcMessage.hasStart()) {
+                callIdToChannelIdMap.put(rpcMessage.getCallId(), this.channelId);
+                channelCallSequencer.makeQueue(rpcMessage.getCallId());
+            }
+            serverTransport.queueMessage(rpcMessage.build());
         }
 
         @Override
         public void close() {
-            channelsById.remove(channelId);
+            channelTransports.remove(channelId);
         }
 
-        @Override
-        public void send(RpcMessage.Builder rpcMessage) throws MessagingException {
-            if(rpcMessage.hasStart()){
-                serverCallSequencer.makeQueue(rpcMessage.getCallId());
-                channelCallSequencer.makeQueue(rpcMessage.getCallId());
-                callIdToChannelIdMap.put(rpcMessage.getCallId(), rpcMessage.getStart().getChannelId());
-            }
-            serverCallSequencer.queueMessage(rpcMessage.build());
-            if(rpcMessage.hasStart()){
-                //Pump the start message. After this grpc will pump the rest of the messages
-                serverTransport.request(rpcMessage.getCallId(), 1);
-            }
-        }
 
         @Override
         public Executor getExecutor() {
             return getExecutorInstance();
         }
 
+        @Override
+        public void onRpcMessage(RpcMessage message) {
+            channel.onRpcMessage(message);
+        }
     }
 
 }

@@ -6,6 +6,7 @@ import org.slf4j.LoggerFactory;
 import java.lang.invoke.MethodHandles;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
 
 public class CallSequencer {
 
@@ -15,17 +16,23 @@ public class CallSequencer {
 
     private static final int DEFAULT_QUEUE_SIZE = 100;
 
-    public CallSequencer() {
+    private final Executor executor;
+    private final RpcMessageHandler messageHandler;
+
+
+    public CallSequencer(Executor executor, RpcMessageHandler messageHandler) {
+        this.executor = executor;
+        this.messageHandler = messageHandler;
     }
 
     /**
-     * Make a queue for a call if it doesn't exist already
+     * Make a queue for a call if it doesn't exist already.
      * @param callId
      */
     public void makeQueue(String callId){
         MessageProcessor processor = processors.get(callId);
         if(processor == null){
-            processor = new MessageProcessor(callId, DEFAULT_QUEUE_SIZE);
+            processor = new MessageProcessor(callId, DEFAULT_QUEUE_SIZE, executor, messageHandler);
             processors.put(callId, processor);
         }
 
@@ -35,30 +42,23 @@ public class CallSequencer {
         if(processor != null) {
             processor.queueMessage(message);
         } else {
-            String err = "No queue for call " + message.getCallId();
+            String err = "Message received for call without queue. This may be a stray message for a call that is already terminated. callId = " + message.getCallId();
             log.error(err);
-            throw new RuntimeException(err);
         }
     }
 
-    /**
-     * Block until a message is available that is in sequence
-     * @param callId
-     * @return an in sequence message.
-     */
-    public RpcMessage getNextMessage(String callId){
+
+    public void request(String callId, int numMessages){
         final MessageProcessor processor = processors.get(callId);
         if(processor == null){
             log.error("Failed to find processor for call " + callId);
-            return null;
+            return;
         }
-        return processor.getNextMessage();
+        processor.request(numMessages);
     }
+
     public void onCallClosed(String callId) {
         final MessageProcessor processor = processors.remove(callId);
-        if(processor != null){
-            processor.close();
-        }
     }
 
 

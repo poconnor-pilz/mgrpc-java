@@ -61,7 +61,7 @@ import static io.mgrpc.MethodTypeConverter.methodType;
 // The Channel will have a waitForServer method which a client can use to determine if a sever is up.
 // This will method will subscribe to server/o/sys/status and send a prompt to server/i/sys/status/prompt
 
-public class MqttChannelTransport implements ChannelMessageTransport, MessageSubscriber {
+public class MqttChannelTransport implements ChannelMessageTransport, MessageSubscriber, RpcMessageHandler {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -71,8 +71,7 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
     private static final com.google.rpc.Status GOOGLE_RPC_OK_STATUS = io.grpc.protobuf.StatusProto.fromStatusAndTrailers(Status.OK, null);
 
     private Map<String, RpcMessage.Builder> startMessages = new ConcurrentHashMap<>();
-    private final CallSequencer callSequencer = new CallSequencer();
-
+    private final CallSequencer callSequencer = new CallSequencer(getExecutor(), this);
 
     private final ServerTopics serverTopics;
 
@@ -84,19 +83,6 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
     private final Map<String, List<StreamObserver>> subscribersByTopic = new ConcurrentHashMap<>();
 
 
-
-    public static class Stats {
-        private final int subscribers;
-
-        public Stats(int subscribers) {
-            this.subscribers = subscribers;
-        }
-
-        public int getSubscribers() {
-            return subscribers;
-        }
-
-    }
 
     private static volatile Executor executorSingleton;
     @Override
@@ -177,43 +163,14 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
     }
 
     @Override
-    public void onCallClosed(String callId) {
-        startMessages.remove(callId);
-    }
-
-    @Override
     public void request(String callId, int numMessages){
         log.debug("Request(" + numMessages + ") for call " + callId);
-        getExecutor().execute(()->{
-            for(int i = 0; i < numMessages; i++){
-                final RpcMessage message = callSequencer.getNextMessage(callId);
-                if(message == null){
-                    //This could happen if call has been terminated
-                    log.warn("Failed to get next message for call " + callId);
-                    return;
-                }
-                channel.onRpcMessage(message);
-            }
-        });
+        callSequencer.request(callId, numMessages);
     }
 
-
-
     @Override
-    public void close() {
-        try {
-            //Notify that this client has been closed so that any server with ongoing calls can cancel them and
-            //release resources.
-            log.debug("Closing channel. Sending notification on " + serverTopics.statusClients);
-            final byte[] connectedMsg = ConnectionStatus.newBuilder().
-                    setConnected(false).setChannelId(channel.getChannelId()).build().toByteArray();
-            client.publish(serverTopics.statusClients, new MqttMessage(connectedMsg));
-            final String replyTopicPrefix = serverTopics.servicesOutForChannel(channel.getChannelId()) + "/#";
-            client.unsubscribe(replyTopicPrefix);
-            client.unsubscribe(serverTopics.status);
-        } catch (MqttException exception) {
-            log.error("Exception closing " + exception);
-        }
+    public void onRpcMessage(RpcMessage message) {
+        channel.onRpcMessage(message);
     }
 
     @Override
@@ -266,9 +223,7 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
             rpcSet.addMessages(messageBuilder);
         }
 
-
         final byte[] buffer = rpcSet.build().toByteArray();
-
         if (!serverConnected) {
             //The server should have an mqtt LWT that reliably sends a message when it is disconnected.
             //Nevertheless send it a ping to make double sure that it is definitely not connected.
@@ -289,6 +244,28 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
         } catch (MqttException e) {
             log.error("Failed to send mqtt message", e);
             throw new MessagingException(e);
+        }
+    }
+
+    @Override
+    public void onCallClosed(String callId) {
+        startMessages.remove(callId);
+    }
+
+    @Override
+    public void close() {
+        try {
+            //Notify that this client has been closed so that any server with ongoing calls can cancel them and
+            //release resources.
+            log.debug("Closing channel. Sending notification on " + serverTopics.statusClients);
+            final byte[] connectedMsg = ConnectionStatus.newBuilder().
+                    setConnected(false).setChannelId(channel.getChannelId()).build().toByteArray();
+            client.publish(serverTopics.statusClients, new MqttMessage(connectedMsg));
+            final String replyTopicPrefix = serverTopics.servicesOutForChannel(channel.getChannelId()) + "/#";
+            client.unsubscribe(replyTopicPrefix);
+            client.unsubscribe(serverTopics.status);
+        } catch (MqttException exception) {
+            log.error("Exception closing " + exception);
         }
     }
 
@@ -404,4 +381,19 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
 
         return new Stats(subscribers);
     }
+
+
+    public static class Stats {
+        private final int subscribers;
+
+        public Stats(int subscribers) {
+            this.subscribers = subscribers;
+        }
+
+        public int getSubscribers() {
+            return subscribers;
+        }
+
+    }
+
 }

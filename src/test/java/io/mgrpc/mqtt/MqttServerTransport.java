@@ -20,7 +20,7 @@ import java.util.concurrent.Executors;
 
 import static io.mgrpc.MethodTypeConverter.methodType;
 
-public class MqttServerTransport implements ServerMessageTransport {
+public class MqttServerTransport implements ServerMessageTransport, RpcMessageHandler {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -33,7 +33,7 @@ public class MqttServerTransport implements ServerMessageTransport {
 
     private Map<String, RpcMessage> startMessages = new ConcurrentHashMap<>();
 
-    private final CallSequencer callSequencer = new CallSequencer();
+    private final CallSequencer callSequencer = new CallSequencer(getExecutor(), this);
 
 
     private final ServerTopics serverTopics;
@@ -129,6 +129,15 @@ public class MqttServerTransport implements ServerMessageTransport {
         }
     }
 
+    @Override
+    public void request(String callId, int numMessages) {
+        log.debug("Request(" + numMessages + ") for call " + callId);
+        callSequencer.request(callId, numMessages);
+    }
+    @Override
+    public void onRpcMessage(RpcMessage message) {
+        this.server.onRpcMessage(message);
+    }
 
 
 
@@ -151,22 +160,7 @@ public class MqttServerTransport implements ServerMessageTransport {
         startMessages.remove(callId);
     }
 
-    @Override
-    public void request(String callId, int numMessages) {
-        log.debug("Request(" + numMessages + ") for call " + callId);
-        getExecutor().execute(()->{
-            for(int i = 0; i < numMessages; i++){
-                final RpcMessage message = callSequencer.getNextMessage(callId);
-                log.debug("got message from sequencer");
-                if(message == null){
-                    //This could happen if call has been terminated
-                    log.warn("Failed to get next message for call " + callId);
-                    return;
-                }
-                server.onRpcMessage(message);
-            }
-        });
-    }
+
 
     @Override
     public void send(RpcMessage message) throws MessagingException {

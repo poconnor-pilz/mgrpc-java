@@ -51,8 +51,8 @@ public abstract class TestHelloBase {
 
     @Test
     public void testSayHello() {
-        final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub blockingStub = ExampleHelloServiceGrpc.newBlockingStub(getChannel())
-               .withDeadlineAfter(REQUEST_TIMEOUT, TimeUnit.MILLISECONDS);;
+        final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub blockingStub = ExampleHelloServiceGrpc.newBlockingStub(getChannel());
+               //.withDeadlineAfter(REQUEST_TIMEOUT, TimeUnit.MILLISECONDS);;
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
         final HelloReply helloReply = blockingStub.sayHello(joe);
         assertEquals("Hello joe", helloReply.getMessage());

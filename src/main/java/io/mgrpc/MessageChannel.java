@@ -23,15 +23,12 @@ public class MessageChannel extends Channel implements ChannelMessageListener, R
 
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
-    public static final long SUBSCRIPTION_TIMEOUT_MILLIS = 10 * 1000;
 
     public static final CallOptions.Key<String> OUT_TOPIC = CallOptions.Key.create("out-topic");
 
     private final static Metadata EMPTY_METADATA = new Metadata();
 
     private static final com.google.rpc.Status GOOGLE_RPC_OK_STATUS = io.grpc.protobuf.StatusProto.fromStatusAndTrailers(Status.OK, null);
-
-    private static volatile Executor executorSingleton;
 
 
     private final ChannelMessageTransport transport;
@@ -189,7 +186,6 @@ public class MessageChannel extends Channel implements ChannelMessageListener, R
         private final ContextCancellationListener cancellationListener =
                 new ContextCancellationListener();
 
-        private final MessageProcessor messageProcessor;
 
         private MsgClientCall(MethodDescriptor<ReqT, RespT> methodDescriptor, CallOptions callOptions,
                               Executor executor, int queueSize) {
@@ -198,7 +194,6 @@ public class MessageChannel extends Channel implements ChannelMessageListener, R
             this.callOptions = callOptions;
             this.context = Context.current().withCancellation();
             this.callId = Id.random();
-            messageProcessor = new MessageProcessor(callId, queueSize);
         }
 
         public String getCallId() {
@@ -341,10 +336,6 @@ public class MessageChannel extends Channel implements ChannelMessageListener, R
         }
 
 
-        public void queueServerMessage(RpcMessage message) {
-            this.messageProcessor.queueMessage(message);
-        }
-
 
         /**
          * onRpcMessage() may be called from multiple threads but only one onMessage will be active at a time.
@@ -385,7 +376,6 @@ public class MessageChannel extends Channel implements ChannelMessageListener, R
 
         public void close(Status status) {
             closed = true;
-            messageProcessor.close();
             log.debug("Closing call {} with status: {} {}", new Object[]{this.callId, status.getCode(), status.getDescription()});
             context.removeListener(cancellationListener);
             cancelTimeouts();
@@ -403,10 +393,6 @@ public class MessageChannel extends Channel implements ChannelMessageListener, R
 
         @Override
         public void request(int numMessages) {
-            //Do nothing here as we don't implement backpressure.
-            //This would be used to send a message to the service to tell it to sent on numMessages
-            //But our services will send on messages when they have them (for the moment anyway)
-//            log.debug("request({})", numMessages);
             transport.request(callId, numMessages);
         }
 

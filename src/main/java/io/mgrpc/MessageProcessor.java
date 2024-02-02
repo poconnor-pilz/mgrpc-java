@@ -4,9 +4,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.lang.invoke.MethodHandles;
+import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.PriorityBlockingQueue;
+import java.util.List;
+import java.util.PriorityQueue;
+import java.util.concurrent.Executor;
 
 /**
  * This class is used to re-order out of order messages from the broker
@@ -21,10 +23,15 @@ public class MessageProcessor {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
     //Messages are ordered by sequence
-    private final BlockingQueue<RpcMessage> messageQueue = new PriorityBlockingQueue<>(1,
+    private final PriorityQueue<RpcMessage> messageQueue = new PriorityQueue<>(3,
             Comparator.comparingInt(o -> o.getSequence()));
 
     private final int queueSize;
+
+    private int numOutstandingMessages = 0;
+
+    private final Executor executor;
+    private final RpcMessageHandler messageHandler;
 
     /**
      * List of recent sequence ids, Used for checking for duplicate messages
@@ -37,106 +44,71 @@ public class MessageProcessor {
 
     private int sequenceOfLastProcessedMessage = UNINITIALISED_SEQUENCE;
 
-    public MessageProcessor(String callId, int queueSize) {
+    public MessageProcessor(String callId, int queueSize, Executor executor, RpcMessageHandler messageHandler) {
         this.queueSize = queueSize;
         this.callId = callId;
+        this.executor = executor;
+        this.messageHandler = messageHandler;
     }
 
 
-    public interface MessageHandler {
-        /**
-         * onProcessorMessage() may be called from multiple threads but only one onProviderMessage will be active at a time.
-         * So it is thread safe with respect to itself but cannot use thread locals
-         *
-         * @param message
-         */
-        void onProcessorMessage(RpcMessage message);
 
-        /**
-         * onQueueCapacityExceeded() is not thread safe and can be called at the same time as an
-         * ongoing onMessage() call
-         */
-        void onProcessorQueueCapacityExceeded(String callId);
-    }
 
-    public void close() {
-        try {
-            messageQueue.put(RpcMessage.newBuilder().setSequence(TERMINATE_SEQUENCE).build());
-        } catch (InterruptedException e) {
-            log.error("Interrupted while putting termination message on queue", e);
-        }
+
+    public void request(int numMessages){
+        processQueue(numMessages, null);
     }
 
     public void queueMessage(RpcMessage message) {
-        try {
-            if (queueCapacityExceeded) {
-                //Some messages may come in from the broker after the queue is exceeded, ignore them.
-                log.warn("Ignoring message after queue exceeded");
-                return;
-            }
-            if ((messageQueue.size() + 1) > queueSize) {
-                log.error("Queue capacity ({}) exceeded for call {}",
-                        queueSize, message.getCallId());
-                queueCapacityExceeded = true;
-                return;
-            }
-//            log.debug("Queueing {} with sequence {}.", messageWithTopic.message.getMessageCase(),
-//                    messageWithTopic.message.getSequence());
-            messageQueue.put(message);
-        } catch (InterruptedException e) {
-            log.error("Interrupted while putting message on queue", e);
-        }
+      processQueue(0, message);
     }
 
-    public RpcMessage getNextMessage() {
+    public synchronized void processQueue(int numMessages, RpcMessage message){
 
-        while (!queueCapacityExceeded) {
-            RpcMessage message;
-            try {
-                message = messageQueue.take();
-            } catch (InterruptedException e) {
-                log.error("Interrupted while processing queue", e);
-                return null;
-            }
 
+        numOutstandingMessages += numMessages;
+
+        if(message != null) {
             final int sequence = message.getSequence();
-
-            if (sequence == TERMINATE_SEQUENCE) {
-                log.debug("processed terminate message");
-                return null;
-            }
-
             if (sequence < 0) {
                 if (sequence != INTERRUPT_SEQUENCE) {
                     log.error("Non-interrupt message received with sequence less than zero");
-                    return null;
+                    return;
                 }
             }
             if (recents.contains(sequence)) {
                 log.warn("{} with sequence {}, is duplicate. Ignoring.", message.getMessageCase(), sequence);
             } else {
-                if (outOfOrder(sequence)) {
-                    //Put this out-of-order message back on the ordered queue and wait for the in-order message to arrive.
-                    try {
-                        log.warn("{} with sequence {}, is out of order. Putting back on queue.", message.getMessageCase(), sequence);
-                        messageQueue.put(message);
-                        //Give it some time for the right message to arrive and be ordered by the queue
-                        Thread.sleep(500);
-                    } catch (InterruptedException e) {
-                        log.error("Interrupted while putting message back on queue", e);
-                        return null;
-                    }
-                } else {
-                    if (sequence != INTERRUPT_SEQUENCE) {
-                        sequenceOfLastProcessedMessage = sequence;
-                        //only add to recents if it has not been put back on queue
-                        recents.add(sequence);
-                    }
-                    return message;
-                }
+                messageQueue.add(message);
             }
         }
-        return null;
+
+        if(numOutstandingMessages <= 0){
+            return;
+        }
+
+
+        List<RpcMessage> list = new ArrayList(numOutstandingMessages);
+        for(int i = 0; i < numOutstandingMessages; i++){
+            final RpcMessage msg = messageQueue.poll();
+            if(msg == null){
+                break;
+            }
+            if(outOfOrder(msg.getSequence())){
+                //Put this out-of-order message back on the ordered queue and wait for the in-order message to arrive.
+                messageQueue.add(msg);
+                break;
+            }
+            list.add(msg);
+            sequenceOfLastProcessedMessage = msg.getSequence();
+        }
+
+        numOutstandingMessages -= list.size();
+        this.executor.execute(()->{
+            for(int i = 0; i < list.size(); i++)
+                messageHandler.onRpcMessage(list.get(i));
+            }
+        );
     }
 
 
