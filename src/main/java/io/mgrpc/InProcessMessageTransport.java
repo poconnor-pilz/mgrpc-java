@@ -1,5 +1,6 @@
 package io.mgrpc;
 
+import io.grpc.Status;
 import io.mgrpc.messaging.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -10,6 +11,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 
+import static io.mgrpc.MethodTypeConverter.methodType;
+
 /**
  * Class providing server and channel transports that runs in process. Useful for unit testing mgrpc.
  * To do production level in process grpc it would be better to use io.grpc.inprocess.InProcessServerBuilder
@@ -19,12 +22,15 @@ public class InProcessMessageTransport {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
+    private static final com.google.rpc.Status GOOGLE_RPC_OK_STATUS = io.grpc.protobuf.StatusProto.fromStatusAndTrailers(Status.OK, null);
+
     private RpcMessageHandler server;
 
     private final InprocServerTransport serverTransport = new InprocServerTransport();
 
-    private final Map<String, InprocChannelTransport> channelTransports = new ConcurrentHashMap<>();
-    private final Map<String, String> callIdToChannelIdMap = new ConcurrentHashMap<>();
+    private final Map<String, InprocChannelTransport> channelTransportsByCallId = new ConcurrentHashMap<>();
+
+    private Map<String, RpcMessage.Builder> startMessages = new ConcurrentHashMap<>();
 
 
     private static volatile Executor executorSingleton;
@@ -70,17 +76,19 @@ public class InProcessMessageTransport {
 
         @Override
         public void onCallClosed(String callId) {
-            callIdToChannelIdMap.remove(callId);
+            channelTransportsByCallId.remove(callId);
             serverCallSequencer.onCallClosed(callId);
+            startMessages.remove(callId);
         }
 
 
-        public void queueMessage(RpcMessage message) {
-            serverCallSequencer.makeQueue(message.getCallId());
-            serverCallSequencer.queueMessage(message);
-            if(message.hasStart()){
+        public void queueSet(RpcSet rpcSet) {
+            final RpcMessage firstMessage = rpcSet.getMessages(0);
+            serverCallSequencer.makeQueue(firstMessage.getCallId());
+            serverCallSequencer.queueSet(rpcSet);
+            if(firstMessage.hasStart()){
                 //Pump the start message. After this grpc will pump the rest of the messages
-                serverTransport.request(message.getCallId(), 1);
+                this.request(firstMessage.getCallId(), 1);
             }
         }
 
@@ -98,12 +106,38 @@ public class InProcessMessageTransport {
 
         @Override
         public void send(RpcMessage message) throws MessagingException {
-            final String channelId = callIdToChannelIdMap.get(message.getCallId());
-            if(channelId == null){
-                throw new MessagingException("Channel not found for call " + message.getCallId());
+
+            final RpcMessage.Builder startMessage = startMessages.get(message.getCallId());
+            if (startMessage == null) {
+                String err = "No cached start message for call " + message.getCallId();
+                log.error(err);
+                throw new MessagingException(err);
             }
-            final InprocChannelTransport inprocChannelTransport = channelTransports.get(channelId);
-            inprocChannelTransport.queueMessage(message);
+
+            final RpcSet.Builder setBuilder = RpcSet.newBuilder();
+            if (methodType(startMessage).serverSendsOneMessage()) {
+                if (message.hasValue()) {
+                    //Send the value and the status as a set in one message to the broker
+                    setBuilder.addMessages(message);
+                    final RpcMessage.Builder statusBuilder = RpcMessage.newBuilder()
+                            .setCallId(message.getCallId())
+                            .setSequence(message.getSequence() + 1)
+                            .setStatus(GOOGLE_RPC_OK_STATUS);
+                    setBuilder.addMessages(statusBuilder);
+                } else {
+                    if (message.getStatus().getCode() != Status.OK.getCode().value()) {
+                        setBuilder.addMessages(message);
+                    } else {
+                        //Ignore non error status values (non cancel values) as the status will already have been sent automatically above
+                        return;
+                    }
+                }
+            } else {
+                setBuilder.addMessages(message);
+            }
+
+            final InprocChannelTransport inprocChannelTransport = channelTransportsByCallId.get(message.getCallId());
+            inprocChannelTransport.queueSet(setBuilder.build());
         }
 
         @Override
@@ -125,7 +159,6 @@ public class InProcessMessageTransport {
         public void start(ChannelMessageListener channel) throws MessagingException {
             this.channelId = channel.getChannelId();
             this.channel = channel;
-            channelTransports.put(channelId, this);
         }
 
         @Override
@@ -138,21 +171,62 @@ public class InProcessMessageTransport {
            channelCallSequencer.request(callId, numMessages);
         }
 
-        public void queueMessage(RpcMessage message) {
-            channelCallSequencer.queueMessage(message);
+        public void queueSet(RpcSet rpcSet) {
+            channelCallSequencer.queueSet(rpcSet);
         }
         @Override
-        public void send(RpcMessage.Builder rpcMessage) throws MessagingException {
-            if(rpcMessage.hasStart()) {
-                callIdToChannelIdMap.put(rpcMessage.getCallId(), this.channelId);
-                channelCallSequencer.makeQueue(rpcMessage.getCallId());
+        public void send(RpcMessage.Builder messageBuilder) throws MessagingException {
+            RpcMessage.Builder start = startMessages.get(messageBuilder.getCallId());
+            if(start == null){
+                if(messageBuilder.hasStart()){
+                    start = messageBuilder;
+                    startMessages.put(messageBuilder.getCallId(), messageBuilder);
+                    channelTransportsByCallId.put(messageBuilder.getCallId(), this);
+                    channelCallSequencer.makeQueue(messageBuilder.getCallId());
+                } else {
+                    if(messageBuilder.hasStatus()){
+                        log.warn("Call cancelled or half closed  before start. An exception may have occurred");
+                        return;
+                    } else {
+                        throw new RuntimeException("First message sent to transport must be a start message. Call " + messageBuilder.getCallId() + " type " + messageBuilder.getMessageCase());
+                    }
+                }
             }
-            serverTransport.queueMessage(rpcMessage.build());
+
+            final RpcSet.Builder rpcSet = RpcSet.newBuilder();
+
+            if (methodType(start).clientSendsOneMessage()) {
+                //If clientSendsOneMessage we only want to send one broker message containing
+                //start, request, status.
+                if (messageBuilder.hasStart()) {
+                    //Wait for the request value
+                    return;
+                }
+                if (messageBuilder.hasStatus()) {
+                    if (messageBuilder.getStatus().getCode() != Status.OK.getCode().value()) {
+                        rpcSet.addMessages(messageBuilder);
+                    } else {
+                        //Ignore non error status values (non cancel values) as the status will already have been sent automatically below
+                        return;
+                    }
+                } else {
+                    rpcSet.addMessages(start);
+                    rpcSet.addMessages(messageBuilder);
+                    final RpcMessage.Builder statusBuilder = RpcMessage.newBuilder()
+                            .setCallId(messageBuilder.getCallId())
+                            .setSequence(messageBuilder.getSequence() + 1)
+                            .setStatus(GOOGLE_RPC_OK_STATUS);
+                    rpcSet.addMessages(statusBuilder);
+                }
+            } else {
+                rpcSet.addMessages(messageBuilder);
+            }
+
+            serverTransport.queueSet(rpcSet.build());
         }
 
         @Override
         public void close() {
-            channelTransports.remove(channelId);
         }
 
 

@@ -131,9 +131,7 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
             client.subscribe(replyTopicPrefix, 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
                 try {
                     final RpcSet rpcSet = RpcSet.parseFrom(mqttMessage.getPayload());
-                    for (RpcMessage rpcMessage : rpcSet.getMessagesList()) {
-                        callSequencer.queueMessage(rpcMessage);
-                    }
+                    callSequencer.queueSet(rpcSet);
                 } catch (InvalidProtocolBufferException e) {
                     log.error("Failed to parse RpcMessage", e);
                     return;

@@ -1,5 +1,7 @@
 package io.mgrpc;
 
+import io.grpc.Status;
+import io.grpc.protobuf.StatusProto;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -28,7 +30,7 @@ public class MessageProcessor {
 
     private final int queueSize;
 
-    private int numOutstandingMessages = 0;
+    private int outStandingRequests = 0;
 
     private final Executor executor;
     private final RpcMessageHandler messageHandler;
@@ -43,6 +45,7 @@ public class MessageProcessor {
     private boolean queueCapacityExceeded = false;
 
     private int sequenceOfLastProcessedMessage = UNINITIALISED_SEQUENCE;
+
 
     public MessageProcessor(String callId, int queueSize, Executor executor, RpcMessageHandler messageHandler) {
         this.queueSize = queueSize;
@@ -59,43 +62,47 @@ public class MessageProcessor {
         processQueue(numMessages, null);
     }
 
-    public void queueMessage(RpcMessage message) {
-      processQueue(0, message);
+    public void queueSet(RpcSet rpcSet) {
+        processQueue(0, rpcSet);
     }
 
-    public synchronized void processQueue(int numMessages, RpcMessage message){
+    public synchronized void processQueue(int requestedMessages, RpcSet rpcSet){
 
 
-        numOutstandingMessages += numMessages;
+//        log.debug("ProcessQueue requestedMessages = " + requestedMessages + " message = " + (rpcSet == null ? 0 : 1));
+        outStandingRequests += requestedMessages;
 
-        if(message != null) {
-            final int sequence = message.getSequence();
-            if (sequence < 0) {
-                if (sequence != INTERRUPT_SEQUENCE) {
-                    log.error("Non-interrupt message received with sequence less than zero");
-                    return;
+        if(rpcSet != null) {
+            for(RpcMessage message: rpcSet.getMessagesList()) {
+                final int sequence = message.getSequence();
+                if (sequence < 0) {
+                    if (sequence != INTERRUPT_SEQUENCE) {
+                        log.error("Non-interrupt message received with sequence less than zero for call " + callId);
+                        return;
+                    }
                 }
-            }
-            if (recents.contains(sequence)) {
-                log.warn("{} with sequence {}, is duplicate. Ignoring.", message.getMessageCase(), sequence);
-            } else {
-                messageQueue.add(message);
+                if (recents.contains(sequence)) {
+                    log.warn("{} with sequence {} for call {}, is duplicate. Ignoring.", new Object[]{message.getMessageCase(), sequence, callId});
+                } else {
+                    messageQueue.add(message);
+                }
             }
         }
 
-        if(numOutstandingMessages <= 0){
+        if(outStandingRequests <= 0){
             return;
         }
 
 
-        List<RpcMessage> list = new ArrayList(numOutstandingMessages);
-        for(int i = 0; i < numOutstandingMessages; i++){
+        List<RpcMessage> list = new ArrayList(outStandingRequests);
+        for(int i = 0; i < outStandingRequests; i++){
             final RpcMessage msg = messageQueue.poll();
             if(msg == null){
                 break;
             }
             if(outOfOrder(msg.getSequence())){
                 //Put this out-of-order message back on the ordered queue and wait for the in-order message to arrive.
+                log.warn("Message for call " + callId + " is out of order sequence = " + msg.getSequence());
                 messageQueue.add(msg);
                 break;
             }
@@ -103,12 +110,33 @@ public class MessageProcessor {
             sequenceOfLastProcessedMessage = msg.getSequence();
         }
 
-        numOutstandingMessages -= list.size();
-        this.executor.execute(()->{
-            for(int i = 0; i < list.size(); i++)
+        if(list.size() == 0){
+            return;
+        }
+
+        outStandingRequests -= list.size();
+        if(outStandingRequests > 0){
+            //This condition could occur if some implementation does manual flow control and requests more
+            //more messages than are available in the queue right now. If this is the case and we proceed normally then
+            //another message could come through quickly and be handled in the executor at the end of this method.
+            //There is no guarantee that that executor would be scheduled in order.
+            //i.e. In we do not want to send messages to a call that has not just requested them in order to make
+            //sure that requests are always handled serially.
+            final String err = "Requested messages exceed available messages. This may be caused by manual flow control requesting more messages than are available in the queue";
+            log.error(err);
+            this.executor.execute(()-> {
+                final Status status = Status.ABORTED.withDescription(err);
+                final com.google.rpc.Status grpcStatus = StatusProto.fromStatusAndTrailers(status, null);
+                messageHandler.onRpcMessage(RpcMessage.newBuilder().setCallId(callId).setStatus(grpcStatus).build());
+            });
+            return;
+        }
+        this.executor.execute(()-> {
+            for (int i = 0; i < list.size(); i++) {
+                final RpcMessage rpcMessage = list.get(i);
                 messageHandler.onRpcMessage(list.get(i));
             }
-        );
+        });
     }
 
 

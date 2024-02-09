@@ -20,6 +20,7 @@ public class CallSequencer {
     private final RpcMessageHandler messageHandler;
 
 
+
     public CallSequencer(Executor executor, RpcMessageHandler messageHandler) {
         this.executor = executor;
         this.messageHandler = messageHandler;
@@ -37,12 +38,12 @@ public class CallSequencer {
         }
 
     }
-    public void queueMessage(RpcMessage message){
-        MessageProcessor processor = processors.get(message.getCallId());
+    public void queueSet(RpcSet set){
+        MessageProcessor processor = processors.get(set.getMessages(0).getCallId());
         if(processor != null) {
-            processor.queueMessage(message);
+            processor.queueSet(set);
         } else {
-            String err = "Message received for call without queue. This may be a stray message for a call that is already terminated. callId = " + message.getCallId();
+            String err = "Message received for call without queue. This may be a stray message for a call that is already terminated. callId = " + set.getMessages(0).getCallId();
             log.error(err);
         }
     }

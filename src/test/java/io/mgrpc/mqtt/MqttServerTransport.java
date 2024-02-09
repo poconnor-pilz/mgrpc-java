@@ -86,19 +86,22 @@ public class MqttServerTransport implements ServerMessageTransport, RpcMessageHa
             client.subscribe(inTopicFilter, 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
                 try {
                     final RpcSet rpcSet = RpcSet.parseFrom(mqttMessage.getPayload());
-                    for (RpcMessage message : rpcSet.getMessagesList()) {
-                        if (message.hasStart()) {
-                            //Cache the start message so that we can use it to get information about the call later.
-                            startMessages.put(message.getCallId(), message);
-                            log.debug("Will send output messages for call " + message.getCallId() + " to "
-                                    + getTopicForSend(message));
-                        }
-                        callSequencer.makeQueue(message.getCallId());
-                        callSequencer.queueMessage(message);
-                        if (message.hasStart()) {
-                            //pump the queue. After the start message is processed grpc will do the rest of the pumping
-                            request(message.getCallId(), 1);
-                        }
+                    final RpcMessage firstMessage = rpcSet.getMessages(0);
+                    if(firstMessage == null){
+                        log.error("Empty message set");
+                        return;
+                    }
+                    if (firstMessage.hasStart()) {
+                        //Cache the start message so that we can use it to get information about the call later.
+                        startMessages.put(firstMessage.getCallId(), firstMessage);
+                        log.debug("Will send output messages for call " + firstMessage.getCallId() + " to "
+                                + getTopicForSend(firstMessage));
+                    }
+                    callSequencer.makeQueue(firstMessage.getCallId());
+                    callSequencer.queueSet(rpcSet);
+                    if (firstMessage.hasStart()) {
+                        //pump the queue. After the start message is processed grpc will do the rest of the pumping
+                        request(firstMessage.getCallId(), 1);
                     }
                 } catch (InvalidProtocolBufferException e) {
                     log.error("Failed to parse RpcMessage", e);
