@@ -6,7 +6,7 @@ import io.mgrpc.RpcMessage;
 /**
  * Interface implemented by the server
  */
-public interface ServerMessageListener {
+public interface ServerMessageListener extends DisconnectListener{
 
     /**
      * The ServerMessageTransport should call this method on the server when it receives
@@ -15,9 +15,4 @@ public interface ServerMessageListener {
      */
     void onMessage(RpcMessage message);
 
-    /**
-     * The ServerMessageTransport should call this message on the serer if it knows that a channel
-     * has disconnected.
-     */
-    void onChannelDisconnected(String channelId);
 }

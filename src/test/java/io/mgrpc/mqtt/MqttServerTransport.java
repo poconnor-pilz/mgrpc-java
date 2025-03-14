@@ -101,7 +101,7 @@ public class MqttServerTransport implements ServerMessageTransport {
                 ConnectionStatus connectionStatus = ConnectionStatus.parseFrom(mqttMessage.getPayload());
                 log.debug("Received client connected status = " + connectionStatus.getConnected() + " on " + topic + " for channel " + connectionStatus.getChannelId());
                 if (!connectionStatus.getConnected()) {
-                    server.onChannelDisconnected(connectionStatus.getChannelId());
+                    server.onDisconnect(connectionStatus.getChannelId());
                 }
             })).waitForCompletion(SUBSCRIBE_TIMEOUT_MILLIS);
 

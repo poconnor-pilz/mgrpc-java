@@ -21,7 +21,7 @@ import java.lang.invoke.MethodHandles;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-public class TestProxy {
+public class TestGrpcProxy {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -44,6 +44,8 @@ public class TestProxy {
     @Test
     public void testClientSideProxy() throws Exception{
 
+        //This tests the case where a single http server is connected to a single device (a single MessageServer)
+        //Any client of the http grpc server can only communicate with that device
 
         //HttpChannel -> HttpServer -> GrpcProxy -> MqttChannel -> Broker -> MqttServer
         int port = 50051;
@@ -63,16 +65,18 @@ public class TestProxy {
 
         //Connect the proxy to the MessageChannel
         GrpcProxy proxy = new GrpcProxy(messageChannel);
-
-        //Connect the proxy to the http server
-        Server httpServer = ServerBuilder.forPort(port)
-                .fallbackHandlerRegistry(proxy)
-                .build().start();
-
+        final GrpcProxy.Registry registry = new GrpcProxy.Registry(proxy);
 
         //Tell the proxy about the method types so that the message transport can transport the messages
         //more efficiently (the test would still work without this but more mqtt messages would be transferred)
-        proxy.registerServiceDescriptor(ExampleHelloServiceGrpc.getServiceDescriptor());
+        registry.registerServiceDescriptor(ExampleHelloServiceGrpc.getServiceDescriptor());
+
+
+        //Connect the proxy to the http server
+        Server httpServer = ServerBuilder.forPort(port)
+                .fallbackHandlerRegistry(registry)
+                .build().start();
+
 
         final ServerServiceDefinition serviceWithIntercept = ServerInterceptors.intercept(
                 new ListenForHello(),
@@ -119,6 +123,9 @@ public class TestProxy {
     @Test
     public void testServerSideProxy() throws Exception{
 
+        //This tests the case where a java client that can connect to an mqtt broker can call
+        //a http server on the server side of the broker that is mapped to a particular topic.
+        //A jvm has to be on the server side of the broker that makes that connection.
 
         //MqttChannel -> Broker -> MqttServer ->  GrpcProxy -> HttpChannel -> HttpServer
         int port = 50051;
@@ -148,9 +155,9 @@ public class TestProxy {
         //MqttServer ->  GrpcProxy -> HttpChannel
 
         //Connect the proxy to the http channel
-        final GrpcProxy proxy = new GrpcProxy(httpChannel);
+        final GrpcProxy proxy2 = new GrpcProxy(httpChannel);
         //Connect the MessageServer to the proxy
-        messageServer.setFallBackRegistry(proxy);
+        messageServer.setFallBackRegistry(new GrpcProxy.Registry(proxy2));
 
         messageServer.start();
 

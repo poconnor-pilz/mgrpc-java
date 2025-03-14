@@ -1,5 +1,6 @@
 package io.mgrpc.examples.hello;
 
+import io.grpc.Channel;
 import io.mgrpc.Id;
 import io.mgrpc.InProcessMessageTransport;
 import io.mgrpc.MessageChannel;
@@ -10,6 +11,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.lang.invoke.MethodHandles;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 
 public class TestHelloInProcess extends TestHelloBase {
@@ -45,12 +48,15 @@ public class TestHelloInProcess extends TestHelloBase {
 
 
     @Override
-    public MessageChannel getChannel() {
+    public Channel getChannel() {
         return this.channel;
     }
 
+
+
     @Override
-    public MessageServer getServer() {
-        return this.server;
+    public void checkNumActiveCalls(int numActiveCalls) {
+        assertEquals(numActiveCalls, this.channel.getStats().getActiveCalls());
+        assertEquals(numActiveCalls, this.server.getStats().getActiveCalls());
     }
 }

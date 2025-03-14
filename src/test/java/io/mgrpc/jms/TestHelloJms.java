@@ -1,5 +1,6 @@
 package io.mgrpc.jms;
 
+import io.grpc.Channel;
 import io.mgrpc.EmbeddedBroker;
 import io.mgrpc.Id;
 import io.mgrpc.MessageChannel;
@@ -18,6 +19,8 @@ import javax.jms.ConnectionFactory;
 import javax.jms.JMSException;
 import javax.naming.InitialContext;
 import java.lang.invoke.MethodHandles;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 
 public class TestHelloJms extends TestHelloBase {
@@ -73,12 +76,14 @@ public class TestHelloJms extends TestHelloBase {
 
 
     @Override
-    public MessageChannel getChannel() {
+    public Channel getChannel() {
         return this.channel;
     }
 
     @Override
-    public MessageServer getServer() {
-        return this.server;
+    public void checkNumActiveCalls(int numActiveCalls) {
+        assertEquals(numActiveCalls, this.channel.getStats().getActiveCalls());
+        assertEquals(numActiveCalls, this.server.getStats().getActiveCalls());
     }
+
 }

@@ -1,57 +1,58 @@
 package io.mgrpc;
 
-/*
- * Copyright 2023, gRPC Authors All rights reserved.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
-
 import com.google.common.io.ByteStreams;
 import io.grpc.*;
+import io.mgrpc.messaging.MessagingException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayInputStream;
+import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.invoke.MethodHandles;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
-import java.util.logging.Logger;
+import java.util.concurrent.ConcurrentHashMap;
 
-//This was taken from
-//examples/src/main/java/io/grpc/examples/grpcproxy/GrpcProxy.java
-//commit: fca1d3c
-//It has a small modification to include registerServiceDescriptor
 /**
- * A grpc-level proxy. GrpcProxy itself can be used unmodified to proxy any service for both unary
- * and streaming. It doesn't care what type of messages are being used. The Registry class causes it
- * to be called for any inbound RPC, and uses plain bytes for messages which avoids marshalling
- * messages and the need for Protobuf schema information. *
+ * A grpc-level proxy. This class is based on GrpcProxy
+ * This proxy can be used to create a single http server that makes it possible for clients to
+ * communicate with a number of different message servers (or devices)
+ * To do so the client must specify grpc metadata as part of the call.
+ * Specifically, the client must specify the key "server-topic". The value should be the message broker topic on which
+ * the MessageServer is listening for example:
+ * server-topic = tenant1/device1
  */
-public final class GrpcProxy<ReqT, RespT> implements ServerCallHandler<ReqT, RespT> {
-    private static final Logger logger = Logger.getLogger(GrpcProxy.class.getName());
+public class MessageProxy<ReqT, RespT>  implements ServerCallHandler<ReqT, RespT> {
 
-    private final Channel channel;
+    private static final Logger logger = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
 
-    public GrpcProxy(Channel channel) {
-        this.channel = channel;
+    private MessageChannelFactory channelFactory;
+
+
+    private final Map<String, MessageChannel> channels = new ConcurrentHashMap<>();
+
+
+    public MessageProxy(MessageChannelFactory channelFactory) {
+        this.channelFactory = channelFactory;
+    }
+
+
+    public void close(){
+        for (MessageChannel channel : channels.values()) {
+            channel.close();
+        }
     }
 
 
     @Override
     public ServerCall.Listener<ReqT> startCall(
             ServerCall<ReqT, RespT> serverCall, Metadata headers) {
+
+        Channel channel = getChannelForServerTopic(headers);
+
         ClientCall<ReqT, RespT> clientCall
                 = channel.newCall(serverCall.getMethodDescriptor(), CallOptions.DEFAULT);
         CallProxy<ReqT, RespT> proxy = new CallProxy<ReqT, RespT>(serverCall, clientCall);
@@ -59,6 +60,45 @@ public final class GrpcProxy<ReqT, RespT> implements ServerCallHandler<ReqT, Res
         serverCall.request(1);
         clientCall.request(1);
         return proxy.serverCallListener;
+    }
+
+    private Channel getChannelForServerTopic(Metadata headers) {
+
+        //Find the right channel for the topic (i.e. find the right device)
+        //and send the messages to it
+        final String serverTopic = headers.get(ServerTopicInterceptor.META_SERVER_TOPIC);
+        if (serverTopic == null || serverTopic.isEmpty()) {
+            throw new IllegalArgumentException("Missing server topic header");
+        }
+
+        MessageChannel channel = channels.get(serverTopic);
+        if (channel == null) {
+            synchronized (channels) {
+                channel = channels.get(serverTopic);
+                if (channel == null) {
+                    channel = channelFactory.createMessageChannel(serverTopic);
+                    channels.put(serverTopic, channel);
+                    logger.debug("Created channel for {}", serverTopic);
+                }
+            }
+        }
+        if(!channel.isStarted()){
+            synchronized (channel){
+                if(!channel.isStarted()){
+                    channel.addDisconnectListener((String channelId) -> {
+                        channels.remove(serverTopic);
+                    });
+                    try {
+                        channel.start();
+                    } catch (MessagingException e) {
+                        channels.remove(serverTopic);
+                        logger.error(e.getMessage(), e);
+                        throw new RuntimeException(e);
+                    }
+                }
+            }
+        }
+        return channel;
     }
 
     private static class CallProxy<ReqT, RespT> {
@@ -79,15 +119,18 @@ public final class GrpcProxy<ReqT, RespT> implements ServerCallHandler<ReqT, Res
                 this.clientCall = clientCall;
             }
 
-            @Override public void onCancel() {
+            @Override
+            public void onCancel() {
                 clientCall.cancel("Server cancelled", null);
             }
 
-            @Override public void onHalfClose() {
+            @Override
+            public void onHalfClose() {
                 clientCall.halfClose();
             }
 
-            @Override public void onMessage(ReqT message) {
+            @Override
+            public void onMessage(ReqT message) {
                 clientCall.sendMessage(message);
                 synchronized (this) {
                     if (clientCall.isReady()) {
@@ -100,7 +143,8 @@ public final class GrpcProxy<ReqT, RespT> implements ServerCallHandler<ReqT, Res
                 }
             }
 
-            @Override public void onReady() {
+            @Override
+            public void onReady() {
                 clientCallListener.onServerReady();
             }
 
@@ -123,15 +167,18 @@ public final class GrpcProxy<ReqT, RespT> implements ServerCallHandler<ReqT, Res
                 this.serverCall = serverCall;
             }
 
-            @Override public void onClose(Status status, Metadata trailers) {
+            @Override
+            public void onClose(Status status, Metadata trailers) {
                 serverCall.close(status, trailers);
             }
 
-            @Override public void onHeaders(Metadata headers) {
+            @Override
+            public void onHeaders(Metadata headers) {
                 serverCall.sendHeaders(headers);
             }
 
-            @Override public void onMessage(RespT message) {
+            @Override
+            public void onMessage(RespT message) {
                 serverCall.sendMessage(message);
                 synchronized (this) {
                     if (serverCall.isReady()) {
@@ -144,7 +191,8 @@ public final class GrpcProxy<ReqT, RespT> implements ServerCallHandler<ReqT, Res
                 }
             }
 
-            @Override public void onReady() {
+            @Override
+            public void onReady() {
                 serverCallListener.onClientReady();
             }
 
@@ -195,8 +243,6 @@ public final class GrpcProxy<ReqT, RespT> implements ServerCallHandler<ReqT, Res
                 methodsRegistry.put(methodDescriptor.getFullMethodName(), methodDescriptor);
             }
         }
-
-
         @Override
         public ServerMethodDefinition<?,?> lookupMethod(String methodName, String authority) {
 
@@ -219,34 +265,5 @@ public final class GrpcProxy<ReqT, RespT> implements ServerCallHandler<ReqT, Res
         }
     }
 
-    public static void main(String[] args) throws IOException, InterruptedException {
-        String target = "localhost:8980";
-        ManagedChannel channel = Grpc.newChannelBuilder(target, InsecureChannelCredentials.create())
-                .build();
-        logger.info("Proxy will connect to " + target);
-        GrpcProxy<byte[], byte[]> proxy = new GrpcProxy<byte[], byte[]>(channel);
-        int port = 8981;
-        Server server = Grpc.newServerBuilderForPort(port, InsecureServerCredentials.create())
-                .fallbackHandlerRegistry(new Registry(proxy))
-                .build()
-                .start();
-        logger.info("Proxy started, listening on " + port);
-        Runtime.getRuntime().addShutdownHook(new Thread() {
-            @Override
-            public void run() {
-                server.shutdown();
-                try {
-                    server.awaitTermination(10, TimeUnit.SECONDS);
-                } catch (InterruptedException ex) {
-                    Thread.currentThread().interrupt();
-                }
-                server.shutdownNow();
-                channel.shutdownNow();
-            }
-        });
-        server.awaitTermination();
-        if (!channel.awaitTermination(1, TimeUnit.SECONDS)) {
-            System.out.println("Channel didn't shut down promptly");
-        }
-    }
+
 }

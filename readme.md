@@ -106,6 +106,67 @@ TODO:
 TODO: tests
 - Test parallelisim
 
+## Http Proxy server
+
+If we make a http proxy server then a client in any language can connect to devices on the other side of the broker
+via the proxy. 
+When the client uses the proxy server it needs to be able to say which device it is connecting to. 
+It could do this by trying to create a special MessageChannel and when constructing the MessageChannel specify the device it will be associated with.
+The problem is that the http client ManagedChannel does not seem to have any way of specifying arbitrary options like you can do when creating a stub. The only thing you can do is to specify a subdomain in the connection e.g.
+        ManagedChannel channel = ManagedChannelBuilder.forTarget("device1.tenant1.mygrpcserver:443").
+Then you would need a proxy like nginx that routes *.mygrpcserver to a single server. Then you would need to implement a server interceptor that can access the ssl session. The interceptor would get the TLS SNI (server name indication) information and then do something to route to the right device. One advantage of this dns setup is that you could use an AWS policy for tenants that restricts subdomain access. (But it would not be hard to do this in the other proposal below where the tenant is passed as an option, just check if the jwt in the header has the right tenant id before proceeding with the call). The other advantage is that it is more natural for a client as opposed to setting a call option. And later it would be possible to replace with actual grpc servers where there is no broker involved. The disadvantage of this scheme is testing it locally. You can't do local dns without your own dhcp and dns server.
+
+Secondly channel connections are expensive to create (Opening a socket, Establishing TCP connection, Negotiating TLS, Starting HTTP/2 connection, Making the gRPC call - https://learn.microsoft.com/en-us/aspnet/core/grpc/performance)
+That article is saying that is why you should share a channel for many calls. In this case we are worried about having one channel per device so it is not quite as bad. But it would still be better if the client could use one http client for many devices. Because technically - it can. Whereas for grpc classic you have to connect to each server indivicually, compared to broker where you connect to one broker and have access to many devices. Our MqttChannelTransport is very lightweight and takes the actual MqttConnection as a parameter.
+
+Instead of using the channel constructor the client will specify grpc metadata as part of the call. Grpc metadata is already used for authentication credentials which is a similar pattern. And the documentation for grpc metadata says "This can be used to implement application-specific features, such as load balancing" which is a similar use case (we are using it for routing).
+Specifically, the client must specify the key "server-topic". The value should be the message broker topic on which
+the MessageServer is listening for example:
+    server-topic = tenant1/device1
+
+But we cannot just override the server topic on the channel for that particular call. This is because the messageChannel and also listens for the connection state of the device server and is tied to a particular server to manage this. The messageChannel will send errors to any client calls when that device server goes down and the broker sends an LWT for that device server.
+i.e. We can have single channel (or connection) in the client (e.g. nodejs client) but in the proxy server we need a map of MessageChannels. One MessageChannel per device.
+The proxy server can share the same mqtt connection between the MessageChannels (or it could use a connection pool if perf shows that helps)
+When the device disconnects then the MessageChannel should be closed and removed from the map (it will also automatically send errors to the client caller because that code is built into MessageChannel)
+This also has the advantage that all the existing test code is valid and we can just build the http proxy on top.
+i.e. the summary is that we do not use dns. Instead we use topics in order to route requests to tenants and devices just as we would with the straight mgrpc java client. If we do decide to use dns later then we need to make a server interceptor that makes the topic from the dns subdomain.
+
+TODO: Implement close on the proxy that closes all channels. Then do testhello using proxy. Then do node version
+from https://grpc.io/docs/guides/metadata/ or here https://github.com/techunits/unary_custom_metadata_grpc_sample_node
+https://techunits.medium.com/how-to-send-a-unary-request-with-additional-custom-metadata-headers-to-the-server-with-grpc-nodejs-90db5235f4fb
+
+
+### Proxy and Method type (unary etc)
+GrpcProxy has a registerServiceDescriptor that can be used by test code to set the method type so that it can efficiently
+send requests for unary methods by packing the start, message, complete in one message. 
+This does not affect the server side which looks up the server method definition to get the method type.
+But this is useless for a remote client generally. The only way it could be used is when the proxy server starts up
+if it has a set of service IDL's that we are sure match the device side.
+Another way would be for the client itself to make some call on the proxy server to tell it the type of a
+method. 
+A better way again would be for the proxy server to make an mqtt call to the device server to get the method type
+the first time that method is called and then to cache the type after. But which device server? The problem is that
+the proxy server will call lookupMethod before startCall. But this could be ok. The first time startCall is called
+for a method it could at that point make an asynchronous remote call to the device to get the type for that method
+and then cache it on the response. Future calls would then use the cache.
+The only way this would fail is if a) The client and device have different protobuf definitions - which is trouble
+anyway. b) Two devices have different protobuf definitions where one says it is a unary call and the other says
+it is a stream. - This is possible. Maybe someone is testing a new version of a service on a particular device only
+but the method type has been cached by the proxy server. They changed the type of the method. This is possible
+but highly unlikely. It should never be done in production, and in test it just needs a restart of the proxy which
+is likely to happen anyway.
+Overall though if we do not implement this it just means that 3 mqtt messages are sent instead of 1 but even at that
+the call will complete after two messages as the server won't care about the client status anyway. So what it means
+for a call is that a start mqtt message and the payload message are sent separately. This may be nearly as fast anyway.
+
+
+### Server side stub 
+The above will work to enable clients written in any language without developing the equivalent of a custom ChannelMessageTransport in that language. To enable servers then there would have to be a stub server (or reverse proxy) in java on the server side. To suppport a number of servers on the device (python, node..) each one would have to be mapped to a subtopic. Assuming that we are using the call option (as opposed to dns) with the client would have tenant1/device1/pythonserver as the server topic. The stub server would take the "pythonserver" bit from the call context and route it to the pythonserver. The stub server would need a properties file that maps pythonserver to the address and port of the python server (like dns). Note that TestGrpcProxy.testServerSideProxy() shows how to wire a proxy from the broker to a http grpc server
+
+For the moment we do not have a requirement for the stub side. We will write all services in java as it is fast
+enough, has threads, is productive to write in, and is an approved language. 
+
+
 ## Watch Batching
 Batching is something that comes up as a specific optimisation for a cloud visu server use case and is probably not a general concept at all. 
 In the cloud visu server we want to be able to create a number of watches and then as the values come in batch them together and send them in one message. So if values come in for watch1 and watch2 within a 50ms interval then the visu server will send those to us in one message. We further want to send them in one mqtt message to the cloud visu server.

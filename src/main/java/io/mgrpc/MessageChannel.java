@@ -6,12 +6,15 @@ import io.grpc.*;
 import io.grpc.protobuf.StatusProto;
 import io.mgrpc.messaging.ChannelMessageListener;
 import io.mgrpc.messaging.ChannelMessageTransport;
+import io.mgrpc.messaging.DisconnectListener;
 import io.mgrpc.messaging.MessagingException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 import java.lang.invoke.MethodHandles;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -25,7 +28,8 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
     public static final long SUBSCRIPTION_TIMEOUT_MILLIS = 10 * 1000;
 
-    public static final CallOptions.Key<String> OUT_TOPIC = CallOptions.Key.create("out-topic");
+    public static final CallOptions.Key<String> OPT_OUT_TOPIC = CallOptions.Key.create("out-topic");
+
 
     private final static Metadata EMPTY_METADATA = new Metadata();
 
@@ -38,11 +42,11 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
 
     private final String channelId;
 
-    private boolean initialized = false;
+    private boolean started = false;
 
     private final Map<String, MsgClientCall> clientCallsById = new ConcurrentHashMap<>();
 
-
+    private final List<DisconnectListener> disconnectListeners = new ArrayList<>();
 
     private static final int SINGLE_MESSAGE_STREAM = 0;
 
@@ -94,7 +98,11 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
     public void start() throws MessagingException {
 
         transport.start(this);
-        initialized = true;
+        started = true;
+    }
+
+    boolean isStarted(){
+        return started;
     }
 
     @Override
@@ -113,8 +121,12 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
 
     }
 
+    /**
+     * The ChannelMessageTransport should call this message on the channel if it knows that the server
+     * has disconnected.
+     */
     @Override
-    public void onServerDisconnected() {
+    public void onDisconnect(String channelId) {
         //Clean up all existing calls because the server has been disconnected.
         //Interrupt the client's call queue with an unavailable status, the call will be cleaned up when it is closed.
         //We could just call close on the call directly but we want the call to finish processing whatever
@@ -130,6 +142,14 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
             call.queueServerMessage(rpcMessage);
         }
 
+        for(DisconnectListener listener: disconnectListeners){
+            listener.onDisconnect(this.channelId);;
+        }
+
+    }
+
+    public void addDisconnectListener(DisconnectListener listener) {
+        disconnectListeners.add(listener);
     }
 
 
@@ -268,7 +288,7 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
             if (effectiveDeadline != null) {
                 start.setTimeoutMillis(effectiveDeadline.timeRemaining(TimeUnit.MILLISECONDS));
             }
-            final String responseTopic = this.callOptions.getOption(OUT_TOPIC);
+            final String responseTopic = this.callOptions.getOption(OPT_OUT_TOPIC);
             if (responseTopic != null && responseTopic.trim().length() != 0) {
                 //If the client specified a responseTopic then set that in the message to the server and
                 //close the call. The client should have already done a subscribe to receive the responses
@@ -367,7 +387,9 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
                     return;
                 case VALUE:
                     clientExec(() -> {
-                        responseListener.onHeaders(EMPTY_METADATA);
+                        if(message.getSequence() == 1) { //only send headers if this is the first response
+                            responseListener.onHeaders(EMPTY_METADATA);
+                        }
                         responseListener.onMessage(methodDescriptor.parseResponse(message.getValue().getContents().newInput()));
                         if (message.getSequence() == SINGLE_MESSAGE_STREAM) {
                             //There is only a single message in this stream and it will not be followed by
@@ -494,7 +516,7 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
 
         private void send(MethodDescriptor methodDescriptor, RpcMessage.Builder messageBuilder) throws MessagingException {
             //fullMethodName will be e.g. "helloworld.ExampleHelloService/LotsOfReplies"
-            if (!initialized) {
+            if (!started) {
                 throw new MessagingException("channel.init() was not called");
             }
             final RpcMessage rpcMessage = messageBuilder.build();

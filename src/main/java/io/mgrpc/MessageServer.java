@@ -4,6 +4,7 @@ import com.google.protobuf.ByteString;
 import com.google.protobuf.MessageLite;
 import io.grpc.*;
 import io.grpc.protobuf.StatusProto;
+import io.mgrpc.messaging.DisconnectListener;
 import io.mgrpc.messaging.MessagingException;
 import io.mgrpc.messaging.ServerMessageListener;
 import io.mgrpc.messaging.ServerMessageTransport;
@@ -141,8 +142,12 @@ public class MessageServer implements ServerMessageListener {
 
     }
 
+    /**
+     * The ServerMessageTransport should call this message on the serer if it knows that a channel
+     * has disconnected.
+     */
     @Override
-    public void onChannelDisconnected(String channelId) {
+    public void onDisconnect(String channelId) {
         //When a client is disconnected we need to cancel all calls for it so that they get cleaned up.
         for (String callId : this.handlersByCallId.keySet()) {
             MessageHandler messageHandler = this.handlersByCallId.get(callId);

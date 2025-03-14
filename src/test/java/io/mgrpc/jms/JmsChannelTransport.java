@@ -151,7 +151,7 @@ public class JmsChannelTransport implements ChannelMessageTransport {
                     log.debug("Server connected status = " + serverConnected);
                     serverConnectedLatch.countDown();
                     if (!serverConnected) {
-                        channel.onServerDisconnected();
+                        channel.onDisconnect(null);
                     }
                 } catch (Exception ex) {
                     log.error("Failed to process status reply", ex);
@@ -298,8 +298,8 @@ public class JmsChannelTransport implements ChannelMessageTransport {
                 log.error("", e);
             }
             if (!serverConnected) {
-                log.warn("Tried to send message but server is not connected");
-                throw new MessagingException("Server is not connected");
+                log.warn("Tried to send message but server is not connected at topic: " + serverTopics.root);
+                throw new MessagingException("Server is not connected at topic: " + serverTopics.root);
             }
         }
 

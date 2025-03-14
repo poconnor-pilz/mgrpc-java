@@ -155,7 +155,7 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
                     log.debug("Server connected status = " + serverConnected);
                     this.serverConnectedLatch.countDown();
                     if (!serverConnected) {
-                        channel.onServerDisconnected();
+                        channel.onDisconnect(null);
                     }
                 } catch (InvalidProtocolBufferException e) {
                     log.error("Failed to parse connection status", e);
@@ -258,8 +258,8 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
                 log.error("", e);
             }
             if (!serverConnected) {
-                log.warn("Tried to send message but server is not connected");
-                throw new MessagingException("Server is not connected");
+                log.warn("Tried to send message but server is not connected at topic: " + serverTopics.root);
+                throw new MessagingException("Server is not connected at topic: " + serverTopics.root);
             }
         }
         final String topic = serverTopics.methodIn(start.getStart().getMethodName());
