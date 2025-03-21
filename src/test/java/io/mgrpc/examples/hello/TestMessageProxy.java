@@ -17,7 +17,6 @@ import org.slf4j.LoggerFactory;
 import java.lang.invoke.MethodHandles;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-
 public class TestMessageProxy {
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -74,14 +73,13 @@ public class TestMessageProxy {
                 .usePlaintext()
                 .build();
 
-        //Add the interceptor that will take the OPT_SERVER_TOPIC and put it in the metadata header for the call
-        ServerTopicInterceptor interceptor = new ServerTopicInterceptor();
-        final Channel channel = ClientInterceptors.intercept(rawChannel, interceptor);
+        //Add the interceptor that will take the server topic and put it in the metadata header for the call
+        final Channel channel = ClientInterceptors.intercept(rawChannel, new TopicInterceptor("server1"));
 
 
 
         final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub blockingStub
-                = ExampleHelloServiceGrpc.newBlockingStub(channel).withOption(ServerTopicInterceptor.OPT_SERVER_TOPIC, "server1");
+                = ExampleHelloServiceGrpc.newBlockingStub(channel);
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
         final HelloReply helloReply = blockingStub.sayHello(joe);
         assertEquals("Hello joe", helloReply.getMessage());

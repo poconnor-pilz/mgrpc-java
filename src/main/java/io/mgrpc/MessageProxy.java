@@ -7,7 +7,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayInputStream;
-import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.invoke.MethodHandles;
@@ -66,7 +65,7 @@ public class MessageProxy<ReqT, RespT>  implements ServerCallHandler<ReqT, RespT
 
         //Find the right channel for the topic (i.e. find the right device)
         //and send the messages to it
-        final String serverTopic = headers.get(ServerTopicInterceptor.META_SERVER_TOPIC);
+        final String serverTopic = headers.get(TopicInterceptor.META_SERVER_TOPIC);
         if (serverTopic == null || serverTopic.isEmpty()) {
             throw new IllegalArgumentException("Missing server topic header");
         }
@@ -259,7 +258,7 @@ public class MessageProxy<ReqT, RespT>  implements ServerCallHandler<ReqT, RespT
             MethodDescriptor<byte[], byte[]> methodDescriptor
                     = MethodDescriptor.newBuilder(byteMarshaller, byteMarshaller)
                     .setFullMethodName(methodName)
-                    .setType(MethodDescriptor.MethodType.UNKNOWN)
+                    .setType(methodType)
                     .build();
             return ServerMethodDefinition.create(methodDescriptor, handler);
         }

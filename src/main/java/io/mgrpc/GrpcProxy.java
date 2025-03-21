@@ -213,7 +213,7 @@ public final class GrpcProxy<ReqT, RespT> implements ServerCallHandler<ReqT, Res
             MethodDescriptor<byte[], byte[]> methodDescriptor
                     = MethodDescriptor.newBuilder(byteMarshaller, byteMarshaller)
                     .setFullMethodName(methodName)
-                    .setType(MethodDescriptor.MethodType.UNKNOWN)
+                    .setType(methodType)
                     .build();
             return ServerMethodDefinition.create(methodDescriptor, handler);
         }

@@ -3,7 +3,6 @@ package io.mgrpc.examples.hello;
 import io.grpc.*;
 import io.mgrpc.*;
 import io.mgrpc.mqtt.MqttChannelFactory;
-import io.mgrpc.mqtt.MqttChannelTransport;
 import io.mgrpc.mqtt.MqttServerTransport;
 import io.mgrpc.mqtt.MqttUtils;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
@@ -13,7 +12,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.lang.invoke.MethodHandles;
-import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
@@ -80,10 +78,8 @@ public class TestHelloMessageProxy extends TestHelloBase {
         basicHttpChannel = Grpc.newChannelBuilder(target, InsecureChannelCredentials.create())
                 .build();
 
-        //Add the interceptor that will take the OPT_SERVER_TOPIC and put it in the metadata header for the call
-        //TestHelloBase will get the topic by calling getServerTopic() below
-        ServerTopicInterceptor interceptor = new ServerTopicInterceptor();
-        httpChannel = ClientInterceptors.intercept(basicHttpChannel, interceptor);
+        //Add the interceptor that will take the server topic and put it in the metadata header for the call
+        httpChannel = ClientInterceptors.intercept(basicHttpChannel, new TopicInterceptor(SERVER));
 
     }
 
@@ -102,10 +98,6 @@ public class TestHelloMessageProxy extends TestHelloBase {
         return httpChannel;
     }
 
-    @Override
-    public String getServerTopic() {
-        return SERVER;
-    }
 
 
     @Override

@@ -52,7 +52,6 @@ public abstract class TestHelloBase {
     @Test
     public void testSayHello() {
         final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub blockingStub = ExampleHelloServiceGrpc.newBlockingStub(getChannel())
-                .withOption(ServerTopicInterceptor.OPT_SERVER_TOPIC, getServerTopic())
                 .withDeadlineAfter(REQUEST_TIMEOUT, TimeUnit.MILLISECONDS);
         ;
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
@@ -67,7 +66,6 @@ public abstract class TestHelloBase {
 
         final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub stub = ExampleHelloServiceGrpc
                 .newBlockingStub(getChannel())
-                .withOption(ServerTopicInterceptor.OPT_SERVER_TOPIC, getServerTopic())
                 .withDeadlineAfter(REQUEST_TIMEOUT, TimeUnit.MILLISECONDS);
         HelloRequest twoReplies = HelloRequest.newBuilder().setName("2").build();
         List<HelloReply> responseList = ToList.toList(stub.lotsOfReplies(twoReplies));
@@ -82,8 +80,7 @@ public abstract class TestHelloBase {
 
         //This test doesn't check anything. It just runs calls in parallel. Sometimes it may show up a concurrency bug.
 
-        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(getChannel())
-                .withOption(ServerTopicInterceptor.OPT_SERVER_TOPIC, getServerTopic());
+        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(getChannel());
         //Tell lotsOfReplies to reply 10 times
         HelloRequest tenTimes = HelloRequest.newBuilder().setName("10").build();
         int numRequests = 100;
@@ -117,8 +114,7 @@ public abstract class TestHelloBase {
     public void testLotsOfGreetings() {
 
         log.debug("testLotsOfGreetings");
-        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(getChannel())
-                .withOption(ServerTopicInterceptor.OPT_SERVER_TOPIC, getServerTopic());
+        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(getChannel());
 
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
         HelloRequest jane = HelloRequest.newBuilder().setName("jane").build();
@@ -138,8 +134,7 @@ public abstract class TestHelloBase {
     @Test
     public void testBidiHello() throws Throwable {
 
-        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(getChannel())
-                .withOption(ServerTopicInterceptor.OPT_SERVER_TOPIC, getServerTopic());
+        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(getChannel());
 
         class TestHelloReplyObserver implements StreamObserver<HelloReply> {
             public HelloReply lastReply;
@@ -200,15 +195,6 @@ public abstract class TestHelloBase {
         channel.shutdown();
         server.shutdown();
         checkForLeaks(0);
-    }
-
-    /**
-     * This is only used in TestHelloMqttMessageProxyServer
-     * It will return the value of the server topic to be set as part of the metadata for the call
-     * so that the proxy server can send the call to topic that corresponds to the right MessageServer
-     */
-    public String getServerTopic() {
-        return "";
     }
 
 
