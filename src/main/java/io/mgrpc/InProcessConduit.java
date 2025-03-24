@@ -19,8 +19,8 @@ public class InProcessConduit {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-    private final Map<String, ChannelMessageListener> channelsById = new ConcurrentHashMap<>();
-    private ServerMessageListener server;
+    private final Map<String, ChannelListener> channelsById = new ConcurrentHashMap<>();
+    private ServerListener server;
 
     private final ServerConduit serverConduit = new InprocServerConduit();
 
@@ -53,7 +53,7 @@ public class InProcessConduit {
 
 
         @Override
-        public void start(ServerMessageListener server) throws MessagingException {
+        public void start(ServerListener server) throws MessagingException {
             if(InProcessConduit.this.server != null){
                 String err = "InProcessConduit instance can only be associated with one Server";
                 log.error(err);
@@ -83,7 +83,7 @@ public class InProcessConduit {
                 throw new MessagingException(err);
             }
 
-            final ChannelMessageListener channel = channelsById.get(channelId);
+            final ChannelListener channel = channelsById.get(channelId);
             if(channel == null){
                 String err = "Channel " + channelId +  " does not exist";
                 log.error(err);
@@ -104,7 +104,7 @@ public class InProcessConduit {
         private String channelId;
 
         @Override
-        public void start(ChannelMessageListener channel) throws MessagingException {
+        public void start(ChannelListener channel) throws MessagingException {
             this.channelId = channel.getChannelId();
             channelsById.put(channelId, channel);
         }

@@ -4,7 +4,7 @@ import com.google.protobuf.InvalidProtocolBufferException;
 import io.grpc.Status;
 import io.mgrpc.*;
 import io.mgrpc.messaging.MessagingException;
-import io.mgrpc.messaging.ServerMessageListener;
+import io.mgrpc.messaging.ServerListener;
 import io.mgrpc.messaging.ServerConduit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -57,7 +57,7 @@ public class JmsServerConduit implements ServerConduit {
     }
 
 
-    private ServerMessageListener server;
+    private ServerListener server;
 
     /**
      * @param client
@@ -73,7 +73,7 @@ public class JmsServerConduit implements ServerConduit {
 
 
     @Override
-    public void start(ServerMessageListener server) throws MessagingException {
+    public void start(ServerListener server) throws MessagingException {
         if (this.server != null) {
             throw new MessagingException("Listener already connected");
         }

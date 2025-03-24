@@ -14,7 +14,7 @@ public interface ChannelConduit {
      * @param channel The channel
      * @throws MessagingException
      */
-    void start(ChannelMessageListener channel) throws MessagingException;
+    void start(ChannelListener channel) throws MessagingException;
 
 
     /**

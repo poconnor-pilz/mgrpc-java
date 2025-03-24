@@ -5,7 +5,7 @@ import com.google.protobuf.Parser;
 import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
-import io.mgrpc.messaging.ChannelMessageListener;
+import io.mgrpc.messaging.ChannelListener;
 import io.mgrpc.messaging.ChannelConduit;
 import io.mgrpc.messaging.MessagingException;
 import io.mgrpc.messaging.pubsub.BufferToStreamObserver;
@@ -75,7 +75,7 @@ public class MqttChannelConduit implements ChannelConduit, MessageSubscriber {
     private CountDownLatch serverConnectedLatch;
     private boolean serverConnected = false;
 
-    private ChannelMessageListener channel;
+    private ChannelListener channel;
 
     private final Map<String, List<StreamObserver>> subscribersByTopic = new ConcurrentHashMap<>();
 
@@ -128,7 +128,7 @@ public class MqttChannelConduit implements ChannelConduit, MessageSubscriber {
 
 
     @Override
-    public void start(ChannelMessageListener channel) throws MessagingException {
+    public void start(ChannelListener channel) throws MessagingException {
 
         if (this.channel != null) {
             throw new MessagingException("Listener already connected");

@@ -15,7 +15,7 @@ public interface ServerConduit {
      * @param server The server
      * @throws MessagingException
      */
-    void start(ServerMessageListener server) throws MessagingException;
+    void start(ServerListener server) throws MessagingException;
 
     /**
      * Called by the server when the server closes. The conduit should release any resources here.

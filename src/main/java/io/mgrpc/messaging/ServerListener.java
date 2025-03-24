@@ -6,7 +6,7 @@ import io.mgrpc.RpcMessage;
 /**
  * Interface implemented by the server
  */
-public interface ServerMessageListener extends DisconnectListener{
+public interface ServerListener extends DisconnectListener{
 
     /**
      * The ServerConduit should call this method on the server when it receives

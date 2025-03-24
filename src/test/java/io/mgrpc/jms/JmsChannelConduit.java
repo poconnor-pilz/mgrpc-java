@@ -4,7 +4,7 @@ import com.google.protobuf.InvalidProtocolBufferException;
 import io.grpc.MethodDescriptor;
 import io.grpc.Status;
 import io.mgrpc.*;
-import io.mgrpc.messaging.ChannelMessageListener;
+import io.mgrpc.messaging.ChannelListener;
 import io.mgrpc.messaging.ChannelConduit;
 import io.mgrpc.messaging.MessagingException;
 import org.slf4j.Logger;
@@ -66,7 +66,7 @@ public class JmsChannelConduit implements ChannelConduit {
 
     private final boolean useBrokerFlowControl;
 
-    private ChannelMessageListener channel;
+    private ChannelListener channel;
 
     private Map<String, JmsCallQueues> callQueuesMap = new ConcurrentHashMap<>();
 
@@ -112,7 +112,7 @@ public class JmsChannelConduit implements ChannelConduit {
 
 
     @Override
-    public void start(ChannelMessageListener channel) throws MessagingException {
+    public void start(ChannelListener channel) throws MessagingException {
 
         if (this.channel != null) {
             throw new MessagingException("Listener already connected");

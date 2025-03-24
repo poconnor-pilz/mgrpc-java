@@ -4,7 +4,7 @@ import com.google.protobuf.ByteString;
 import com.google.protobuf.MessageLite;
 import io.grpc.*;
 import io.grpc.protobuf.StatusProto;
-import io.mgrpc.messaging.ChannelMessageListener;
+import io.mgrpc.messaging.ChannelListener;
 import io.mgrpc.messaging.ChannelConduit;
 import io.mgrpc.messaging.DisconnectListener;
 import io.mgrpc.messaging.MessagingException;
@@ -22,7 +22,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
-public class MessageChannel extends Channel implements ChannelMessageListener {
+public class MessageChannel extends Channel implements ChannelListener {
 
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());

@@ -5,7 +5,7 @@ import io.mgrpc.RpcMessage;
 /**
  * Interface implemented by the channel
  */
-public interface ChannelMessageListener extends DisconnectListener{
+public interface ChannelListener extends DisconnectListener{
 
     /**
      * The ChannelConduit should call this method on the channel when it receives

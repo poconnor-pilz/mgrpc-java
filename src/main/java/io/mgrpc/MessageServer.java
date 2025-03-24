@@ -5,7 +5,7 @@ import com.google.protobuf.MessageLite;
 import io.grpc.*;
 import io.grpc.protobuf.StatusProto;
 import io.mgrpc.messaging.MessagingException;
-import io.mgrpc.messaging.ServerMessageListener;
+import io.mgrpc.messaging.ServerListener;
 import io.mgrpc.messaging.ServerConduit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,7 +21,7 @@ import java.util.concurrent.TimeUnit;
 import static io.mgrpc.RpcMessage.MessageCase.START;
 
 
-public class MessageServer implements ServerMessageListener {
+public class MessageServer implements ServerListener {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
     private MInternalHandlerRegistry registry = new MInternalHandlerRegistry();
@@ -142,7 +142,7 @@ public class MessageServer implements ServerMessageListener {
     }
 
     /**
-     * The ServerConduit should call this message on the serer if it knows that a channel
+     * The ServerConduit should call this message on the server if it knows that a channel
      * has disconnected.
      */
     @Override
