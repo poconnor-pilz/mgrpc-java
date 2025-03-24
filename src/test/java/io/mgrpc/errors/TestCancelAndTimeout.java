@@ -12,8 +12,8 @@ import io.mgrpc.EmbeddedBroker;
 import io.mgrpc.Id;
 import io.mgrpc.MessageChannel;
 import io.mgrpc.MessageServer;
-import io.mgrpc.mqtt.MqttChannelTransport;
-import io.mgrpc.mqtt.MqttServerTransport;
+import io.mgrpc.mqtt.MqttChannelConduit;
+import io.mgrpc.mqtt.MqttServerConduit;
 import io.mgrpc.mqtt.MqttUtils;
 import io.mgrpc.utils.StatusObserver;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
@@ -69,9 +69,9 @@ public class TestCancelAndTimeout {
     void setup() throws Exception {
 
         //Set up the server
-        server = new MessageServer(new MqttServerTransport(serverMqtt, SERVER));
+        server = new MessageServer(new MqttServerConduit(serverMqtt, SERVER));
         server.start();
-        channel = new MessageChannel(new MqttChannelTransport(clientMqtt, SERVER));
+        channel = new MessageChannel(new MqttChannelConduit(clientMqtt, SERVER));
         channel.start();
     }
 
@@ -271,7 +271,7 @@ public class TestCancelAndTimeout {
 
         server.close();
         //Make a server with queue size 10
-        server = new MessageServer(new MqttServerTransport(serverMqtt, SERVER), 10);
+        server = new MessageServer(new MqttServerConduit(serverMqtt, SERVER), 10);
         server.start();
 
         final CountDownLatch serviceLatch = new CountDownLatch(1);
@@ -334,7 +334,7 @@ public class TestCancelAndTimeout {
         //and the input stream to the server should get an error.
         channel.close();
         //Make a channel with queue size 10
-        channel = new MessageChannel(new MqttChannelTransport(serverMqtt, SERVER), 10);
+        channel = new MessageChannel(new MqttChannelConduit(serverMqtt, SERVER), 10);
         channel.start();
 
         final CountDownLatch serverCancelledLatch = new CountDownLatch(1);

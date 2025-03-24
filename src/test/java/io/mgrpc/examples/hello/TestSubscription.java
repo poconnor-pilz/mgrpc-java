@@ -6,8 +6,8 @@ import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
 import io.mgrpc.messaging.MessagingException;
-import io.mgrpc.mqtt.MqttChannelTransport;
-import io.mgrpc.mqtt.MqttServerTransport;
+import io.mgrpc.mqtt.MqttChannelConduit;
+import io.mgrpc.mqtt.MqttServerConduit;
 import io.mgrpc.mqtt.MqttUtils;
 import io.mgrpc.utils.ToList;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
@@ -34,7 +34,7 @@ public class TestSubscription {
     private MessageChannel channel;
     private MessageServer server;
 
-    private MqttChannelTransport channelTransport;
+    private MqttChannelConduit channelConduit;
 
     //Make server name short but random to prevent stray status messages from previous tests affecting this test
     private static final String SERVER = Id.shortRandom();
@@ -61,10 +61,10 @@ public class TestSubscription {
     void setup() throws Exception{
 
         //Set up the serverb
-        server = new MessageServer(new MqttServerTransport(serverMqtt, SERVER));
+        server = new MessageServer(new MqttServerConduit(serverMqtt, SERVER));
         server.start();
-        channelTransport = new MqttChannelTransport(clientMqtt, SERVER);
-        channel = new MessageChannel(channelTransport);
+        channelConduit = new MqttChannelConduit(clientMqtt, SERVER);
+        channel = new MessageChannel(channelConduit);
         channel.start();
     }
 
@@ -135,20 +135,20 @@ public class TestSubscription {
         //Subscribe for responses
         CountDownLatch latch = new CountDownLatch(3);
         HelloObserver obs1 = new HelloObserver(latch);
-        channelTransport.subscribe(responseTopic1, HelloReply.parser(), obs1);
+        channelConduit.subscribe(responseTopic1, HelloReply.parser(), obs1);
         HelloObserver obs2 = new HelloObserver(latch);
-        channelTransport.subscribe(responseTopic1, HelloReply.parser(), obs2);
+        channelConduit.subscribe(responseTopic1, HelloReply.parser(), obs2);
         HelloObserver obsTemp = new HelloObserver(latch);
-        channelTransport.subscribe(responseTopic1, HelloReply.parser(), obsTemp);
-        assertEquals(channelTransport.getStats().getSubscribers(), 3);
+        channelConduit.subscribe(responseTopic1, HelloReply.parser(), obsTemp);
+        assertEquals(channelConduit.getStats().getSubscribers(), 3);
 
         //Unsubscribe one of the observers of responseTopic1 and verify that it is removed
-        channelTransport.unsubscribe(responseTopic1, obsTemp);
-        assertEquals(channelTransport.getStats().getSubscribers(), 2);
+        channelConduit.unsubscribe(responseTopic1, obsTemp);
+        assertEquals(channelConduit.getStats().getSubscribers(), 2);
 
         HelloObserver obs3 = new HelloObserver(latch);
-        channelTransport.subscribe(responseTopic2, HelloReply.parser(), obs3);
-        assertEquals(channelTransport.getStats().getSubscribers(), 3);
+        channelConduit.subscribe(responseTopic2, HelloReply.parser(), obs3);
+        assertEquals(channelConduit.getStats().getSubscribers(), 3);
 
         //Send two requests each with a different responseTopic
         final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub blockingStub1 =
@@ -170,7 +170,7 @@ public class TestSubscription {
         latch.await();
 
         //All subscriptions should be closed because the streams have completed
-        assertEquals(channelTransport.getStats().getSubscribers(), 0);
+        assertEquals(channelConduit.getStats().getSubscribers(), 0);
 
         assertEquals(obs1.replies.size(), 2);
         assertEquals("Hello 0", obs1.replies.get(0).getMessage());
@@ -191,17 +191,17 @@ public class TestSubscription {
         checkForLeaks(0);
 
         //Test unsubscribe of all observers to a responseTopic
-        channelTransport.subscribe(responseTopic1, HelloReply.parser(), obs1);
-        channelTransport.subscribe(responseTopic1, HelloReply.parser(), obs2);
-        channelTransport.subscribe(responseTopic2, HelloReply.parser(), obs3);
-        assertEquals(3, channelTransport.getStats().getSubscribers());
+        channelConduit.subscribe(responseTopic1, HelloReply.parser(), obs1);
+        channelConduit.subscribe(responseTopic1, HelloReply.parser(), obs2);
+        channelConduit.subscribe(responseTopic2, HelloReply.parser(), obs3);
+        assertEquals(3, channelConduit.getStats().getSubscribers());
 
-        channelTransport.unsubscribe(responseTopic1);
+        channelConduit.unsubscribe(responseTopic1);
         //All 2 of the subscribers to responseTopic1 should be removed
-        assertEquals(1, channelTransport.getStats().getSubscribers());
+        assertEquals(1, channelConduit.getStats().getSubscribers());
 
-        channelTransport.unsubscribe(responseTopic2);
-        assertEquals(0, channelTransport.getStats().getSubscribers());
+        channelConduit.unsubscribe(responseTopic2);
+        assertEquals(0, channelConduit.getStats().getSubscribers());
 
     }
 

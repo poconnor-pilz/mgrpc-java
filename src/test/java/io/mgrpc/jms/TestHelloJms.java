@@ -60,11 +60,11 @@ public class TestHelloJms extends TestHelloBase {
     void setup() throws Exception{
 
         //Set up the serverb
-        server = new MessageServer(new JmsServerTransport(serverConnection, SERVER));
+        server = new MessageServer(new JmsServerConduit(serverConnection, SERVER));
         server.start();
         server.addService(new HelloServiceForTest());
         Thread.sleep(1000);
-        channel = new MessageChannel(new JmsChannelTransport(clientConnection, SERVER, true));
+        channel = new MessageChannel(new JmsChannelConduit(clientConnection, SERVER, true));
         channel.start();
     }
 

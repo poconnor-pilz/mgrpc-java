@@ -8,7 +8,7 @@ import io.mgrpc.RpcMessage;
 public interface ChannelMessageListener extends DisconnectListener{
 
     /**
-     * The ChannelMessageTransport should call this method on the channel when it receives
+     * The ChannelMessageConduit should call this method on the channel when it receives
      * a reply from the server
      * @param message The reply from the server.
      */
@@ -16,7 +16,7 @@ public interface ChannelMessageListener extends DisconnectListener{
 
 
     /**
-     * The ChannelMessageTransport can call this method to get the channel id.
+     * The ChannelMessageConduit can call this method to get the channel id.
      * @return
      */
     String getChannelId();

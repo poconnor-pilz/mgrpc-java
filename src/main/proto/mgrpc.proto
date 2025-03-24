@@ -10,10 +10,10 @@ option java_package = "io.mgrpc";
 option java_outer_classname = "MGrpc";
 
 message RpcSet{
-  //A set of messages. A transport can decide how many messages to include in a set.
-  //For example, in the case of a unary message call the channel transport could send a single broker message
+  //A set of messages. A conduit can decide how many messages to include in a set.
+  //For example, in the case of a unary message call the channel conduit could send a single broker message
   //consisting of an RpcSet containing the RpcMessages {Start, Value, Status}
-  //Then the server transport could respond with a single broker message
+  //Then the server conduit could respond with a single broker message
   //consisting of an RpcSet containing the RpcMessages {Value, Status}
   //In total for this unary call only two broker messages (each containing a set) are sent.
   repeated RpcMessage messages = 1;
@@ -78,11 +78,11 @@ message Start{
   repeated MetadataEntry metadata = 5;
 
   //Topic or queue that should be used for the client stream for this call
-  //Will not be set for a unary or server streaming call and may not be set depending on the transport strategy
+  //Will not be set for a unary or server streaming call and may not be set depending on the conduit strategy
   string clientStreamTopic = 6;
 
   //Topic or queue that should be used for the server stream for this call
-  //Will not be set for a unary or client streaming call and may not be set depending on the transport strategy
+  //Will not be set for a unary or client streaming call and may not be set depending on the conduit strategy
   string serverStreamTopic = 7;
 }
 

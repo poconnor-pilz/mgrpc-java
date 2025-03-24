@@ -3,7 +3,7 @@ package io.mgrpc.examples.hello;
 import io.grpc.*;
 import io.mgrpc.*;
 import io.mgrpc.mqtt.MqttChannelFactory;
-import io.mgrpc.mqtt.MqttServerTransport;
+import io.mgrpc.mqtt.MqttServerConduit;
 import io.mgrpc.mqtt.MqttUtils;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
@@ -61,7 +61,7 @@ public class TestHelloMessageProxy extends TestHelloBase {
         //We want to wire this:
         //httpChannel -> httpServer -> GrpcProxy -> messageChannel -> broker-> messageServer
 
-        messageServer = new MessageServer(new MqttServerTransport(serverMqtt, SERVER));
+        messageServer = new MessageServer(new MqttServerConduit(serverMqtt, SERVER));
         messageServer.start();
         messageServer.addService(new HelloServiceForTest());
 

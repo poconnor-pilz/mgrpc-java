@@ -6,7 +6,7 @@ import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
 import io.mgrpc.messaging.ChannelMessageListener;
-import io.mgrpc.messaging.ChannelMessageTransport;
+import io.mgrpc.messaging.ChannelMessageConduit;
 import io.mgrpc.messaging.MessagingException;
 import io.mgrpc.messaging.pubsub.BufferToStreamObserver;
 import io.mgrpc.messaging.pubsub.MessageSubscriber;
@@ -59,7 +59,7 @@ import java.util.concurrent.*;
 // The Channel will have a waitForServer method which a client can use to determine if a sever is up.
 // This will method will subscribe to server/o/sys/status and send a prompt to server/i/sys/status/prompt
 
-public class MqttChannelTransport implements ChannelMessageTransport, MessageSubscriber {
+public class MqttChannelConduit implements ChannelMessageConduit, MessageSubscriber {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -121,7 +121,7 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
      *                    Where if the gRPC fullMethodName is "helloworld.HelloService/SayHello"
      *                    then {slashedFullMethod} is "helloworld/HelloService/SayHello"
      */
-    public MqttChannelTransport(MqttAsyncClient client, String serverTopic) {
+    public MqttChannelConduit(MqttAsyncClient client, String serverTopic) {
         this.client = client;
         this.serverTopics = new ServerTopics(serverTopic);
     }
@@ -211,7 +211,7 @@ public class MqttChannelTransport implements ChannelMessageTransport, MessageSub
                     log.warn("Call cancelled or half closed  before start. An exception may have occurred");
                 return;
                 } else {
-                    throw new RuntimeException("First message sent to transport must be a start message. Call " + messageBuilder.getCallId() + " type " + messageBuilder.getMessageCase());
+                    throw new RuntimeException("First message sent to conduit must be a start message. Call " + messageBuilder.getCallId() + " type " + messageBuilder.getMessageCase());
                 }
             }
         }

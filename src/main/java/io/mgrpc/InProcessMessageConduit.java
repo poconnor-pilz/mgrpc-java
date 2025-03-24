@@ -11,30 +11,30 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 
 /**
- * Class providing server and channel transports that runs in process. Useful for unit testing mgrpc.
+ * Class providing server and channel conduits that runs in process. Useful for unit testing mgrpc.
  * To do production level in process grpc it would be better to use io.grpc.inprocess.InProcessServerBuilder
  * which will be more efficient.
  */
-public class InProcessMessageTransport {
+public class InProcessMessageConduit {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
     private final Map<String, ChannelMessageListener> channelsById = new ConcurrentHashMap<>();
     private ServerMessageListener server;
 
-    private final ServerMessageTransport serverTransport = new InprocServerTransport();
+    private final ServerMessageConduit serverConduit = new InprocServerConduit();
 
     private final Map<String, String> callIdToChannelIdMap = new ConcurrentHashMap<>();
 
     private static volatile Executor executorSingleton;
 
 
-    public ChannelMessageTransport getChannelTransport(){
-        return new InprocChannelTransport();
+    public ChannelMessageConduit getChannelConduit(){
+        return new InprocChannelConduit();
     }
 
-    public ServerMessageTransport getServerTransport(){
-        return serverTransport;
+    public ServerMessageConduit getServerConduit(){
+        return serverConduit;
     }
 
     private static Executor getExecutorInstance() {
@@ -49,17 +49,17 @@ public class InProcessMessageTransport {
         return executorSingleton;
     }
 
-    private class InprocServerTransport implements ServerMessageTransport {
+    private class InprocServerConduit implements ServerMessageConduit {
 
 
         @Override
         public void start(ServerMessageListener server) throws MessagingException {
-            if(InProcessMessageTransport.this.server != null){
-                String err = "InProcessMessageTransport instance can only be associated with one Server";
+            if(InProcessMessageConduit.this.server != null){
+                String err = "InProcessMessageconduit instance can only be associated with one Server";
                 log.error(err);
                 throw new MessagingException(err);
             }
-            InProcessMessageTransport.this.server = server;
+            InProcessMessageConduit.this.server = server;
         }
 
         @Override
@@ -99,7 +99,7 @@ public class InProcessMessageTransport {
 
     }
 
-    private class InprocChannelTransport implements ChannelMessageTransport {
+    private class InprocChannelConduit implements ChannelMessageConduit {
 
         private String channelId;
 

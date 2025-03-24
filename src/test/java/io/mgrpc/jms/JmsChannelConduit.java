@@ -5,7 +5,7 @@ import io.grpc.MethodDescriptor;
 import io.grpc.Status;
 import io.mgrpc.*;
 import io.mgrpc.messaging.ChannelMessageListener;
-import io.mgrpc.messaging.ChannelMessageTransport;
+import io.mgrpc.messaging.ChannelMessageConduit;
 import io.mgrpc.messaging.MessagingException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -46,7 +46,7 @@ import java.util.concurrent.*;
 // The Channel will have a waitForServer method which a client can use to determine if a sever is up.
 // This will method will subscribe to server/o/sys/status and send a prompt to server/i/sys/status/prompt
 
-public class JmsChannelTransport implements ChannelMessageTransport {
+public class JmsChannelConduit implements ChannelMessageConduit {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -99,12 +99,12 @@ public class JmsChannelTransport implements ChannelMessageTransport {
      *                    This topic should be unique to the broker.
      *                    Requests will be sent to {serverTopic}/i/svc
      *                    The channel will subscribe for replies on {serverTopic}/o/svc/{channelId}
-     * @param useBrokerFlowControl If this is true then for non-unary calls the transport will create
+     * @param useBrokerFlowControl If this is true then for non-unary calls the conduit will create
      *                             an individual broker queue for the server or client streams and only
      *                             pull from this queue when the next message is required meaning that the
      *                             channel and the server do not need to use their internal buffers.
      */
-    public JmsChannelTransport(Connection client, String serverTopic, boolean useBrokerFlowControl) {
+    public JmsChannelConduit(Connection client, String serverTopic, boolean useBrokerFlowControl) {
         this.client = client;
         this.useBrokerFlowControl = useBrokerFlowControl;
         this.serverTopics = new ServerTopics(serverTopic, TOPIC_SEPARATOR);
@@ -193,7 +193,7 @@ public class JmsChannelTransport implements ChannelMessageTransport {
         final JmsCallQueues callQueues = callQueuesMap.get(callId);
         try {
             if (callQueues != null) {
-                log.debug("Transport releasing resources for call " + callId);
+                log.debug("Conduit releasing resources for call " + callId);
                 if (callQueues.producer != null) {
                     callQueues.producer.close();
                 }
@@ -254,7 +254,7 @@ public class JmsChannelTransport implements ChannelMessageTransport {
                     log.warn("Call cancelled before start. An exception may have occurred");
                     return;
                 } else {
-                    throw new RuntimeException("First message sent to transport must be a start message. Call " + messageBuilder.getCallId());
+                    throw new RuntimeException("First message sent to conduit must be a start message. Call " + messageBuilder.getCallId());
                 }
             }
         }

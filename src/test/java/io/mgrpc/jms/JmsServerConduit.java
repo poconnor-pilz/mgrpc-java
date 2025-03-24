@@ -5,7 +5,7 @@ import io.grpc.Status;
 import io.mgrpc.*;
 import io.mgrpc.messaging.MessagingException;
 import io.mgrpc.messaging.ServerMessageListener;
-import io.mgrpc.messaging.ServerMessageTransport;
+import io.mgrpc.messaging.ServerMessageConduit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -16,7 +16,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 
-public class JmsServerTransport implements ServerMessageTransport {
+public class JmsServerConduit implements ServerMessageConduit {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -66,7 +66,7 @@ public class JmsServerTransport implements ServerMessageTransport {
      *                    A request for a method should be sent to sent to {serverTopic}/i/svc
      *                    Replies will be sent to {serverTopic}/o/svc/{channelId}}
      */
-    public JmsServerTransport(Connection client, String serverTopic) {
+    public JmsServerConduit(Connection client, String serverTopic) {
         this.client = client;
         this.serverTopics = new ServerTopics(serverTopic, TOPIC_SEPARATOR);
     }
@@ -167,7 +167,7 @@ public class JmsServerTransport implements ServerMessageTransport {
     @Override
     public void close() {
         try {
-            log.debug("Closing transport");
+            log.debug("Closing conduit");
             notifyConnected(false);
             session.close();
         } catch (JMSException exception) {
@@ -182,7 +182,7 @@ public class JmsServerTransport implements ServerMessageTransport {
         final JmsCallQueues callQueues = callQueuesMap.get(callId);
         try {
             if (callQueues != null) {
-                log.debug("Transport releasing resources for call " + callId);
+                log.debug("Conduit releasing resources for call " + callId);
                 if (callQueues.producer != null) {
                     callQueues.producer.close();
                 }

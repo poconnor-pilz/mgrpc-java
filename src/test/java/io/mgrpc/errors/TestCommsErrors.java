@@ -6,8 +6,8 @@ import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
-import io.mgrpc.mqtt.MqttChannelTransport;
-import io.mgrpc.mqtt.MqttServerTransport;
+import io.mgrpc.mqtt.MqttChannelConduit;
+import io.mgrpc.mqtt.MqttServerConduit;
 import io.mgrpc.mqtt.MqttUtils;
 import io.mgrpc.utils.StatusObserver;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
@@ -66,7 +66,7 @@ public class TestCommsErrors {
         //Make unique server name for each test to prevent stray status messages from previous tests affecting this test
         final String serverName = Id.shortRandom();
 
-        MessageChannel channel = new MessageChannel(new MqttChannelTransport(clientMqtt, serverName));
+        MessageChannel channel = new MessageChannel(new MqttChannelConduit(clientMqtt, serverName));
         channel.start();
         StatusObserver statusObserver = new StatusObserver("obs");
 
@@ -88,7 +88,7 @@ public class TestCommsErrors {
         //Make unique server name for each test to prevent stray status messages from previous tests affecting this test
         final String serverName = Id.shortRandom();
 
-        MessageChannel channel = new MessageChannel(new MqttChannelTransport(clientMqtt, serverName));
+        MessageChannel channel = new MessageChannel(new MqttChannelConduit(clientMqtt, serverName));
         channel.start();
         StatusObserver statusObserver = new StatusObserver("obs");
 
@@ -96,7 +96,7 @@ public class TestCommsErrors {
         Thread.sleep(500);
 
         //The server will send a connected status when it starts up
-        MessageServer server = new MessageServer(new MqttServerTransport(serverMqtt, serverName));
+        MessageServer server = new MessageServer(new MqttServerConduit(serverMqtt, serverName));
         server.start();
         server.addService(new HelloService());
 
@@ -126,10 +126,10 @@ public class TestCommsErrors {
         //Make unique server name for each test to prevent stray status messages from previous tests affecting this test
         final String serverName = Id.shortRandom();
 
-        MessageChannel channel = new MessageChannel(new MqttChannelTransport(clientMqtt, serverName));
+        MessageChannel channel = new MessageChannel(new MqttChannelConduit(clientMqtt, serverName));
         channel.start();
         MqttAsyncClient serverMqttWithLwt = MqttUtils.makeClient();
-        MessageServer server = new MessageServer(new MqttServerTransport(serverMqttWithLwt, serverName));
+        MessageServer server = new MessageServer(new MqttServerConduit(serverMqttWithLwt, serverName));
         server.start();
         server.addService(new HelloService());
 
@@ -162,12 +162,12 @@ public class TestCommsErrors {
         //Make unique server name for each test to prevent stray status messages from previous tests affecting this test
         final String serverName = Id.shortRandom();
 
-        MessageChannel channel = new MessageChannel(new MqttChannelTransport(clientMqtt, serverName));
+        MessageChannel channel = new MessageChannel(new MqttChannelConduit(clientMqtt, serverName));
         channel.start();
         final String statusTopic = new ServerTopics(serverName).status;
         CloseableSocketFactory sf = new CloseableSocketFactory();
         MqttAsyncClient serverMqttWithLwt = MqttUtils.makeClient(statusTopic, null, sf);
-        MessageServer server = new MessageServer(new MqttServerTransport(serverMqttWithLwt, serverName));
+        MessageServer server = new MessageServer(new MqttServerConduit(serverMqttWithLwt, serverName));
         server.start();
         server.addService(new HelloService());
 
@@ -203,11 +203,11 @@ public class TestCommsErrors {
         final String serverName = Id.shortRandom();
 
         final ListenForCancel listenForCancel = new ListenForCancel();
-        MessageServer server = new MessageServer(new MqttServerTransport(serverMqtt, serverName));
+        MessageServer server = new MessageServer(new MqttServerConduit(serverMqtt, serverName));
         server.start();
         server.addService(listenForCancel);
 
-        MessageChannel channel = new MessageChannel(new MqttChannelTransport(clientMqtt, serverName));
+        MessageChannel channel = new MessageChannel(new MqttChannelConduit(clientMqtt, serverName));
         channel.start();
 
         final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
@@ -250,7 +250,7 @@ public class TestCommsErrors {
         final String serverName = Id.shortRandom();
 
         final ListenForCancel listenForCancel = new ListenForCancel();
-        MessageServer server = new MessageServer(new MqttServerTransport(serverMqtt, serverName));
+        MessageServer server = new MessageServer(new MqttServerConduit(serverMqtt, serverName));
         server.start();
         server.addService(listenForCancel);
 
@@ -258,7 +258,7 @@ public class TestCommsErrors {
         String channelId = Id.random();
         String clientStatusTopic = new ServerTopics(serverName).statusClients;
         MqttAsyncClient clientMqttWithLwt = MqttUtils.makeClient(clientStatusTopic, channelId, sf);
-        MessageChannel channel = new MessageChannel(new MqttChannelTransport(clientMqttWithLwt, serverName), channelId);
+        MessageChannel channel = new MessageChannel(new MqttChannelConduit(clientMqttWithLwt, serverName), channelId);
         channel.start();
 
         final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);

@@ -186,7 +186,7 @@ public final class GrpcProxy<ReqT, RespT> implements ServerCallHandler<ReqT, Res
         /**
          * A client can choose to inform the proxy about services using this method.
          * This can help where the proxy is being connected to a MessageChannel. It means that the MessageChannel
-         * will know about the method type which can help the ChannelMessageTransport to transport the messages more
+         * will know about the method type which can help the ChannelMessageConduit to transport the messages more
          * efficiently.
          * @param serviceDescriptor
          */

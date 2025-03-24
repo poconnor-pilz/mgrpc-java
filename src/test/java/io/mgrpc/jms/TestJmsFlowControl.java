@@ -64,11 +64,11 @@ public class TestJmsFlowControl {
 
         final String serverId = Id.shortRandom();
         //Make a server with queue size 10
-        MessageServer server = new MessageServer(new JmsServerTransport(serverConnection, serverId), 10);
+        MessageServer server = new MessageServer(new JmsServerConduit(serverConnection, serverId), 10);
         server.start();
 
         //Set up a channel without broker flow control
-        MessageChannel channel = new MessageChannel(new JmsChannelTransport(clientConnection, serverId, false));
+        MessageChannel channel = new MessageChannel(new JmsChannelConduit(clientConnection, serverId, false));
         channel.start();
 
 
@@ -135,11 +135,11 @@ public class TestJmsFlowControl {
         //The test code should get an error and the server should get a cancel so that it stops sending messages.
         //and the input stream to the server should get an error.
 
-        MessageServer server = new MessageServer(new JmsServerTransport(serverConnection, serverId));
+        MessageServer server = new MessageServer(new JmsServerConduit(serverConnection, serverId));
         server.start();
 
         //Make a channel with queue size 10 without broker flow control
-        MessageChannel channel = new MessageChannel(new JmsChannelTransport(clientConnection, serverId, false), 10);
+        MessageChannel channel = new MessageChannel(new JmsChannelConduit(clientConnection, serverId, false), 10);
         channel.start();
 
         final CountDownLatch serverCancelledLatch = new CountDownLatch(1);
@@ -226,11 +226,11 @@ public class TestJmsFlowControl {
 
         final String serverId = Id.shortRandom();
         //Make a server with queue size 10
-        MessageServer server = new MessageServer(new JmsServerTransport(serverConnection, serverId), 10);
+        MessageServer server = new MessageServer(new JmsServerConduit(serverConnection, serverId), 10);
         server.start();
 
         //Set up a channel with broker flow control
-        MessageChannel channel = new MessageChannel(new JmsChannelTransport(clientConnection, serverId, true));
+        MessageChannel channel = new MessageChannel(new JmsChannelConduit(clientConnection, serverId, true));
         channel.start();
 
         final CountDownLatch serviceLatch = new CountDownLatch(1);
@@ -311,11 +311,11 @@ public class TestJmsFlowControl {
 
         final String serverId = Id.shortRandom();
         //Make a server with queue size 10
-        MessageServer server = new MessageServer(new JmsServerTransport(serverConnection, serverId), 10);
+        MessageServer server = new MessageServer(new JmsServerConduit(serverConnection, serverId), 10);
         server.start();
 
         //Set up a channel with broker flow control
-        MessageChannel channel = new MessageChannel(new JmsChannelTransport(clientConnection, serverId, true));
+        MessageChannel channel = new MessageChannel(new JmsChannelConduit(clientConnection, serverId, true));
         channel.start();
 
         class ServiceThatTriesToCauseOverflow extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {

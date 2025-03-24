@@ -2,11 +2,10 @@ package io.mgrpc.examples.hello;
 
 import io.grpc.*;
 import io.mgrpc.*;
-import io.mgrpc.mqtt.MqttChannelTransport;
-import io.mgrpc.mqtt.MqttServerTransport;
+import io.mgrpc.mqtt.MqttChannelConduit;
+import io.mgrpc.mqtt.MqttServerConduit;
 import io.mgrpc.mqtt.MqttUtils;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
-import org.eclipse.paho.client.mqttv3.MqttException;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -62,11 +61,11 @@ public class TestHelloGrpcProxy extends TestHelloBase {
         //We want to wire this:
         //httpChannel -> httpServer -> GrpcProxy -> messageChannel -> broker-> messageServer
 
-        messageServer = new MessageServer(new MqttServerTransport(serverMqtt, SERVER));
+        messageServer = new MessageServer(new MqttServerConduit(serverMqtt, SERVER));
         messageServer.start();
         messageServer.addService(new HelloServiceForTest());
 
-        messageChannel = new MessageChannel(new MqttChannelTransport(clientMqtt, SERVER));
+        messageChannel = new MessageChannel(new MqttChannelConduit(clientMqtt, SERVER));
         messageChannel.start();
 
         GrpcProxy proxy = new GrpcProxy(messageChannel);

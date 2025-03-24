@@ -6,7 +6,7 @@ import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
 import io.mgrpc.*;
 import io.mgrpc.mqtt.MqttChannelFactory;
-import io.mgrpc.mqtt.MqttServerTransport;
+import io.mgrpc.mqtt.MqttServerConduit;
 import io.mgrpc.mqtt.MqttUtils;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
@@ -50,11 +50,11 @@ public class TestMessageProxy {
         String topic1 = "server1";
         String topic2 = "server2";
 
-        MessageServer server1 = new MessageServer(new MqttServerTransport(serverMqtt, topic1));
+        MessageServer server1 = new MessageServer(new MqttServerConduit(serverMqtt, topic1));
         server1.start();
         server1.addService(new HelloServiceForTest());
 
-        MessageServer server2 = new MessageServer(new MqttServerTransport(serverMqtt, topic2));
+        MessageServer server2 = new MessageServer(new MqttServerConduit(serverMqtt, topic2));
         server2.start();
         server2.addService(new HelloServiceForTest());
 

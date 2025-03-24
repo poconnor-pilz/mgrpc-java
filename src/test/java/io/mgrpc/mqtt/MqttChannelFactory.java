@@ -14,7 +14,7 @@ public class MqttChannelFactory implements MessageChannelFactory {
 
     @Override
     public MessageChannel createMessageChannel(String serverTopic) {
-        MessageChannel channel = new MessageChannel(new MqttChannelTransport(client, serverTopic));
+        MessageChannel channel = new MessageChannel(new MqttChannelConduit(client, serverTopic));
         return channel;
     }
 }

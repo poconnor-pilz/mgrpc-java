@@ -4,10 +4,9 @@ import com.google.protobuf.ByteString;
 import com.google.protobuf.MessageLite;
 import io.grpc.*;
 import io.grpc.protobuf.StatusProto;
-import io.mgrpc.messaging.DisconnectListener;
 import io.mgrpc.messaging.MessagingException;
 import io.mgrpc.messaging.ServerMessageListener;
-import io.mgrpc.messaging.ServerMessageTransport;
+import io.mgrpc.messaging.ServerMessageConduit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -36,7 +35,7 @@ public class MessageServer implements ServerMessageListener {
     private static volatile Executor executorSingleton;
 
 
-    private final ServerMessageTransport transport;
+    private final ServerMessageConduit conduit;
 
     private final Map<String, MessageHandler> handlersByCallId = new ConcurrentHashMap<>();
 
@@ -58,24 +57,24 @@ public class MessageServer implements ServerMessageListener {
     private  ScheduledFuture<?> clearRecentlyRemovedTimer;
 
     /**
-     * @param transport PubsubClient
+     * @param conduit PubsubClient
      * @param queueSize         The size of the incoming message queue for each call
      */
-    public MessageServer(ServerMessageTransport transport, int queueSize) {
-        this.transport = transport;
+    public MessageServer(ServerMessageConduit conduit, int queueSize) {
+        this.conduit = conduit;
         this.queueSize = queueSize;
     }
 
 
-    public MessageServer(ServerMessageTransport transport) {
-        this(transport, DEFAULT_QUEUE_SIZE);
+    public MessageServer(ServerMessageConduit conduit) {
+        this(conduit, DEFAULT_QUEUE_SIZE);
     }
 
 
     public void start() throws MessagingException {
 
 
-        transport.start(this);
+        conduit.start(this);
 
         //Every 10 minutes clear out recentlyRemovedCallIds that are more than 10 minutes old
         clearRecentlyRemovedTimer = TimerService.get().scheduleAtFixedRate(() -> {
@@ -86,7 +85,7 @@ public class MessageServer implements ServerMessageListener {
     }
 
     public void close() {
-        transport.close();
+        conduit.close();
         if(clearRecentlyRemovedTimer != null){
             clearRecentlyRemovedTimer.cancel(false);
         }
@@ -134,7 +133,7 @@ public class MessageServer implements ServerMessageListener {
 
         MessageHandler handler = handlersByCallId.get(callId);
         if (handler == null) {
-            handler = new MessageHandler(callId, transport.getExecutor(), queueSize);
+            handler = new MessageHandler(callId, conduit.getExecutor(), queueSize);
             handlersByCallId.put(callId, handler);
         }
         //put the message on the handler's queue
@@ -143,7 +142,7 @@ public class MessageServer implements ServerMessageListener {
     }
 
     /**
-     * The ServerMessageTransport should call this message on the serer if it knows that a channel
+     * The ServerMessageConduit should call this message on the serer if it knows that a channel
      * has disconnected.
      */
     @Override
@@ -182,7 +181,7 @@ public class MessageServer implements ServerMessageListener {
             log.debug("Sending completed: " + status);
         }
         try {
-            transport.send(message);
+            conduit.send(message);
         } catch (MessagingException e) {
             //We cannot do anything here to help the client because there is no way of sending a message so just log.
             log.error("Failed to send status", e);
@@ -246,7 +245,7 @@ public class MessageServer implements ServerMessageListener {
             if (message.hasStatus()) {
                 if (message.getStatus().getCode() == CANCELLED_CODE) {
                     //Don't run the cancel on the mqtt message thread
-                    transport.getExecutor().execute(() -> {
+                    conduit.getExecutor().execute(() -> {
                         log.debug("Canceling");
                         //If the call was constructed, cancel it.
                         if (serverCall != null) {
@@ -414,7 +413,7 @@ public class MessageServer implements ServerMessageListener {
             @Override
             public void request(int numMessages) {
                 //log.debug("request(" + numMessages + ")");
-                transport.request(callId, numMessages);
+                conduit.request(callId, numMessages);
             }
 
             @Override
@@ -484,7 +483,7 @@ public class MessageServer implements ServerMessageListener {
                 try {
                     log.debug("Sending {} {} {} to {} ",
                             new Object[]{rpcMessage.getCallId(), rpcMessage.getSequence(), rpcMessage.getMessageCase(), methodDescriptor.getFullMethodName()});
-                    transport.send(rpcMessage);
+                    conduit.send(rpcMessage);
                 } catch (MessagingException e) {
                     log.error("Failed to send", e);
                     throw new StatusRuntimeException(Status.UNAVAILABLE);//.withCause(e));
@@ -504,7 +503,7 @@ public class MessageServer implements ServerMessageListener {
                 sendStatus(callId, sequence, status);
                 cancelTimeouts();
                 MessageHandler.this.remove();
-                transport.onCallClosed(callId);
+                conduit.onCallClosed(callId);
             }
 
             public void cancel() {

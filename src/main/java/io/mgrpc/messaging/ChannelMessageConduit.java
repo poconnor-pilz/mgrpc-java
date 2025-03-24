@@ -7,7 +7,7 @@ import java.util.concurrent.Executor;
 /**
  * Interface to messaging client. Adapters should implement this to work with different message protocols.
  */
-public interface ChannelMessageTransport {
+public interface ChannelMessageConduit {
 
     /**
      * Called by the channel when it starts
@@ -19,19 +19,19 @@ public interface ChannelMessageTransport {
 
     /**
      * Called by the channel after the call has closed.
-     * The transport can clean up any resources here for the call.
+     * The conduit can clean up any resources here for the call.
      */
     void onCallClosed(String callId);
 
 
     /**
-     * Called by the channel when the channel closes. The transport should release any resources here.
+     * Called by the channel when the channel closes. The conduit should release any resources here.
      */
     void close();
 
     /**
-     * Request the transport to send on a number of messages for a call
-     * If the transport does not implement buffering it can ignore this and just send the messages
+     * Request the conduit to send on a number of messages for a call
+     * If the conduit does not implement buffering it can ignore this and just send the messages
      * whenever they arrive.
      */
     void request(String callId, int numMessages);

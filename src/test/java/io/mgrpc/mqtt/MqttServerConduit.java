@@ -5,7 +5,7 @@ import io.grpc.Status;
 import io.mgrpc.*;
 import io.mgrpc.messaging.MessagingException;
 import io.mgrpc.messaging.ServerMessageListener;
-import io.mgrpc.messaging.ServerMessageTransport;
+import io.mgrpc.messaging.ServerMessageConduit;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
@@ -18,7 +18,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 
-public class MqttServerTransport implements ServerMessageTransport {
+public class MqttServerConduit implements ServerMessageConduit {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -60,7 +60,7 @@ public class MqttServerTransport implements ServerMessageTransport {
      *                    Where if the gRPC fullMethodName is "helloworld.HelloService/SayHello"
      *                    then {slashedFullMethod} is "helloworld/HelloService/SayHello"
      */
-    public MqttServerTransport(MqttAsyncClient client, String serverTopic) {
+    public MqttServerConduit(MqttAsyncClient client, String serverTopic) {
         this.client = client;
         this.serverTopics = new ServerTopics(serverTopic);
     }

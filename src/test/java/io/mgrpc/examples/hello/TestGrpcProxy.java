@@ -8,8 +8,8 @@ import io.grpc.stub.StreamObserver;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
 import io.mgrpc.*;
-import io.mgrpc.mqtt.MqttChannelTransport;
-import io.mgrpc.mqtt.MqttServerTransport;
+import io.mgrpc.mqtt.MqttChannelConduit;
+import io.mgrpc.mqtt.MqttServerConduit;
 import io.mgrpc.mqtt.MqttUtils;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.junit.jupiter.api.BeforeAll;
@@ -57,7 +57,7 @@ public class TestGrpcProxy {
                 .usePlaintext().build();
 
         final MqttAsyncClient clientMqttConnection = MqttUtils.makeClient();
-        MessageChannel messageChannel = new MessageChannel(new MqttChannelTransport(clientMqttConnection, SERVER));
+        MessageChannel messageChannel = new MessageChannel(new MqttChannelConduit(clientMqttConnection, SERVER));
         messageChannel.start();
 
         //We want to wire this:
@@ -67,7 +67,7 @@ public class TestGrpcProxy {
         GrpcProxy proxy = new GrpcProxy(messageChannel);
         final GrpcProxy.Registry registry = new GrpcProxy.Registry(proxy);
 
-        //Tell the proxy about the method types so that the message transport can transport the messages
+        //Tell the proxy about the method types so that the message conduit can transport the messages
         //more efficiently (the test would still work without this but more mqtt messages would be transferred)
         registry.registerServiceDescriptor(ExampleHelloServiceGrpc.getServiceDescriptor());
 
@@ -84,7 +84,7 @@ public class TestGrpcProxy {
 
 
         final MqttAsyncClient serverMqttConnection = MqttUtils.makeClient();
-        MessageServer messageServer = new MessageServer(new MqttServerTransport(serverMqttConnection, SERVER));
+        MessageServer messageServer = new MessageServer(new MqttServerConduit(serverMqttConnection, SERVER));
         messageServer.addService(serviceWithIntercept);
         messageServer.start();
 
@@ -134,7 +134,7 @@ public class TestGrpcProxy {
         final String SERVER = Id.shortRandom();
 
         final MqttAsyncClient clientMqttConnection = MqttUtils.makeClient();
-        MessageChannel messageChannel = new MessageChannel(new MqttChannelTransport(clientMqttConnection, SERVER));
+        MessageChannel messageChannel = new MessageChannel(new MqttChannelConduit(clientMqttConnection, SERVER));
         messageChannel.start();
 
         final ServerServiceDefinition serviceWithIntercept = ServerInterceptors.intercept(
@@ -149,7 +149,7 @@ public class TestGrpcProxy {
                 .usePlaintext().build();
 
         final MqttAsyncClient serverMqttConnection = MqttUtils.makeClient();
-        MessageServer messageServer = new MessageServer(new MqttServerTransport(serverMqttConnection, SERVER));
+        MessageServer messageServer = new MessageServer(new MqttServerConduit(serverMqttConnection, SERVER));
 
         //We want to wire this:
         //MqttServer ->  GrpcProxy -> HttpChannel
