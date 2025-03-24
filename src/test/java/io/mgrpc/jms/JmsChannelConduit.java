@@ -5,7 +5,7 @@ import io.grpc.MethodDescriptor;
 import io.grpc.Status;
 import io.mgrpc.*;
 import io.mgrpc.messaging.ChannelMessageListener;
-import io.mgrpc.messaging.ChannelMessageConduit;
+import io.mgrpc.messaging.ChannelConduit;
 import io.mgrpc.messaging.MessagingException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -46,7 +46,7 @@ import java.util.concurrent.*;
 // The Channel will have a waitForServer method which a client can use to determine if a sever is up.
 // This will method will subscribe to server/o/sys/status and send a prompt to server/i/sys/status/prompt
 
-public class JmsChannelConduit implements ChannelMessageConduit {
+public class JmsChannelConduit implements ChannelConduit {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 

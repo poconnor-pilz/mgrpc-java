@@ -4,10 +4,10 @@ package io.mgrpc.messaging.pubsub;
 import com.google.protobuf.Parser;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.messaging.MessagingException;
-import io.mgrpc.messaging.ServerMessageConduit;
+import io.mgrpc.messaging.ServerConduit;
 
 /**
- * Some channel {@link ServerMessageConduit}s may implement this interface if they want to support pub/sub
+ * Some channel {@link ServerConduit}s may implement this interface if they want to support pub/sub
  * of gRPC streams. It is not necessary to implement this to support core gRPC
  */
 public interface MessageSubscriber {

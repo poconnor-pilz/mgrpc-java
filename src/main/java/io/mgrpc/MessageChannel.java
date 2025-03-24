@@ -5,7 +5,7 @@ import com.google.protobuf.MessageLite;
 import io.grpc.*;
 import io.grpc.protobuf.StatusProto;
 import io.mgrpc.messaging.ChannelMessageListener;
-import io.mgrpc.messaging.ChannelMessageConduit;
+import io.mgrpc.messaging.ChannelConduit;
 import io.mgrpc.messaging.DisconnectListener;
 import io.mgrpc.messaging.MessagingException;
 import org.slf4j.Logger;
@@ -38,7 +38,7 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
     private static volatile Executor executorSingleton;
 
 
-    private final ChannelMessageConduit conduit;
+    private final ChannelConduit conduit;
 
     private final String channelId;
 
@@ -59,7 +59,7 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
      * @param channelId         The client id for the channel. Should be unique.
      * @param queueSize        The size of the message queue for each call's replies
      */
-    public MessageChannel(ChannelMessageConduit conduit, String channelId, int queueSize) {
+    public MessageChannel(ChannelConduit conduit, String channelId, int queueSize) {
         this.conduit = conduit;
         this.channelId = channelId;
         this.queueSize = queueSize;
@@ -69,7 +69,7 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
      * @param conduit      PubsubClient
      * @param queueSize   The size of the message queue for each call's replies
      */
-    public MessageChannel(ChannelMessageConduit conduit, int queueSize) {
+    public MessageChannel(ChannelConduit conduit, int queueSize) {
         this(conduit, Id.random(), queueSize);
     }
 
@@ -78,14 +78,14 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
      * @param conduit      Mqtt client
      * @param channelId    The client id for the channel. Should be unique.
      */
-    public MessageChannel(ChannelMessageConduit conduit, String channelId) {
+    public MessageChannel(ChannelConduit conduit, String channelId) {
         this(conduit, channelId, DEFAULT_QUEUE_SIZE);
     }
 
     /**
      * @param conduit      Mqtt client
      */
-    public MessageChannel(ChannelMessageConduit conduit) {
+    public MessageChannel(ChannelConduit conduit) {
         this(conduit, Id.random());
     }
 
@@ -122,7 +122,7 @@ public class MessageChannel extends Channel implements ChannelMessageListener {
     }
 
     /**
-     * The ChannelMessageconduit should call this message on the channel if it knows that the server
+     * The ChannelConduit should call this message on the channel if it knows that the server
      * has disconnected.
      */
     @Override

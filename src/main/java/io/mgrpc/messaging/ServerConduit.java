@@ -7,7 +7,7 @@ import java.util.concurrent.Executor;
 /**
  * Interface to messaging client. Adapters should implement this to work with different message protocols.
  */
-public interface ServerMessageConduit {
+public interface ServerConduit {
 
 
     /**

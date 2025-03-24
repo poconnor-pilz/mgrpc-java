@@ -6,7 +6,7 @@ import io.grpc.*;
 import io.grpc.protobuf.StatusProto;
 import io.mgrpc.messaging.MessagingException;
 import io.mgrpc.messaging.ServerMessageListener;
-import io.mgrpc.messaging.ServerMessageConduit;
+import io.mgrpc.messaging.ServerConduit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -35,7 +35,7 @@ public class MessageServer implements ServerMessageListener {
     private static volatile Executor executorSingleton;
 
 
-    private final ServerMessageConduit conduit;
+    private final ServerConduit conduit;
 
     private final Map<String, MessageHandler> handlersByCallId = new ConcurrentHashMap<>();
 
@@ -60,13 +60,13 @@ public class MessageServer implements ServerMessageListener {
      * @param conduit PubsubClient
      * @param queueSize         The size of the incoming message queue for each call
      */
-    public MessageServer(ServerMessageConduit conduit, int queueSize) {
+    public MessageServer(ServerConduit conduit, int queueSize) {
         this.conduit = conduit;
         this.queueSize = queueSize;
     }
 
 
-    public MessageServer(ServerMessageConduit conduit) {
+    public MessageServer(ServerConduit conduit) {
         this(conduit, DEFAULT_QUEUE_SIZE);
     }
 
@@ -142,7 +142,7 @@ public class MessageServer implements ServerMessageListener {
     }
 
     /**
-     * The ServerMessageConduit should call this message on the serer if it knows that a channel
+     * The ServerConduit should call this message on the serer if it knows that a channel
      * has disconnected.
      */
     @Override

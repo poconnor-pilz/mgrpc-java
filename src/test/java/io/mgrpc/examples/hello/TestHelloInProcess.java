@@ -2,7 +2,7 @@ package io.mgrpc.examples.hello;
 
 import io.grpc.Channel;
 import io.mgrpc.Id;
-import io.mgrpc.InProcessMessageConduit;
+import io.mgrpc.InProcessConduit;
 import io.mgrpc.MessageChannel;
 import io.mgrpc.MessageServer;
 import org.junit.jupiter.api.AfterEach;
@@ -32,7 +32,7 @@ public class TestHelloInProcess extends TestHelloBase {
     void setup() throws Exception{
 
         //Set up the serverb
-        InProcessMessageConduit conduit = new InProcessMessageConduit();
+        InProcessConduit conduit = new InProcessConduit();
         server = new MessageServer(conduit.getServerConduit());
         server.start();
         server.addService(new HelloServiceForTest());

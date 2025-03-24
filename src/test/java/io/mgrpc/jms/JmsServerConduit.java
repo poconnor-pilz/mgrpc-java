@@ -5,7 +5,7 @@ import io.grpc.Status;
 import io.mgrpc.*;
 import io.mgrpc.messaging.MessagingException;
 import io.mgrpc.messaging.ServerMessageListener;
-import io.mgrpc.messaging.ServerMessageConduit;
+import io.mgrpc.messaging.ServerConduit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -16,7 +16,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 
-public class JmsServerConduit implements ServerMessageConduit {
+public class JmsServerConduit implements ServerConduit {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 

@@ -15,25 +15,25 @@ import java.util.concurrent.Executors;
  * To do production level in process grpc it would be better to use io.grpc.inprocess.InProcessServerBuilder
  * which will be more efficient.
  */
-public class InProcessMessageConduit {
+public class InProcessConduit {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
     private final Map<String, ChannelMessageListener> channelsById = new ConcurrentHashMap<>();
     private ServerMessageListener server;
 
-    private final ServerMessageConduit serverConduit = new InprocServerConduit();
+    private final ServerConduit serverConduit = new InprocServerConduit();
 
     private final Map<String, String> callIdToChannelIdMap = new ConcurrentHashMap<>();
 
     private static volatile Executor executorSingleton;
 
 
-    public ChannelMessageConduit getChannelConduit(){
+    public ChannelConduit getChannelConduit(){
         return new InprocChannelConduit();
     }
 
-    public ServerMessageConduit getServerConduit(){
+    public ServerConduit getServerConduit(){
         return serverConduit;
     }
 
@@ -49,17 +49,17 @@ public class InProcessMessageConduit {
         return executorSingleton;
     }
 
-    private class InprocServerConduit implements ServerMessageConduit {
+    private class InprocServerConduit implements ServerConduit {
 
 
         @Override
         public void start(ServerMessageListener server) throws MessagingException {
-            if(InProcessMessageConduit.this.server != null){
-                String err = "InProcessMessageconduit instance can only be associated with one Server";
+            if(InProcessConduit.this.server != null){
+                String err = "InProcessConduit instance can only be associated with one Server";
                 log.error(err);
                 throw new MessagingException(err);
             }
-            InProcessMessageConduit.this.server = server;
+            InProcessConduit.this.server = server;
         }
 
         @Override
@@ -99,7 +99,7 @@ public class InProcessMessageConduit {
 
     }
 
-    private class InprocChannelConduit implements ChannelMessageConduit {
+    private class InprocChannelConduit implements ChannelConduit {
 
         private String channelId;
 

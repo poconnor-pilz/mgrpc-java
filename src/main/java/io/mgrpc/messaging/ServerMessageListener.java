@@ -9,7 +9,7 @@ import io.mgrpc.RpcMessage;
 public interface ServerMessageListener extends DisconnectListener{
 
     /**
-     * The ServerMessageConduit should call this method on the server when it receives
+     * The ServerConduit should call this method on the server when it receives
      * a request from a channel
      * @param message An rpc message containing the request from a channel.
      */
