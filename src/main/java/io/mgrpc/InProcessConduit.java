@@ -28,9 +28,23 @@ public class InProcessConduit {
 
     private static volatile Executor executorSingleton;
 
+    private final InprocChannelConduit channelConduit = new InprocChannelConduit();
 
-    public ChannelConduit getChannelConduit(){
-        return new InprocChannelConduit();
+
+    public ChannelConduitManager getChannelConduitManager(){
+        return new ChannelConduitManager() {
+            @Override
+            public ChannelConduit getChannelConduitForServer(String serverTopic, ChannelListener channelListener) {
+                channelConduit.start(channelListener);
+                return channelConduit;
+            }
+            @Override
+            public Executor getExecutor() {
+                return getExecutorInstance();
+            }
+            @Override
+            public void close(String channelId, String channelStatusTopic) {}
+        };
     }
 
     public ServerConduit getServerConduit(){
@@ -78,7 +92,7 @@ public class InProcessConduit {
         public void send(RpcMessage message) throws MessagingException {
             final String channelId = callIdToChannelIdMap.get(message.getCallId());
             if(channelId == null){
-                String err = "Channel " + channelId +  " does not exist";
+                String err = "Channel for call " + message.getCallId() +  " does not exist";
                 log.error(err);
                 throw new MessagingException(err);
             }
@@ -104,9 +118,11 @@ public class InProcessConduit {
         private String channelId;
 
         @Override
-        public void start(ChannelListener channel) throws MessagingException {
-            this.channelId = channel.getChannelId();
-            channelsById.put(channelId, channel);
+        public void start(ChannelListener channel) {
+            if(this.channelId == null) {
+                this.channelId = channel.getChannelId();
+                channelsById.put(channelId, channel);
+            }
         }
 
         @Override
@@ -126,11 +142,6 @@ public class InProcessConduit {
                 callIdToChannelIdMap.put(rpcMessageBuilder.getCallId(), rpcMessageBuilder.getStart().getChannelId());
             }
             server.onMessage(rpcMessageBuilder.build());
-        }
-
-        @Override
-        public Executor getExecutor() {
-            return getExecutorInstance();
         }
 
     }

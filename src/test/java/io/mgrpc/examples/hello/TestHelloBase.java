@@ -9,7 +9,8 @@ import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.inprocess.InProcessChannelBuilder;
 import io.grpc.inprocess.InProcessServerBuilder;
 import io.grpc.stub.StreamObserver;
-import io.mgrpc.*;
+import io.mgrpc.NoopStreamObserver;
+import io.mgrpc.StreamWaiter;
 import io.mgrpc.utils.ToList;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
@@ -53,7 +54,6 @@ public abstract class TestHelloBase {
     public void testSayHello() {
         final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub blockingStub = ExampleHelloServiceGrpc.newBlockingStub(getChannel())
                 .withDeadlineAfter(REQUEST_TIMEOUT, TimeUnit.MILLISECONDS);
-        ;
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
         final HelloReply helloReply = blockingStub.sayHello(joe);
         assertEquals("Hello joe", helloReply.getMessage());
@@ -74,6 +74,7 @@ public abstract class TestHelloBase {
         assertEquals("Hello 1", responseList.get(1).getMessage());
         checkForLeaks(0);
     }
+
 
     @Test
     public void testParallelReplies() throws Throwable {

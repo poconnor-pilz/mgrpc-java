@@ -4,8 +4,8 @@ import com.google.protobuf.ByteString;
 import com.google.protobuf.MessageLite;
 import io.grpc.*;
 import io.grpc.protobuf.StatusProto;
-import io.mgrpc.messaging.ChannelListener;
 import io.mgrpc.messaging.ChannelConduit;
+import io.mgrpc.messaging.ChannelListener;
 import io.mgrpc.messaging.DisconnectListener;
 import io.mgrpc.messaging.MessagingException;
 import org.slf4j.Logger;
@@ -38,56 +38,59 @@ public class MessageChannel extends Channel implements ChannelListener {
     private static volatile Executor executorSingleton;
 
 
-    private final ChannelConduit conduit;
+    private final ChannelConduitManager conduitFactory;
 
     private final String channelId;
+    private final int queueSize;
+
+    private final String channelStatusTopic;
+
 
     private boolean started = false;
 
+
     private final Map<String, MsgClientCall> clientCallsById = new ConcurrentHashMap<>();
+
 
     private final List<DisconnectListener> disconnectListeners = new ArrayList<>();
 
     private static final int SINGLE_MESSAGE_STREAM = 0;
 
     public static final int DEFAULT_QUEUE_SIZE = 100;
-    private final int queueSize;
 
 
     /**
-     * @param conduit           PubsubClient
+     * @param conduitFactory           PubsubClient
      * @param channelId         The client id for the channel. Should be unique.
      * @param queueSize        The size of the message queue for each call's replies
      */
-    public MessageChannel(ChannelConduit conduit, String channelId, int queueSize) {
-        this.conduit = conduit;
-        this.channelId = channelId;
-        this.queueSize = queueSize;
+    public MessageChannel(ChannelConduitManager conduitFactory, String channelId, int queueSize, String channelStatusTopic) {
+        log.debug("Creating MessageChannel with channelId={} and queueSize={}", channelId, queueSize);
+        if(conduitFactory == null) {
+            throw new NullPointerException("conduitFactory is null");
+        }
+        this.conduitFactory = conduitFactory;
+        if(channelId == null) {
+            this.channelId = Id.random();
+        } else {
+            this.channelId = channelId;
+        }
+        if(queueSize <= 0) {
+            this.queueSize = DEFAULT_QUEUE_SIZE;
+        } else {
+            this.queueSize = queueSize;
+        }
+        this.channelStatusTopic = channelStatusTopic;
     }
 
     /**
-     * @param conduit      PubsubClient
-     * @param queueSize   The size of the message queue for each call's replies
+     * @param conduitFactory      Mqtt client
      */
-    public MessageChannel(ChannelConduit conduit, int queueSize) {
-        this(conduit, Id.random(), queueSize);
+    public MessageChannel(ChannelConduitManager conduitFactory) {
+        this(conduitFactory, Id.random(), DEFAULT_QUEUE_SIZE, null);
     }
 
 
-    /**
-     * @param conduit      Mqtt client
-     * @param channelId    The client id for the channel. Should be unique.
-     */
-    public MessageChannel(ChannelConduit conduit, String channelId) {
-        this(conduit, channelId, DEFAULT_QUEUE_SIZE);
-    }
-
-    /**
-     * @param conduit      Mqtt client
-     */
-    public MessageChannel(ChannelConduit conduit) {
-        this(conduit, Id.random());
-    }
 
 
     /**
@@ -97,7 +100,6 @@ public class MessageChannel extends Channel implements ChannelListener {
      */
     public void start() throws MessagingException {
 
-        conduit.start(this);
         started = true;
     }
 
@@ -121,25 +123,31 @@ public class MessageChannel extends Channel implements ChannelListener {
 
     }
 
+    ChannelConduit getConduit(String serverTopic){
+        return conduitFactory.getChannelConduitForServer(serverTopic, this);
+    }
+
     /**
      * The ChannelConduit should call this message on the channel if it knows that the server
      * has disconnected.
      */
     @Override
-    public void onDisconnect(String channelId) {
+    public void onDisconnect(String serverTopic) {
         //Clean up all existing calls because the server has been disconnected.
         //Interrupt the client's call queue with an unavailable status, the call will be cleaned up when it is closed.
         //We could just call close on the call directly but we want the call to finish processing whatever
         //message it has first and if we put it on the queue it means we don't have to worry about thread safety.
         for (MsgClientCall call : clientCallsById.values()) {
-            final Status status = Status.UNAVAILABLE.withDescription("Server disconnected");
-            final com.google.rpc.Status grpcStatus = StatusProto.fromStatusAndTrailers(status, null);
-            RpcMessage rpcMessage = RpcMessage.newBuilder()
-                    .setStatus(grpcStatus)
-                    .setCallId(call.callId)
-                    .setSequence(MessageProcessor.INTERRUPT_SEQUENCE)
-                    .build();
-            call.queueServerMessage(rpcMessage);
+            if(call.getServerTopic() != null && call.getServerTopic().equals(serverTopic)) {
+                final Status status = Status.UNAVAILABLE.withDescription("Server disconnected");
+                final com.google.rpc.Status grpcStatus = StatusProto.fromStatusAndTrailers(status, null);
+                RpcMessage rpcMessage = RpcMessage.newBuilder()
+                        .setStatus(grpcStatus)
+                        .setCallId(call.callId)
+                        .setSequence(MessageProcessor.INTERRUPT_SEQUENCE)
+                        .build();
+                call.queueServerMessage(rpcMessage);
+            }
         }
 
         for(DisconnectListener listener: disconnectListeners){
@@ -154,13 +162,13 @@ public class MessageChannel extends Channel implements ChannelListener {
 
 
     public void close() {
-        conduit.close();
+        conduitFactory.close(this.channelId, this.channelStatusTopic);
     }
 
 
     @Override
     public <RequestT, ResponseT> ClientCall newCall(MethodDescriptor<RequestT, ResponseT> methodDescriptor, CallOptions callOptions) {
-        MsgClientCall call = new MsgClientCall<>(methodDescriptor, callOptions, conduit.getExecutor(), queueSize);
+        MsgClientCall call = new MsgClientCall<>(methodDescriptor, callOptions, conduitFactory.getExecutor(), queueSize);
         clientCallsById.put(call.getCallId(), call);
         return call;
     }
@@ -205,6 +213,10 @@ public class MessageChannel extends Channel implements ChannelListener {
         Deadline effectiveDeadline = null;
         Metadata metadata = null;
 
+        private ChannelConduit conduit;
+
+        private String serverTopic;
+
 
         private final ContextCancellationListener cancellationListener =
                 new ContextCancellationListener();
@@ -225,8 +237,22 @@ public class MessageChannel extends Channel implements ChannelListener {
             return callId;
         }
 
+        public String getServerTopic() {return serverTopic;}
+
         @Override
         public void start(Listener<RespT> responseListener, Metadata headers) {
+
+            serverTopic = headers.get(TopicInterceptor.META_SERVER_TOPIC);
+            if(serverTopic == null || serverTopic.isEmpty()) {
+                final String err = "No header metadata property value specified for " + TopicInterceptor.SERVER_TOPIC
+                        + " The call may not be routed properly";
+                //Just warn as a conduit (like the inproc one) may not need a serverTopic
+                log.warn(err);
+            }
+
+            //This call may block until conduit is started if it is not started already.
+            this.conduit = getConduit(serverTopic);
+
 
             this.responseListener = responseListener;
             //If the client specified authentication details then merge them into the metadata

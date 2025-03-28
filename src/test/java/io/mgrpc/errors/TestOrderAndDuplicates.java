@@ -1,12 +1,14 @@
 package io.mgrpc.errors;
 
+import io.grpc.Channel;
+import io.grpc.ClientInterceptors;
 import io.grpc.Status;
 import io.grpc.examples.helloworld.ExampleHelloServiceGrpc;
 import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
-import io.mgrpc.mqtt.MqttChannelConduit;
+import io.mgrpc.mqtt.MqttChannelConduitManager;
 import io.mgrpc.mqtt.MqttExceptionLogger;
 import io.mgrpc.mqtt.MqttServerConduit;
 import io.mgrpc.mqtt.MqttUtils;
@@ -125,7 +127,7 @@ public class TestOrderAndDuplicates {
 
         final RpcSet.Builder setBuilder = RpcSet.newBuilder();
         setBuilder.addMessages(rpcMessage);
-        clientMqtt.publish(topic, new MqttMessage(setBuilder.build().toByteArray()));
+        client.publish(topic, new MqttMessage(setBuilder.build().toByteArray()));
         //Introduce slight pause between messages to simulate a real system
         //If we don't do this then the thread pool that processes the messages won't get activated
         //until after all the messages are received by which time they are automatically ordered by the queue
@@ -182,12 +184,18 @@ public class TestOrderAndDuplicates {
         //Make a mock server that sends back replies out of order when it gets a request
         //Then verify that the MqttChannel will re-order the replies correctly
 
-        String servicesInFilter = new ServerTopics(SERVER).servicesIn + "/#";
-        log.debug("subscribe server at: " + servicesInFilter);
-
+        final ServerTopics serverTopics = new ServerTopics(SERVER);
         final String channelId = Id.random();
 
-        serverMqtt.subscribe(servicesInFilter, 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
+        //Fake server connected message
+        serverMqtt.subscribe(serverTopics.statusPrompt, 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
+            final byte[] connectedMsg = ConnectionStatus.newBuilder().setConnected(true).build().toByteArray();
+            serverMqtt.publish(serverTopics.status, new MqttMessage(connectedMsg));
+        }));
+
+
+        serverMqtt.subscribe(serverTopics.servicesIn + "/#",
+                1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
             final RpcSet rpcSet = RpcSet.parseFrom(mqttMessage.getPayload());
             final RpcMessage message = rpcSet.getMessages(0);
             log.debug("Received {} with sequence {} message on : {}", new Object[]{message.getMessageCase(), message.getSequence(), topic});
@@ -204,10 +212,11 @@ public class TestOrderAndDuplicates {
             publishAndPause(serverMqtt, replyTo, TestRpcMessageBuilder.makeValueResponse(callId, 4));
         }));
 
-        final MqttChannelConduit mqttChannelMessageProvider = new MqttChannelConduit(clientMqtt, SERVER);
-        mqttChannelMessageProvider.fakeServerConnectedForTests();
-        MessageChannel channel = new MessageChannel(mqttChannelMessageProvider, channelId);
-        channel.start();
+        MessageChannel messageChannel = new MessageChannelBuilder()
+                .channelId(channelId)
+                .conduitManager(new MqttChannelConduitManager(clientMqtt)).build();
+        messageChannel.start();
+        Channel channel = ClientInterceptors.intercept(messageChannel, new TopicInterceptor(SERVER));
 
 
         final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub stub = ExampleHelloServiceGrpc.newBlockingStub(channel);
@@ -224,9 +233,9 @@ public class TestOrderAndDuplicates {
             seq = current;
         }
 
-        serverMqtt.unsubscribe(servicesInFilter);
-        assertEquals(0, channel.getStats().getActiveCalls());
-        channel.close();
+        serverMqtt.unsubscribe(serverTopics.servicesIn + "/#");
+        assertEquals(0, messageChannel.getStats().getActiveCalls());
+        messageChannel.close();
 
     }
 

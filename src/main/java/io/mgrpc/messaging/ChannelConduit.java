@@ -2,15 +2,13 @@ package io.mgrpc.messaging;
 
 import io.mgrpc.RpcMessage;
 
-import java.util.concurrent.Executor;
-
 /**
  * Interface to messaging client. Adapters should implement this to work with different message protocols.
  */
 public interface ChannelConduit {
 
     /**
-     * Called by the channel when it starts
+     * Called by the channel when it starts. This should be idempotent.
      * @param channel The channel
      * @throws MessagingException
      */
@@ -43,10 +41,6 @@ public interface ChannelConduit {
      */
     void send(RpcMessage.Builder rpcMessageBuilder) throws MessagingException;
 
-    /**
-     * @return The executor with which to execute calls
-     */
-    Executor getExecutor();
 
 
 }

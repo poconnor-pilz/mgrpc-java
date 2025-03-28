@@ -1,15 +1,14 @@
 package io.mgrpc.jms;
 
+import io.grpc.Channel;
+import io.grpc.ClientInterceptors;
 import io.grpc.Status;
 import io.grpc.examples.helloworld.ExampleHelloServiceGrpc;
 import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.stub.ServerCallStreamObserver;
 import io.grpc.stub.StreamObserver;
-import io.mgrpc.EmbeddedBroker;
-import io.mgrpc.Id;
-import io.mgrpc.MessageChannel;
-import io.mgrpc.MessageServer;
+import io.mgrpc.*;
 import io.mgrpc.utils.StatusObserver;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -68,8 +67,9 @@ public class TestJmsFlowControl {
         server.start();
 
         //Set up a channel without broker flow control
-        MessageChannel channel = new MessageChannel(new JmsChannelConduit(clientConnection, serverId, false));
-        channel.start();
+        MessageChannel messageChannel = new MessageChannel(new JmsChannelConduitManager(clientConnection, false));
+        messageChannel.start();
+        Channel channel = ClientInterceptors.intercept(messageChannel, new TopicInterceptor(serverId));
 
 
         final CountDownLatch serviceLatch = new CountDownLatch(1);
@@ -120,7 +120,7 @@ public class TestJmsFlowControl {
         assertEquals("Service queue capacity exceeded.", clientStatus.getDescription());
         serviceLatch.countDown();
 
-        channel.close();
+        messageChannel.close();
         server.close();
     }
 
@@ -139,8 +139,11 @@ public class TestJmsFlowControl {
         server.start();
 
         //Make a channel with queue size 10 without broker flow control
-        MessageChannel channel = new MessageChannel(new JmsChannelConduit(clientConnection, serverId, false), 10);
-        channel.start();
+        MessageChannel messageChannel = new MessageChannelBuilder()
+                .conduitManager(new JmsChannelConduitManager(clientConnection, false))
+                .queueSize(10).build();
+        messageChannel.start();
+        Channel channel = ClientInterceptors.intercept(messageChannel, new TopicInterceptor(serverId));
 
         final CountDownLatch serverCancelledLatch = new CountDownLatch(1);
         class BlockingListenForCancel extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
@@ -211,7 +214,7 @@ public class TestJmsFlowControl {
         //The client should receive an onError() RESOURCE_EXHAUSTED
         checkStatus(Status.RESOURCE_EXHAUSTED, clientStatusObserver.waitForStatus(10, TimeUnit.SECONDS));
 
-        channel.close();
+        messageChannel.close();
         server.close();
 
     }
@@ -230,8 +233,9 @@ public class TestJmsFlowControl {
         server.start();
 
         //Set up a channel with broker flow control
-        MessageChannel channel = new MessageChannel(new JmsChannelConduit(clientConnection, serverId, true));
-        channel.start();
+        MessageChannel messageChannel = new MessageChannel(new JmsChannelConduitManager(clientConnection, true));
+        messageChannel.start();
+        Channel channel = ClientInterceptors.intercept(messageChannel, new TopicInterceptor(serverId));
 
         final CountDownLatch serviceLatch = new CountDownLatch(1);
         class BlockedService extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
@@ -296,7 +300,7 @@ public class TestJmsFlowControl {
         checkStatus(Status.OK, clientStatusObserver.waitForStatus(10, TimeUnit.SECONDS));
         assertEquals(15, blockedService.list.size());
 
-        channel.close();
+        messageChannel.close();
         server.close();
     }
 
@@ -315,8 +319,9 @@ public class TestJmsFlowControl {
         server.start();
 
         //Set up a channel with broker flow control
-        MessageChannel channel = new MessageChannel(new JmsChannelConduit(clientConnection, serverId, true));
-        channel.start();
+        MessageChannel messageChannel = new MessageChannel(new JmsChannelConduitManager(clientConnection, true));
+        messageChannel.start();
+        Channel channel = ClientInterceptors.intercept(messageChannel, new TopicInterceptor(serverId));
 
         class ServiceThatTriesToCauseOverflow extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
             @Override
@@ -377,7 +382,7 @@ public class TestJmsFlowControl {
         assertTrue(blockingServerStream.completedLatch.await(5, TimeUnit.SECONDS));
         assertEquals(15, blockingServerStream.list.size());
 
-        channel.close();
+        messageChannel.close();
         server.close();
     }
 

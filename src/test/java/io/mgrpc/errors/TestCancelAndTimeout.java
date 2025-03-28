@@ -1,18 +1,13 @@
 package io.mgrpc.errors;
 
-import io.grpc.Context;
-import io.grpc.Status;
-import io.grpc.StatusRuntimeException;
+import io.grpc.*;
 import io.grpc.examples.helloworld.ExampleHelloServiceGrpc;
 import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.stub.ServerCallStreamObserver;
 import io.grpc.stub.StreamObserver;
-import io.mgrpc.EmbeddedBroker;
-import io.mgrpc.Id;
-import io.mgrpc.MessageChannel;
-import io.mgrpc.MessageServer;
-import io.mgrpc.mqtt.MqttChannelConduit;
+import io.mgrpc.*;
+import io.mgrpc.mqtt.MqttChannelConduitManager;
 import io.mgrpc.mqtt.MqttServerConduit;
 import io.mgrpc.mqtt.MqttUtils;
 import io.mgrpc.utils.StatusObserver;
@@ -39,7 +34,8 @@ public class TestCancelAndTimeout {
     private static MqttAsyncClient serverMqtt;
     private static MqttAsyncClient clientMqtt;
 
-    private MessageChannel channel;
+    private Channel channel;
+    private MessageChannel messageChannel;
     private MessageServer server;
 
 
@@ -71,8 +67,9 @@ public class TestCancelAndTimeout {
         //Set up the server
         server = new MessageServer(new MqttServerConduit(serverMqtt, SERVER));
         server.start();
-        channel = new MessageChannel(new MqttChannelConduit(clientMqtt, SERVER));
-        channel.start();
+        messageChannel = new MessageChannel(new MqttChannelConduitManager(clientMqtt));
+        messageChannel.start();
+        channel = ClientInterceptors.intercept(messageChannel, new TopicInterceptor(SERVER));
     }
 
     @AfterEach
@@ -87,7 +84,7 @@ public class TestCancelAndTimeout {
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }
-        assertEquals(numActiveCalls, channel.getStats().getActiveCalls());
+        assertEquals(numActiveCalls, messageChannel.getStats().getActiveCalls());
         assertEquals(numActiveCalls, server.getStats().getActiveCalls());
     }
 
@@ -332,10 +329,14 @@ public class TestCancelAndTimeout {
         //then the client queue limit is reached.
         //The test code should get an error and the server should get a cancel so that it stops sending messages.
         //and the input stream to the server should get an error.
-        channel.close();
+        messageChannel.close();
         //Make a channel with queue size 10
-        channel = new MessageChannel(new MqttChannelConduit(serverMqtt, SERVER), 10);
-        channel.start();
+        messageChannel = new MessageChannelBuilder()
+                .conduitManager(new MqttChannelConduitManager(serverMqtt))
+                .queueSize(10).build();
+        messageChannel.start();
+        channel = ClientInterceptors.intercept(messageChannel, new TopicInterceptor(SERVER));
+
 
         final CountDownLatch serverCancelledLatch = new CountDownLatch(1);
         class BlockingListenForCancel extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {

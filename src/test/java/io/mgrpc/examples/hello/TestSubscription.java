@@ -64,7 +64,7 @@ public class TestSubscription {
         server = new MessageServer(new MqttServerConduit(serverMqtt, SERVER));
         server.start();
         channelConduit = new MqttChannelConduit(clientMqtt, SERVER);
-        channel = new MessageChannel(channelConduit);
+        channel = null; //new MessageChannel(channelConduit);
         channel.start();
     }
 

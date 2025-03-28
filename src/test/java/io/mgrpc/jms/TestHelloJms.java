@@ -1,10 +1,8 @@
 package io.mgrpc.jms;
 
 import io.grpc.Channel;
-import io.mgrpc.EmbeddedBroker;
-import io.mgrpc.Id;
-import io.mgrpc.MessageChannel;
-import io.mgrpc.MessageServer;
+import io.grpc.ClientInterceptors;
+import io.mgrpc.*;
 import io.mgrpc.examples.hello.HelloServiceForTest;
 import io.mgrpc.examples.hello.TestHelloBase;
 import org.junit.jupiter.api.AfterAll;
@@ -30,12 +28,12 @@ public class TestHelloJms extends TestHelloBase {
     private static Connection serverConnection;
     private static Connection clientConnection;
 
-    MessageChannel channel;
+    Channel channel;
+    MessageChannel baseChannel;
+
     MessageServer server;
 
 
-    //Make server name short but random to prevent stray status messages from previous tests affecting this test
-    private static final String SERVER = "mgprc/" + Id.shortRandom();
 
 
     @BeforeAll
@@ -59,19 +57,27 @@ public class TestHelloJms extends TestHelloBase {
     @BeforeEach
     void setup() throws Exception{
 
+
+        //Make server name short but random to prevent stray status messages from previous tests affecting this test
+        final String serverTopic = "mgprc/" + Id.shortRandom();
+
         //Set up the serverb
-        server = new MessageServer(new JmsServerConduit(serverConnection, SERVER));
+        server = new MessageServer(new JmsServerConduit(serverConnection, serverTopic));
         server.start();
         server.addService(new HelloServiceForTest());
         Thread.sleep(1000);
-        channel = new MessageChannel(new JmsChannelConduit(clientConnection, SERVER, true));
-        channel.start();
+        baseChannel = new MessageChannel(new JmsChannelConduitManager(clientConnection, true));
+        baseChannel.start();
+
+        channel = ClientInterceptors.intercept(baseChannel, new TopicInterceptor(serverTopic));
+
     }
 
     @AfterEach
     void tearDown() throws Exception{
         server.close();
-        channel.close();
+        baseChannel.close();
+
     }
 
 
@@ -82,7 +88,7 @@ public class TestHelloJms extends TestHelloBase {
 
     @Override
     public void checkNumActiveCalls(int numActiveCalls) {
-        assertEquals(numActiveCalls, this.channel.getStats().getActiveCalls());
+        assertEquals(numActiveCalls, this.baseChannel.getStats().getActiveCalls());
         assertEquals(numActiveCalls, this.server.getStats().getActiveCalls());
     }
 

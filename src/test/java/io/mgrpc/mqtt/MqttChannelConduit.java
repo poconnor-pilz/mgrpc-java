@@ -5,8 +5,8 @@ import com.google.protobuf.Parser;
 import io.grpc.Status;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
-import io.mgrpc.messaging.ChannelListener;
 import io.mgrpc.messaging.ChannelConduit;
+import io.mgrpc.messaging.ChannelListener;
 import io.mgrpc.messaging.MessagingException;
 import io.mgrpc.messaging.pubsub.BufferToStreamObserver;
 import io.mgrpc.messaging.pubsub.MessageSubscriber;
@@ -21,7 +21,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 //  Topics and connection status:
 
@@ -77,6 +79,10 @@ public class MqttChannelConduit implements ChannelConduit, MessageSubscriber {
 
     private ChannelListener channel;
 
+    private final String channelStatusTopic;
+
+    private volatile boolean isStarted = false;
+
     private final Map<String, List<StreamObserver>> subscribersByTopic = new ConcurrentHashMap<>();
 
 
@@ -93,23 +99,27 @@ public class MqttChannelConduit implements ChannelConduit, MessageSubscriber {
 
     }
 
-    private static volatile Executor executorSingleton;
-    @Override
-    public Executor getExecutor() {
-        return getExecutorInstance();
-    }
-    private static Executor getExecutorInstance() {
-        if (executorSingleton == null) {
-            synchronized (MessageServer.class) {
-                if (executorSingleton == null) {
-                    //TODO: What kind of thread pool should we use here. It should probably be limited to a fixed maximum or maybe it should be passed as a constructor parameter?
-                    executorSingleton = Executors.newCachedThreadPool();
-                }
-            }
-        }
-        return executorSingleton;
-    }
 
+    /**
+     * @param client
+     * @param serverTopic The root topic of the server to connect to e.g. "tenant1/device1"
+     *                    This topic should be unique to the broker.
+     *                    Requests will be sent to {serverTopic}/i/svc/{slashedFullMethod}
+     *                    The channel will subscribe for replies on {serverTopic}/o/svc/{channelId}/#
+     *                    The channel will receive replies to on
+     *                    {serverTopic}/o/svc/{channelId}/{slashedFullMethod}
+     *                    Where if the gRPC fullMethodName is "helloworld.HelloService/SayHello"
+     *                    then {slashedFullMethod} is "helloworld/HelloService/SayHello"
+     * @param channelStatusTopic The topic on which messages regarding channel status will be reported.
+     *                           This topic will usually be the same topic as the MQTT LWT for the channel client.
+     *                           If this value is null then the conduit will not attempt to send
+     *                           channel status messages.
+     */
+    public MqttChannelConduit(MqttAsyncClient client, String serverTopic, String channelStatusTopic) {
+        this.client = client;
+        this.serverTopics = new ServerTopics(serverTopic);
+        this.channelStatusTopic = channelStatusTopic;
+    }
     /**
      * @param client
      * @param serverTopic The root topic of the server to connect to e.g. "tenant1/device1"
@@ -122,13 +132,16 @@ public class MqttChannelConduit implements ChannelConduit, MessageSubscriber {
      *                    then {slashedFullMethod} is "helloworld/HelloService/SayHello"
      */
     public MqttChannelConduit(MqttAsyncClient client, String serverTopic) {
-        this.client = client;
-        this.serverTopics = new ServerTopics(serverTopic);
+        this(client, serverTopic, null);
     }
 
 
     @Override
-    public void start(ChannelListener channel) throws MessagingException {
+    public synchronized void start(ChannelListener channel) throws MessagingException {
+
+        if(isStarted) {
+            return;
+        }
 
         if (this.channel != null) {
             throw new MessagingException("Listener already connected");
@@ -155,7 +168,7 @@ public class MqttChannelConduit implements ChannelConduit, MessageSubscriber {
                     log.debug("Server connected status = " + serverConnected);
                     this.serverConnectedLatch.countDown();
                     if (!serverConnected) {
-                        channel.onDisconnect(null);
+                        channel.onDisconnect(serverTopics.root);
                     }
                 } catch (InvalidProtocolBufferException e) {
                     log.error("Failed to parse connection status", e);
@@ -168,6 +181,8 @@ public class MqttChannelConduit implements ChannelConduit, MessageSubscriber {
         } catch (MqttException ex) {
             throw new MessagingException(ex);
         }
+
+        this.isStarted = true;
 
     }
 
@@ -184,10 +199,13 @@ public class MqttChannelConduit implements ChannelConduit, MessageSubscriber {
         try {
             //Notify that this client has been closed so that any server with ongoing calls can cancel them and
             //release resources.
-            log.debug("Closing channel. Sending notification on " + serverTopics.statusClients);
+            if(this.channelStatusTopic == null){
+                return;
+            }
+            log.debug("Closing channel. Sending notification on " + channelStatusTopic);
             final byte[] connectedMsg = ConnectionStatus.newBuilder().
                     setConnected(false).setChannelId(channel.getChannelId()).build().toByteArray();
-            client.publish(serverTopics.statusClients, new MqttMessage(connectedMsg));
+            client.publish(channelStatusTopic, new MqttMessage(connectedMsg));
             final String replyTopicPrefix = serverTopics.servicesOutForChannel(channel.getChannelId()) + "/#";
             client.unsubscribe(replyTopicPrefix);
             client.unsubscribe(serverTopics.status);
@@ -209,7 +227,7 @@ public class MqttChannelConduit implements ChannelConduit, MessageSubscriber {
             } else {
                 if(messageBuilder.hasStatus()){
                     log.warn("Call cancelled or half closed  before start. An exception may have occurred");
-                return;
+                    return;
                 } else {
                     throw new RuntimeException("First message sent to conduit must be a start message. Call " + messageBuilder.getCallId() + " type " + messageBuilder.getMessageCase());
                 }
@@ -288,14 +306,6 @@ public class MqttChannelConduit implements ChannelConduit, MessageSubscriber {
         }
     }
 
-    /**
-     * Some tests will not use a real server that responds to pings.
-     * The channel will fail to send messages if it thinks that a server is not connected.
-     * This method will fool the channel into thinking that a real server is connected.
-     */
-    public void fakeServerConnectedForTests() {
-        this.serverConnected = true;
-    }
 
     @Override
     public <T> void subscribe(String responseTopic, Parser<T> parser, StreamObserver<T> streamObserver) throws MessagingException {

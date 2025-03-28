@@ -1,12 +1,14 @@
 package io.mgrpc.errors;
 
+import io.grpc.Channel;
+import io.grpc.ClientInterceptors;
 import io.grpc.Status;
 import io.grpc.examples.helloworld.ExampleHelloServiceGrpc;
 import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
-import io.mgrpc.mqtt.MqttChannelConduit;
+import io.mgrpc.mqtt.MqttChannelConduitManager;
 import io.mgrpc.mqtt.MqttServerConduit;
 import io.mgrpc.mqtt.MqttUtils;
 import io.mgrpc.utils.StatusObserver;
@@ -19,7 +21,7 @@ import org.slf4j.LoggerFactory;
 import java.lang.invoke.MethodHandles;
 import java.util.concurrent.TimeUnit;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 public class TestCommsErrors {
 
@@ -66,8 +68,10 @@ public class TestCommsErrors {
         //Make unique server name for each test to prevent stray status messages from previous tests affecting this test
         final String serverName = Id.shortRandom();
 
-        MessageChannel channel = new MessageChannel(new MqttChannelConduit(clientMqtt, serverName));
-        channel.start();
+        MessageChannel baseChannel = new MessageChannel(new MqttChannelConduitManager(clientMqtt));
+        baseChannel.start();
+        Channel channel = ClientInterceptors.intercept(baseChannel, new TopicInterceptor(serverName));
+
         StatusObserver statusObserver = new StatusObserver("obs");
 
         final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
@@ -75,7 +79,7 @@ public class TestCommsErrors {
         stub.lotsOfReplies(joe, statusObserver);
 
         checkStatus(Status.UNAVAILABLE, statusObserver.waitForStatus(2, TimeUnit.SECONDS));
-        channel.close();
+        baseChannel.close();
 
     }
 
@@ -88,8 +92,10 @@ public class TestCommsErrors {
         //Make unique server name for each test to prevent stray status messages from previous tests affecting this test
         final String serverName = Id.shortRandom();
 
-        MessageChannel channel = new MessageChannel(new MqttChannelConduit(clientMqtt, serverName));
-        channel.start();
+        MessageChannel baseChannel = new MessageChannel(new MqttChannelConduitManager(clientMqtt));
+        baseChannel.start();
+        Channel channel = ClientInterceptors.intercept(baseChannel, new TopicInterceptor(serverName));
+
         StatusObserver statusObserver = new StatusObserver("obs");
 
         //Allow enough time for the initial ping to the server to fail
@@ -105,7 +111,7 @@ public class TestCommsErrors {
         stub.sayHello(joe, statusObserver);
 
         checkStatus(Status.OK, statusObserver.waitForStatus(2, TimeUnit.SECONDS));
-        channel.close();
+        baseChannel.close();
         server.close();
 
     }
@@ -126,8 +132,10 @@ public class TestCommsErrors {
         //Make unique server name for each test to prevent stray status messages from previous tests affecting this test
         final String serverName = Id.shortRandom();
 
-        MessageChannel channel = new MessageChannel(new MqttChannelConduit(clientMqtt, serverName));
-        channel.start();
+        MessageChannel baseChannel = new MessageChannel(new MqttChannelConduitManager(clientMqtt));
+        baseChannel.start();
+        Channel channel = ClientInterceptors.intercept(baseChannel, new TopicInterceptor(serverName));
+
         MqttAsyncClient serverMqttWithLwt = MqttUtils.makeClient();
         MessageServer server = new MessageServer(new MqttServerConduit(serverMqttWithLwt, serverName));
         server.start();
@@ -143,7 +151,7 @@ public class TestCommsErrors {
         server.close();
         checkStatus(Status.UNAVAILABLE, statusObserver.waitForStatus(2, TimeUnit.SECONDS));
 
-        channel.close();
+        baseChannel.close();
 
     }
 
@@ -162,8 +170,10 @@ public class TestCommsErrors {
         //Make unique server name for each test to prevent stray status messages from previous tests affecting this test
         final String serverName = Id.shortRandom();
 
-        MessageChannel channel = new MessageChannel(new MqttChannelConduit(clientMqtt, serverName));
-        channel.start();
+        MessageChannel baseChannel = new MessageChannel(new MqttChannelConduitManager(clientMqtt));
+        baseChannel.start();
+        Channel channel = ClientInterceptors.intercept(baseChannel, new TopicInterceptor(serverName));
+
         final String statusTopic = new ServerTopics(serverName).status;
         CloseableSocketFactory sf = new CloseableSocketFactory();
         MqttAsyncClient serverMqttWithLwt = MqttUtils.makeClient(statusTopic, null, sf);
@@ -178,14 +188,14 @@ public class TestCommsErrors {
         stub.lotsOfReplies(joe, statusObserver);
 
         Thread.sleep(500);
-        assertEquals(1, channel.getStats().getActiveCalls());
+        assertEquals(1, baseChannel.getStats().getActiveCalls());
         //This should cause an LWT message which will send on the disconnected status
         sf.disableAndCloseAll();
         checkStatus(Status.UNAVAILABLE, statusObserver.waitForStatus(2, TimeUnit.SECONDS));
         //Calls should be cleaned up because the server is out of contact.
-        assertEquals(0, channel.getStats().getActiveCalls());
+        assertEquals(0, baseChannel.getStats().getActiveCalls());
 
-        channel.close();
+        baseChannel.close();
         server.close();
 
     }
@@ -201,14 +211,17 @@ public class TestCommsErrors {
 
         //Make unique server name for each test to prevent stray status messages from previous tests affecting this test
         final String serverName = Id.shortRandom();
+        final String channelStatusTopic = "mgrpc/channelStatus";
 
         final ListenForCancel listenForCancel = new ListenForCancel();
-        MessageServer server = new MessageServer(new MqttServerConduit(serverMqtt, serverName));
+        MessageServer server = new MessageServer(new MqttServerConduit(serverMqtt, serverName, channelStatusTopic));
         server.start();
         server.addService(listenForCancel);
 
-        MessageChannel channel = new MessageChannel(new MqttChannelConduit(clientMqtt, serverName));
-        channel.start();
+        MessageChannel baseChannel = new MessageChannelBuilder().channelStatusTopic(channelStatusTopic)
+                .conduitManager(new MqttChannelConduitManager(clientMqtt)).build();
+        baseChannel.start();
+        Channel channel = ClientInterceptors.intercept(baseChannel, new TopicInterceptor(serverName));
 
         final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
@@ -221,7 +234,7 @@ public class TestCommsErrors {
         assertEquals(server.getStats().getActiveCalls(), 1);
 
         //Close the channel. The server cancel handler should get called
-        channel.close();
+        baseChannel.close();
 
         //Verify that the Context.CancellationListener gets called
         //assertTrue(listenForCancel.contextListenerCancelled.await(5, TimeUnit.SECONDS));
@@ -232,7 +245,7 @@ public class TestCommsErrors {
         //The call should be cleaned up on the server.
         assertEquals(server.getStats().getActiveCalls(), 0);
 
-        channel.close();
+        baseChannel.close();
         server.close();
 
     }
@@ -250,16 +263,21 @@ public class TestCommsErrors {
         final String serverName = Id.shortRandom();
 
         final ListenForCancel listenForCancel = new ListenForCancel();
-        MessageServer server = new MessageServer(new MqttServerConduit(serverMqtt, serverName));
+        final String channelStatusTopic = "mgrpc/channelStatus";
+        MessageServer server = new MessageServer(new MqttServerConduit(serverMqtt, serverName, channelStatusTopic));
         server.start();
         server.addService(listenForCancel);
 
         CloseableSocketFactory sf = new CloseableSocketFactory();
         String channelId = Id.random();
-        String clientStatusTopic = new ServerTopics(serverName).statusClients;
-        MqttAsyncClient clientMqttWithLwt = MqttUtils.makeClient(clientStatusTopic, channelId, sf);
-        MessageChannel channel = new MessageChannel(new MqttChannelConduit(clientMqttWithLwt, serverName), channelId);
-        channel.start();
+        MqttAsyncClient clientMqttWithLwt = MqttUtils.makeClient(channelStatusTopic, channelId, sf);
+        MessageChannel baseChannel = new MessageChannelBuilder()
+                .channelId(channelId)
+                .channelStatusTopic(channelStatusTopic)
+                .conduitManager(new MqttChannelConduitManager(clientMqttWithLwt)).build();
+
+        baseChannel.start();
+        Channel channel = ClientInterceptors.intercept(baseChannel, new TopicInterceptor(serverName));
 
         final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
@@ -283,7 +301,7 @@ public class TestCommsErrors {
         //The call should be cleaned up on the server.
         assertEquals(server.getStats().getActiveCalls(), 0);
 
-        channel.close();
+        baseChannel.close();
         server.close();
 
     }

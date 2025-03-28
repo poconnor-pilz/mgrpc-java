@@ -1,20 +1,14 @@
 package io.mgrpc.examples.hello;
 
-import io.grpc.ServerInterceptors;
-import io.grpc.ServerServiceDefinition;
-import io.grpc.Status;
-import io.grpc.StatusRuntimeException;
+import io.grpc.*;
 import io.grpc.examples.helloworld.ExampleHelloServiceGrpc;
 import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.stub.StreamObserver;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
-import io.mgrpc.EmbeddedBroker;
-import io.mgrpc.Id;
-import io.mgrpc.MessageChannel;
-import io.mgrpc.MessageServer;
-import io.mgrpc.mqtt.MqttChannelConduit;
+import io.mgrpc.*;
+import io.mgrpc.mqtt.MqttChannelConduitManager;
 import io.mgrpc.mqtt.MqttServerConduit;
 import io.mgrpc.mqtt.MqttUtils;
 import org.junit.jupiter.api.Test;
@@ -64,8 +58,10 @@ public class TestAuthAndMetadata {
                 new ListenForHello(),
                 new ServerAuthInterceptor());
         server.addService(serviceWithIntercept);
-        MessageChannel channel = new MessageChannel(new MqttChannelConduit(MqttUtils.makeClient(), SERVER));
-        channel.start();
+
+        MessageChannel messageChannel = new MessageChannel(new MqttChannelConduitManager(MqttUtils.makeClient()));
+        messageChannel.start();
+        Channel channel = ClientInterceptors.intercept(messageChannel, new TopicInterceptor(SERVER));
 
 
         //Make a jwt token and add it to the call credentials
@@ -95,7 +91,7 @@ public class TestAuthAndMetadata {
         assertEquals(Status.UNAUTHENTICATED.getCode(), ex.getStatus().getCode());
         assertTrue(ex.getMessage().contains("Authorization token is missing"));
 
-        channel.close();
+        messageChannel.close();
         server.close();
 
     }

@@ -4,8 +4,8 @@ import com.google.protobuf.InvalidProtocolBufferException;
 import io.grpc.MethodDescriptor;
 import io.grpc.Status;
 import io.mgrpc.*;
-import io.mgrpc.messaging.ChannelListener;
 import io.mgrpc.messaging.ChannelConduit;
+import io.mgrpc.messaging.ChannelListener;
 import io.mgrpc.messaging.MessagingException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -13,7 +13,10 @@ import org.slf4j.LoggerFactory;
 import javax.jms.*;
 import java.lang.invoke.MethodHandles;
 import java.util.Map;
-import java.util.concurrent.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
 
 
 //  Topics and connection status:
@@ -52,8 +55,7 @@ public class JmsChannelConduit implements ChannelConduit {
 
     private static final com.google.rpc.Status GOOGLE_RPC_OK_STATUS = io.grpc.protobuf.StatusProto.fromStatusAndTrailers(Status.OK, null);
 
-    private final Connection client;
-    private Session session;
+    private final Session session;
 
     private MessageProducer requestProducer;
     private MessageProducer pingProducer;
@@ -62,7 +64,7 @@ public class JmsChannelConduit implements ChannelConduit {
     private final ServerTopics serverTopics;
 
     private CountDownLatch serverConnectedLatch;
-    private boolean serverConnected = false;
+    private volatile boolean serverConnected = false;
 
     private final boolean useBrokerFlowControl;
 
@@ -72,29 +74,39 @@ public class JmsChannelConduit implements ChannelConduit {
 
     private Map<String, RpcMessage.Builder> startMessages = new ConcurrentHashMap<>();
 
+    private final String channelStatusTopic;
 
-    private static volatile Executor executorSingleton;
 
-    @Override
-    public Executor getExecutor() {
-        return getExecutorInstance();
-    }
+    private final Executor executor;
 
-    private static Executor getExecutorInstance() {
-        if (executorSingleton == null) {
-            synchronized (MessageServer.class) {
-                if (executorSingleton == null) {
-                    //TODO: What kind of thread pool should we use here. It should probably be limited to a fixed maximum or maybe it should be passed as a constructor parameter?
-                    executorSingleton = Executors.newCachedThreadPool();
-                }
-            }
-        }
-        return executorSingleton;
-    }
+    private volatile boolean isStarted = false;
+
 
 
     /**
-     * @param client
+     * @param session
+     * @param serverTopic The root topic of the server to connect to e.g. "tenant1/device1"
+     *                    This topic should be unique to the broker.
+     *                    Requests will be sent to {serverTopic}/i/svc
+     *                    The channel will subscribe for replies on {serverTopic}/o/svc/{channelId}
+     * @param useBrokerFlowControl If this is true then for non-unary calls the conduit will create
+     *                             an individual broker queue for the server or client streams and only
+     *                             pull from this queue when the next message is required meaning that the
+     *                             channel and the server do not need to use their internal buffers.
+     * @param channelStatusTopic The topic on which messages regarding channel status will be reported.
+     *                           If this value is null then the conduit will not attempt to send
+     *                           channel status messages.
+     */
+    public JmsChannelConduit(Session session, String serverTopic, boolean useBrokerFlowControl, Executor executor, String channelStatusTopic) {
+        this.session = session;
+        this.useBrokerFlowControl = useBrokerFlowControl;
+        this.serverTopics = new ServerTopics(serverTopic, TOPIC_SEPARATOR);
+        this.executor = executor;
+        this.channelStatusTopic = channelStatusTopic;
+    }
+
+    /**
+     * @param session
      * @param serverTopic The root topic of the server to connect to e.g. "tenant1/device1"
      *                    This topic should be unique to the broker.
      *                    Requests will be sent to {serverTopic}/i/svc
@@ -104,22 +116,25 @@ public class JmsChannelConduit implements ChannelConduit {
      *                             pull from this queue when the next message is required meaning that the
      *                             channel and the server do not need to use their internal buffers.
      */
-    public JmsChannelConduit(Connection client, String serverTopic, boolean useBrokerFlowControl) {
-        this.client = client;
-        this.useBrokerFlowControl = useBrokerFlowControl;
-        this.serverTopics = new ServerTopics(serverTopic, TOPIC_SEPARATOR);
+    public JmsChannelConduit(Session session, String serverTopic, boolean useBrokerFlowControl, Executor executor) {
+        this(session, serverTopic, useBrokerFlowControl, executor, null);
     }
 
 
     @Override
-    public void start(ChannelListener channel) throws MessagingException {
+    public synchronized void start(ChannelListener channel) throws MessagingException {
+
+        if(isStarted) {
+            return;
+        }
+
+        isStarted = true;
 
         if (this.channel != null) {
             throw new MessagingException("Listener already connected");
         }
         this.channel = channel;
         try {
-            session = client.createSession();
             Queue sendQueue = session.createQueue(serverTopics.servicesIn);
             log.debug("Will send requests to : " + sendQueue.getQueueName());
             requestProducer = session.createProducer(sendQueue);
@@ -148,10 +163,10 @@ public class JmsChannelConduit implements ChannelConduit {
             statusConsumer.setMessageListener(message -> {
                 try {
                     serverConnected = ConnectionStatus.parseFrom(JmsUtils.byteArrayFromMessage(session, message)).getConnected();
-                    log.debug("Server connected status = " + serverConnected);
+                    log.debug("Server " + serverTopics.root + " connected status = " + serverConnected);
                     serverConnectedLatch.countDown();
                     if (!serverConnected) {
-                        channel.onDisconnect(null);
+                        channel.onDisconnect(serverTopics.root);
                     }
                 } catch (Exception ex) {
                     log.error("Failed to process status reply", ex);
@@ -164,28 +179,13 @@ public class JmsChannelConduit implements ChannelConduit {
             throw new MessagingException(ex);
         }
 
+
     }
 
     @Override
     public void close() {
-        try {
-            //Notify that this client has been closed so that any server with ongoing calls can cancel them and
-            //release resources.
-            String statusQueue = serverTopics.statusClients;
-            log.debug("Closing channel. Sending notification on " + statusQueue);
-            final byte[] connectedMsg = ConnectionStatus.newBuilder()
-                    .setConnected(false)
-                    .setChannelId(channel.getChannelId())
-                    .build().toByteArray();
-            Queue queue = session.createQueue(statusQueue);
-            MessageProducer producer = session.createProducer(queue);
-            BytesMessage bytesMessage = session.createBytesMessage();
-            bytesMessage.writeBytes(connectedMsg);
-            producer.send(bytesMessage);
-            session.close();
-        } catch (JMSException e) {
-            log.error("Exception closing " + e);
-        }
+        //Nothing to do. The JMSChannelConduitManager will close the session which
+        //will release all resources like publishers etc.
     }
 
     public void onCallClosed(String callId) {
@@ -322,7 +322,7 @@ public class JmsChannelConduit implements ChannelConduit {
         final JmsCallQueues callQueues = callQueuesMap.get(callId);
         if (callQueues != null) {
             if (callQueues.consumer != null) {
-                getExecutor().execute(() -> {
+                executor.execute(() -> {
                     //This will block until a message is available so we need to run it on a thread
                     //to prevent the channel from blocking. This will effectively block the thread for the duration
                     //of the whole call.

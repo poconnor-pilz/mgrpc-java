@@ -4,8 +4,8 @@ import com.google.protobuf.InvalidProtocolBufferException;
 import io.grpc.Status;
 import io.mgrpc.*;
 import io.mgrpc.messaging.MessagingException;
-import io.mgrpc.messaging.ServerListener;
 import io.mgrpc.messaging.ServerConduit;
+import io.mgrpc.messaging.ServerListener;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
@@ -30,6 +30,8 @@ public class MqttServerConduit implements ServerConduit {
     private Map<String, RpcMessage> startMessages = new ConcurrentHashMap<>();
 
     private final ServerTopics serverTopics;
+
+    private final String channelStatusTopic;
 
     private static volatile Executor executorSingleton;
     @Override
@@ -59,10 +61,29 @@ public class MqttServerConduit implements ServerConduit {
      *                    Replies will be sent to {serverTopic}/o/svc/{channelId}/{slashedFullMethod}
      *                    Where if the gRPC fullMethodName is "helloworld.HelloService/SayHello"
      *                    then {slashedFullMethod} is "helloworld/HelloService/SayHello"
+     * @param channelStatusTopic The topic on which messages regarding channel status will be reported.
+     *                           This topic will usually be the same topic as the MQTT LWT for the channel client.
+     *                           If this value is null then the conduit will not attempt to subscribe for
+     *                           channel status messages.
      */
-    public MqttServerConduit(MqttAsyncClient client, String serverTopic) {
+    public MqttServerConduit(MqttAsyncClient client, String serverTopic, String channelStatusTopic) {
         this.client = client;
         this.serverTopics = new ServerTopics(serverTopic);
+        this.channelStatusTopic = channelStatusTopic;
+    }
+
+    /**
+     * @param client
+     * @param serverTopic The root topic of the server e.g. "tenant1/device1"
+     *                    This topic should be unique to the broker.
+     *                    The server will subscribe for requests on subtopics of {serverTopic}/i/svc
+     *                    A request for a method should be sent to sent to {serverTopic}/i/svc/{slashedFullMethod}
+     *                    Replies will be sent to {serverTopic}/o/svc/{channelId}/{slashedFullMethod}
+     *                    Where if the gRPC fullMethodName is "helloworld.HelloService/SayHello"
+     *                    then {slashedFullMethod} is "helloworld/HelloService/SayHello"
+     */
+    public MqttServerConduit(MqttAsyncClient client, String serverTopic) {
+        this(client, serverTopic, null);
     }
 
 
@@ -96,14 +117,16 @@ public class MqttServerConduit implements ServerConduit {
 
 
             //Subscribe for channel status messages
-            log.debug("Subscribing for client status on " + serverTopics.statusClients);
-            client.subscribe(serverTopics.statusClients, 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
-                ConnectionStatus connectionStatus = ConnectionStatus.parseFrom(mqttMessage.getPayload());
-                log.debug("Received client connected status = " + connectionStatus.getConnected() + " on " + topic + " for channel " + connectionStatus.getChannelId());
-                if (!connectionStatus.getConnected()) {
-                    server.onDisconnect(connectionStatus.getChannelId());
-                }
-            })).waitForCompletion(SUBSCRIBE_TIMEOUT_MILLIS);
+            if(this.channelStatusTopic != null) {
+                log.debug("Subscribing for client status on " + channelStatusTopic);
+                client.subscribe(channelStatusTopic, 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
+                    ConnectionStatus connectionStatus = ConnectionStatus.parseFrom(mqttMessage.getPayload());
+                    log.debug("Received client connected status = " + connectionStatus.getConnected() + " on " + topic + " for channel " + connectionStatus.getChannelId());
+                    if (!connectionStatus.getConnected()) {
+                        server.onDisconnect(connectionStatus.getChannelId());
+                    }
+                })).waitForCompletion(SUBSCRIBE_TIMEOUT_MILLIS);
+            }
 
             //If this receives a ping from a client then send a notification that we are connected
             log.debug("Subscribing for client pings on " + serverTopics.statusPrompt);
@@ -122,7 +145,9 @@ public class MqttServerConduit implements ServerConduit {
         try {
             notifyConnected(false);
             client.unsubscribe(serverTopics.servicesIn + "/#");
-            client.unsubscribe(serverTopics.statusClients + "/#");
+            if(this.channelStatusTopic != null) {
+                client.unsubscribe(this.channelStatusTopic + "/#");
+            }
             client.unsubscribe(serverTopics.statusPrompt);
         } catch (MqttException exception) {
             log.error("Exception closing " + exception);

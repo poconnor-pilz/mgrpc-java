@@ -8,7 +8,7 @@ import io.grpc.stub.StreamObserver;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
 import io.mgrpc.*;
-import io.mgrpc.mqtt.MqttChannelConduit;
+import io.mgrpc.mqtt.MqttChannelConduitManager;
 import io.mgrpc.mqtt.MqttServerConduit;
 import io.mgrpc.mqtt.MqttUtils;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
@@ -56,8 +56,10 @@ public class TestGrpcProxy {
         ManagedChannel httpChannel = ManagedChannelBuilder.forTarget(target)
                 .usePlaintext().build();
 
+        final Channel httpChannelWithTopic = ClientInterceptors.intercept(httpChannel, new TopicInterceptor(SERVER));
+
         final MqttAsyncClient clientMqttConnection = MqttUtils.makeClient();
-        MessageChannel messageChannel = new MessageChannel(new MqttChannelConduit(clientMqttConnection, SERVER));
+        MessageChannel messageChannel = new MessageChannel(new MqttChannelConduitManager(clientMqttConnection));
         messageChannel.start();
 
         //We want to wire this:
@@ -99,7 +101,7 @@ public class TestGrpcProxy {
         BearerToken token = new BearerToken(jwtString);
 
         final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub stub = ExampleHelloServiceGrpc
-                .newBlockingStub(httpChannel).withCallCredentials(token);
+                .newBlockingStub(httpChannelWithTopic).withCallCredentials(token);
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
         final HelloReply helloReply = stub.sayHello(joe);
 
@@ -107,7 +109,7 @@ public class TestGrpcProxy {
 
         //Verify that not setting authentication causes failure
         final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub stub1 =
-                ExampleHelloServiceGrpc.newBlockingStub(httpChannel);
+                ExampleHelloServiceGrpc.newBlockingStub(httpChannelWithTopic);
         StatusRuntimeException ex = assertThrows(StatusRuntimeException.class, () -> stub1.sayHello(joe));
         assertEquals(Status.UNAUTHENTICATED.getCode(), ex.getStatus().getCode());
         assertTrue(ex.getMessage().contains("Authorization token is missing"));
@@ -134,8 +136,10 @@ public class TestGrpcProxy {
         final String SERVER = Id.shortRandom();
 
         final MqttAsyncClient clientMqttConnection = MqttUtils.makeClient();
-        MessageChannel messageChannel = new MessageChannel(new MqttChannelConduit(clientMqttConnection, SERVER));
+        MessageChannel messageChannel = new MessageChannel(new MqttChannelConduitManager(clientMqttConnection));
         messageChannel.start();
+
+        final Channel messageChannelWithTopic = ClientInterceptors.intercept(messageChannel, new TopicInterceptor(SERVER));
 
         final ServerServiceDefinition serviceWithIntercept = ServerInterceptors.intercept(
                 new ListenForHello(),
@@ -172,7 +176,7 @@ public class TestGrpcProxy {
         BearerToken token = new BearerToken(jwtString);
 
         final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub stub = ExampleHelloServiceGrpc
-                .newBlockingStub(messageChannel).withCallCredentials(token);
+                .newBlockingStub(messageChannelWithTopic).withCallCredentials(token);
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
         final HelloReply helloReply = stub.sayHello(joe);
 
@@ -181,7 +185,7 @@ public class TestGrpcProxy {
 
         //Verify that not setting authentication causes failure
         final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub stub1 =
-                ExampleHelloServiceGrpc.newBlockingStub(messageChannel);
+                ExampleHelloServiceGrpc.newBlockingStub(messageChannelWithTopic);
         StatusRuntimeException ex = assertThrows(StatusRuntimeException.class, () -> stub1.sayHello(joe));
         assertEquals(Status.UNAUTHENTICATED.getCode(), ex.getStatus().getCode());
         assertTrue(ex.getMessage().contains("Authorization token is missing"));

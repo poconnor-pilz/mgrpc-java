@@ -4,8 +4,8 @@ import com.google.protobuf.InvalidProtocolBufferException;
 import io.grpc.Status;
 import io.mgrpc.*;
 import io.mgrpc.messaging.MessagingException;
-import io.mgrpc.messaging.ServerListener;
 import io.mgrpc.messaging.ServerConduit;
+import io.mgrpc.messaging.ServerListener;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -37,6 +37,8 @@ public class JmsServerConduit implements ServerConduit {
 
     private final ServerTopics serverTopics;
 
+    private final String channelStatusTopic;
+
     private static volatile Executor executorSingleton;
 
     @Override
@@ -65,10 +67,27 @@ public class JmsServerConduit implements ServerConduit {
      *                    The server will subscribe for requests on subtopics of {serverTopic}/i/svc
      *                    A request for a method should be sent to sent to {serverTopic}/i/svc
      *                    Replies will be sent to {serverTopic}/o/svc/{channelId}}
+     * @param channelStatusTopic The topic on which messages regarding channel status will be reported.
+     *                           If this value is null then the conduit will not attempt to subscribe for
+     *                           channel status messages.
+     */
+    public JmsServerConduit(Connection client, String serverTopic, String channelStatusTopic) {
+        this.client = client;
+        this.serverTopics = new ServerTopics(serverTopic, TOPIC_SEPARATOR);
+        this.channelStatusTopic = channelStatusTopic;
+    }
+
+    /**
+     * @param client
+     * @param serverTopic The root topic of the server e.g. "tenant1/device1"
+     *                    The server will subscribe for requests on subtopics of {serverTopic}/i/svc
+     *                    A request for a method should be sent to sent to {serverTopic}/i/svc
+     *                    Replies will be sent to {serverTopic}/o/svc/{channelId}}
      */
     public JmsServerConduit(Connection client, String serverTopic) {
         this.client = client;
         this.serverTopics = new ServerTopics(serverTopic, TOPIC_SEPARATOR);
+        this.channelStatusTopic = null;
     }
 
 
@@ -129,21 +148,23 @@ public class JmsServerConduit implements ServerConduit {
                 }
             });
 
-            Queue statusQueue = session.createQueue(serverTopics.statusClients);
-            log.debug("Subscribing for channel status on: " + statusQueue.getQueueName());
-            MessageConsumer statusConsumer = session.createConsumer(statusQueue);
-            statusConsumer.setMessageListener(message -> {
-                try {
-                    ConnectionStatus connectionStatus = ConnectionStatus.parseFrom(JmsUtils.byteArrayFromMessage(session, message));
-                    log.debug("Received client connected status = " + connectionStatus.getConnected() + " for channel " + connectionStatus.getChannelId());
-                    if (!connectionStatus.getConnected()) {
-                        server.onDisconnect(connectionStatus.getChannelId());
-                        channelProducers.remove(connectionStatus.getChannelId());
+            if(this.channelStatusTopic != null) {
+                Queue statusQueue = session.createQueue(this.channelStatusTopic);
+                log.debug("Subscribing for channel status on: " + statusQueue.getQueueName());
+                MessageConsumer statusConsumer = session.createConsumer(statusQueue);
+                statusConsumer.setMessageListener(message -> {
+                    try {
+                        ConnectionStatus connectionStatus = ConnectionStatus.parseFrom(JmsUtils.byteArrayFromMessage(session, message));
+                        log.debug("Received client connected status = " + connectionStatus.getConnected() + " for channel " + connectionStatus.getChannelId());
+                        if (!connectionStatus.getConnected()) {
+                            server.onDisconnect(connectionStatus.getChannelId());
+                            channelProducers.remove(connectionStatus.getChannelId());
+                        }
+                    } catch (Exception ex) {
+                        log.error("Failed to process status reply", ex);
                     }
-                } catch (Exception ex) {
-                    log.error("Failed to process status reply", ex);
-                }
-            });
+                });
+            }
 
             Queue pingQueue = session.createQueue(serverTopics.statusPrompt);
             log.debug("Subscribing for pings on : " + pingQueue.getQueueName());

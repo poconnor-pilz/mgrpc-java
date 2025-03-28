@@ -29,11 +29,6 @@ public class ServerTopics {
      */
     public final String statusPrompt;
     /**
-     * Clients should send status message to this topic postfixed with channelId
-     * Has the form {root}/i/sys/status/client
-     */
-    public final String statusClients;
-    /**
      * The topic on which a server will listen for all input messages for all services
      * Has the form {root}/i/svc
      */
@@ -44,7 +39,6 @@ public class ServerTopics {
         this.sep = topicSeparator;
         this.status = make(root, OUT, SYS, STATUS);
         this.statusPrompt = make(root, IN, SYS, STATUS, PROMPT);
-        this.statusClients = make(this.status, CLIENT);
         this.servicesIn = make(root, IN , SVC);
     }
 

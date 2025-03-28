@@ -4,6 +4,8 @@ import com.google.protobuf.Any;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.rpc.Code;
 import com.google.rpc.ErrorInfo;
+import io.grpc.Channel;
+import io.grpc.ClientInterceptors;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 import io.grpc.examples.helloworld.ExampleHelloServiceGrpc;
@@ -13,7 +15,7 @@ import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.protobuf.StatusProto;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
-import io.mgrpc.mqtt.MqttChannelConduit;
+import io.mgrpc.mqtt.MqttChannelConduitManager;
 import io.mgrpc.mqtt.MqttServerConduit;
 import io.mgrpc.mqtt.MqttUtils;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
@@ -36,7 +38,8 @@ public class TestErrors {
     private static MqttAsyncClient serverMqtt;
     private static MqttAsyncClient clientMqtt;
 
-    private MessageChannel channel;
+    private Channel channel;
+    private MessageChannel messageChannel;
     private MessageServer server;
 
 
@@ -68,8 +71,9 @@ public class TestErrors {
         //Set up the server
         server = new MessageServer(new MqttServerConduit(serverMqtt, SERVER));
         server.start();
-        channel = new MessageChannel(new MqttChannelConduit(clientMqtt, SERVER));
-        channel.start();
+        messageChannel = new MessageChannel(new MqttChannelConduitManager(clientMqtt));
+        messageChannel.start();
+        channel = ClientInterceptors.intercept(messageChannel, new TopicInterceptor(SERVER));
     }
 
     @AfterEach
@@ -84,7 +88,7 @@ public class TestErrors {
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }
-        assertEquals(numActiveCalls, channel.getStats().getActiveCalls());
+        assertEquals(numActiveCalls, messageChannel.getStats().getActiveCalls());
         assertEquals(numActiveCalls, server.getStats().getActiveCalls());
     }
 

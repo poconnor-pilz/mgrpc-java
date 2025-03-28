@@ -2,7 +2,7 @@ package io.mgrpc.examples.hello;
 
 import io.grpc.*;
 import io.mgrpc.*;
-import io.mgrpc.mqtt.MqttChannelConduit;
+import io.mgrpc.mqtt.MqttChannelConduitManager;
 import io.mgrpc.mqtt.MqttServerConduit;
 import io.mgrpc.mqtt.MqttUtils;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
@@ -35,7 +35,7 @@ public class TestHelloGrpcProxy extends TestHelloBase {
     MessageServer messageServer;
     Server httpServer;
 
-    Channel httpChannel;
+    Channel interceptedHttpChannel;
 
     @BeforeAll
     public static void startClients() throws Exception {
@@ -65,7 +65,7 @@ public class TestHelloGrpcProxy extends TestHelloBase {
         messageServer.start();
         messageServer.addService(new HelloServiceForTest());
 
-        messageChannel = new MessageChannel(new MqttChannelConduit(clientMqtt, SERVER));
+        messageChannel = new MessageChannel(new MqttChannelConduitManager(clientMqtt));
         messageChannel.start();
 
         GrpcProxy proxy = new GrpcProxy(messageChannel);
@@ -77,8 +77,10 @@ public class TestHelloGrpcProxy extends TestHelloBase {
                 .start();
 
         String target = "localhost:" + port1;
-        httpChannel = Grpc.newChannelBuilder(target, InsecureChannelCredentials.create())
+        Channel httpChannel = Grpc.newChannelBuilder(target, InsecureChannelCredentials.create())
                 .build();
+
+        interceptedHttpChannel = ClientInterceptors.intercept(httpChannel, new TopicInterceptor(SERVER));
 
     }
 
@@ -125,7 +127,7 @@ public class TestHelloGrpcProxy extends TestHelloBase {
 
     @Override
     public Channel getChannel() {
-        return httpChannel;
+        return interceptedHttpChannel;
     }
 
     @Override
