@@ -1,12 +1,14 @@
 package io.mgrpc.examples.hello;
 
+import io.grpc.Channel;
+import io.grpc.ClientInterceptors;
 import io.grpc.examples.helloworld.ExampleHelloServiceGrpc;
 import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
 import io.mgrpc.messaging.MessagingException;
-import io.mgrpc.mqtt.MqttChannelConduit;
+import io.mgrpc.mqtt.MqttChannelConduitManager;
 import io.mgrpc.mqtt.MqttServerConduit;
 import io.mgrpc.mqtt.MqttUtils;
 import io.mgrpc.utils.ToList;
@@ -31,10 +33,12 @@ public class TestSubscription {
     private static MqttAsyncClient serverMqtt;
     private static MqttAsyncClient clientMqtt;
 
-    private MessageChannel channel;
+    private MessageChannel baseChannel;
+
+    Channel channel;
     private MessageServer server;
 
-    private MqttChannelConduit channelConduit;
+    private MqttChannelConduitManager channelConduit;
 
     //Make server name short but random to prevent stray status messages from previous tests affecting this test
     private static final String SERVER = Id.shortRandom();
@@ -63,18 +67,24 @@ public class TestSubscription {
         //Set up the serverb
         server = new MessageServer(new MqttServerConduit(serverMqtt, SERVER));
         server.start();
-        channelConduit = new MqttChannelConduit(clientMqtt, SERVER);
-        channel = null; //new MessageChannel(channelConduit);
-        channel.start();
+
+        channelConduit = new MqttChannelConduitManager(clientMqtt);
+
+        baseChannel = new MessageChannel(new MqttChannelConduitManager(clientMqtt));
+        baseChannel.start();
+
+        channel = ClientInterceptors.intercept(baseChannel, new TopicInterceptor(SERVER));
+
     }
 
     @AfterEach
     void tearDown() throws Exception{
+        baseChannel.close();
         server.close();
     }
 
 
-    public MessageChannel getChannel() {
+    public Channel getChannel() {
         return this.channel;
     }
 
@@ -89,7 +99,7 @@ public class TestSubscription {
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }
-        assertEquals(numActiveCalls, getChannel().getStats().getActiveCalls());
+        assertEquals(numActiveCalls, baseChannel.getStats().getActiveCalls());
         assertEquals(numActiveCalls, getServer().getStats().getActiveCalls());
     }
 

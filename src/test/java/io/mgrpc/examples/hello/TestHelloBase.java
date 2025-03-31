@@ -79,7 +79,8 @@ public abstract class TestHelloBase {
     @Test
     public void testParallelReplies() throws Throwable {
 
-        //This test doesn't check anything. It just runs calls in parallel. Sometimes it may show up a concurrency bug.
+        //This test doesn't check anything except leaks.
+        //It just runs calls in parallel. Sometimes it may show up a concurrency bug.
 
         final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(getChannel());
         //Tell lotsOfReplies to reply 10 times

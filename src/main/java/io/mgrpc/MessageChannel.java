@@ -170,6 +170,7 @@ public class MessageChannel extends Channel implements ChannelListener {
     public <RequestT, ResponseT> ClientCall newCall(MethodDescriptor<RequestT, ResponseT> methodDescriptor, CallOptions callOptions) {
         MsgClientCall call = new MsgClientCall<>(methodDescriptor, callOptions, conduitFactory.getExecutor(), queueSize);
         clientCallsById.put(call.getCallId(), call);
+
         return call;
     }
 
@@ -206,10 +207,6 @@ public class MessageChannel extends Channel implements ChannelListener {
         private ScheduledFuture<?> deadlineCancellationFuture;
         private boolean cancelCalled = false;
         private boolean closed = false;
-        /**
-         * List of recent sequence ids, Used for checking for duplicate messages
-         */
-        private Recents recents = new Recents();
         Deadline effectiveDeadline = null;
         Metadata metadata = null;
 
@@ -242,6 +239,12 @@ public class MessageChannel extends Channel implements ChannelListener {
         @Override
         public void start(Listener<RespT> responseListener, Metadata headers) {
 
+            //Note that start may be called by multiple threads if this call is being run by GrpcProxy
+            //As part of a http server. But start is only called once per MsgClientCall so it does not
+            //need to be thread safe wrt MsgClientCall (but it does wrt MesssageChannel)
+            //This is true for all ClientCall methods on MsgClientCall
+
+            //log.debug("Starting call {} on thread {}", callId, Thread.currentThread().getName());
             serverTopic = headers.get(TopicInterceptor.META_SERVER_TOPIC);
             if(serverTopic == null || serverTopic.isEmpty()) {
                 final String err = "No header metadata property value specified for " + TopicInterceptor.SERVER_TOPIC
@@ -289,10 +292,10 @@ public class MessageChannel extends Channel implements ChannelListener {
 
 
             //Listen for cancellations
-            context.addListener(cancellationListener, command -> command.run());
+            this.context.addListener(cancellationListener, command -> command.run());
 
             //Close call if deadline exceeded
-            effectiveDeadline = DeadlineTimer.min(callOptions.getDeadline(), context.getDeadline());
+            this.effectiveDeadline = DeadlineTimer.min(callOptions.getDeadline(), context.getDeadline());
             if (effectiveDeadline != null) {
                 this.deadlineCancellationFuture = DeadlineTimer.start(effectiveDeadline, (String deadlineMessage) -> {
                     //We close the call here which will call listener.onClose(Status.DEADLINE_EXCEEDED)

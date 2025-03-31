@@ -17,6 +17,8 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class MqttServerConduit implements ServerConduit {
 
@@ -42,8 +44,18 @@ public class MqttServerConduit implements ServerConduit {
         if (executorSingleton == null) {
             synchronized (MessageServer.class) {
                 if (executorSingleton == null) {
-                    //TODO: What kind of thread pool should we use here. It should probably be limited to a fixed maximum or maybe it should be passed as a constructor parameter?
-                    executorSingleton = Executors.newCachedThreadPool();
+                    //Note that the default exector for grpc classic is a cached thread pool.
+                    //The cached thread pool will retire threads that are not used for 60 seconds but otherwise
+                    //create, cache and re-use threads as needed.
+                    executorSingleton = Executors.newCachedThreadPool(new ThreadFactory() {
+                        private final AtomicInteger threadNumber = new AtomicInteger(1);
+                        @Override
+                        public Thread newThread(Runnable r) {
+                            Thread t = new Thread(r, "mgprc-mqtt-server-" + threadNumber.getAndIncrement());
+                            t.setDaemon(true);
+                            return t;
+                        }
+                    });
                 }
             }
         }
