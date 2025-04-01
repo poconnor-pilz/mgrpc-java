@@ -146,7 +146,7 @@ public class MessageServer implements ServerListener {
      * has disconnected.
      */
     @Override
-    public void onDisconnect(String channelId) {
+    public void onChannelDisconnected(String channelId) {
         //When a client is disconnected we need to cancel all calls for it so that they get cleaned up.
         for (String callId : this.handlersByCallId.keySet()) {
             MessageHandler messageHandler = this.handlersByCallId.get(callId);

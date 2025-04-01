@@ -10,8 +10,6 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 import java.lang.invoke.MethodHandles;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -23,7 +21,6 @@ public class MessageChannel extends Channel implements ChannelListener {
 
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
-    public static final long SUBSCRIPTION_TIMEOUT_MILLIS = 10 * 1000;
 
     public static final CallOptions.Key<String> OPT_OUT_TOPIC = CallOptions.Key.create("out-topic");
 
@@ -47,8 +44,6 @@ public class MessageChannel extends Channel implements ChannelListener {
 
     private final Map<String, MsgClientCall> clientCallsById = new ConcurrentHashMap<>();
 
-
-    private final List<DisconnectListener> disconnectListeners = new ArrayList<>();
 
     private static final int SINGLE_MESSAGE_STREAM = 0;
 
@@ -127,7 +122,7 @@ public class MessageChannel extends Channel implements ChannelListener {
      * has disconnected.
      */
     @Override
-    public void onDisconnect(String serverTopic) {
+    public void onServerDisconnected(String serverTopic) {
         //Clean up all existing calls because the server has been disconnected.
         //Interrupt the client's call queue with an unavailable status, the call will be cleaned up when it is closed.
         //We could just call close on the call directly but we want the call to finish processing whatever
@@ -145,14 +140,6 @@ public class MessageChannel extends Channel implements ChannelListener {
             }
         }
 
-        for(DisconnectListener listener: disconnectListeners){
-            listener.onDisconnect(this.channelId);;
-        }
-
-    }
-
-    public void addDisconnectListener(DisconnectListener listener) {
-        disconnectListeners.add(listener);
     }
 
 

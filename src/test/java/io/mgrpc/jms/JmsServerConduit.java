@@ -169,7 +169,7 @@ public class JmsServerConduit implements ServerConduit {
                         ConnectionStatus connectionStatus = ConnectionStatus.parseFrom(JmsUtils.byteArrayFromMessage(session, message));
                         log.debug("Received client connected status = " + connectionStatus.getConnected() + " for channel " + connectionStatus.getChannelId());
                         if (!connectionStatus.getConnected()) {
-                            server.onDisconnect(connectionStatus.getChannelId());
+                            server.onChannelDisconnected(connectionStatus.getChannelId());
                             channelProducers.remove(connectionStatus.getChannelId());
                         }
                     } catch (Exception ex) {

@@ -159,7 +159,7 @@ public class MqttChannelTopicConduit implements ChannelTopicConduit {
                     log.debug("Server connected status = " + serverConnected);
                     this.serverConnectedLatch.countDown();
                     if (!serverConnected) {
-                        channel.onDisconnect(serverTopics.root);
+                        channel.onServerDisconnected(serverTopics.root);
                     }
                 } catch (InvalidProtocolBufferException e) {
                     log.error("Failed to parse connection status", e);

@@ -5,7 +5,7 @@ import io.mgrpc.RpcMessage;
 /**
  * Interface implemented by the channel
  */
-public interface ChannelListener extends DisconnectListener{
+public interface ChannelListener{
 
     /**
      * The ChannelConduit should call this method on the channel when it receives
@@ -20,4 +20,10 @@ public interface ChannelListener extends DisconnectListener{
      * @return
      */
     String getChannelId();
+
+    /**
+     * The ChannelConduit should call this message on the channel if it knows that the server
+     * has disconnected.
+     */
+     void onServerDisconnected(String serverTopic);
 }

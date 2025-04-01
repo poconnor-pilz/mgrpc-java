@@ -135,7 +135,7 @@ public class MqttServerConduit implements ServerConduit {
                     ConnectionStatus connectionStatus = ConnectionStatus.parseFrom(mqttMessage.getPayload());
                     log.debug("Received client connected status = " + connectionStatus.getConnected() + " on " + topic + " for channel " + connectionStatus.getChannelId());
                     if (!connectionStatus.getConnected()) {
-                        server.onDisconnect(connectionStatus.getChannelId());
+                        server.onChannelDisconnected(connectionStatus.getChannelId());
                     }
                 })).waitForCompletion(SUBSCRIBE_TIMEOUT_MILLIS);
             }

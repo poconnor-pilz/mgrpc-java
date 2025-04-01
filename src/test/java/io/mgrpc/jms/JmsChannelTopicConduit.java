@@ -166,7 +166,7 @@ public class JmsChannelTopicConduit implements ChannelTopicConduit {
                     log.debug("Server " + serverTopics.root + " connected status = " + serverConnected);
                     serverConnectedLatch.countDown();
                     if (!serverConnected) {
-                        channel.onDisconnect(serverTopics.root);
+                        channel.onServerDisconnected(serverTopics.root);
                     }
                 } catch (Exception ex) {
                     log.error("Failed to process status reply", ex);
