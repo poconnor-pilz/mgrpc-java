@@ -1,46 +1,24 @@
 package io.mgrpc.messaging;
 
-import io.mgrpc.RpcMessage;
+import java.util.concurrent.Executor;
 
-/**
- * Interface to messaging client. Adapters should implement this to work with different message protocols.
- */
 public interface ChannelConduit {
 
     /**
-     * Called by the channel when it starts. This should be idempotent.
-     * @param channel The channel
-     * @throws MessagingException
+     * There is a channel topic conduit per server. This method will return the channel topic conduit corresponding
+     * to the server. If the conduit is not started it will start it which may cause it to block for some time.
+     * @param serverTopic The root topic of the server corresponding to the conduit
+     * @return
      */
-    void start(ChannelListener channel) throws MessagingException;
-
+    ChannelTopicConduit getChannelTopicConduit(String serverTopic, ChannelListener channelListener);
 
     /**
-     * Called by the channel after the call has closed.
-     * The conduit can clean up any resources here for the call.
+     * @return The executor with which to execute calls
      */
-    void onCallClosed(String callId);
-
+    Executor getExecutor();
 
     /**
-     * Called by the channel when the channel closes. The conduit should release any resources here.
+     * @param channelId The id of the channel being closed
      */
-    void close();
-
-    /**
-     * Request the conduit to send on a number of messages for a call
-     * If the conduit does not implement buffering it can ignore this and just send the messages
-     * whenever they arrive.
-     */
-    void request(String callId, int numMessages);
-
-
-    /**
-     * Send a request to a server.
-     * @exception
-     */
-    void send(RpcMessage.Builder rpcMessageBuilder) throws MessagingException;
-
-
-
+    void close(String channelId);
 }

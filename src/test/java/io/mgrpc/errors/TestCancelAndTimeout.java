@@ -7,7 +7,7 @@ import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.stub.ServerCallStreamObserver;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
-import io.mgrpc.mqtt.MqttChannelConduitManager;
+import io.mgrpc.mqtt.MqttChannelConduit;
 import io.mgrpc.mqtt.MqttServerConduit;
 import io.mgrpc.mqtt.MqttUtils;
 import io.mgrpc.utils.StatusObserver;
@@ -67,7 +67,7 @@ public class TestCancelAndTimeout {
         //Set up the server
         server = new MessageServer(new MqttServerConduit(serverMqtt, SERVER));
         server.start();
-        messageChannel = new MessageChannel(new MqttChannelConduitManager(clientMqtt));
+        messageChannel = new MessageChannel(new MqttChannelConduit(clientMqtt));
         messageChannel.start();
         channel = ClientInterceptors.intercept(messageChannel, new TopicInterceptor(SERVER));
     }
@@ -332,7 +332,7 @@ public class TestCancelAndTimeout {
         messageChannel.close();
         //Make a channel with queue size 10
         messageChannel = new MessageChannelBuilder()
-                .conduitManager(new MqttChannelConduitManager(serverMqtt))
+                .conduit(new MqttChannelConduit(serverMqtt))
                 .queueSize(10).build();
         messageChannel.start();
         channel = ClientInterceptors.intercept(messageChannel, new TopicInterceptor(SERVER));

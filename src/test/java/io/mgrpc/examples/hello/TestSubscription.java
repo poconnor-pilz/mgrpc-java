@@ -8,7 +8,7 @@ import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
 import io.mgrpc.messaging.MessagingException;
-import io.mgrpc.mqtt.MqttChannelConduitManager;
+import io.mgrpc.mqtt.MqttChannelConduit;
 import io.mgrpc.mqtt.MqttServerConduit;
 import io.mgrpc.mqtt.MqttUtils;
 import io.mgrpc.utils.ToList;
@@ -38,7 +38,7 @@ public class TestSubscription {
     Channel channel;
     private MessageServer server;
 
-    private MqttChannelConduitManager channelConduit;
+    private MqttChannelConduit channelConduit;
 
     //Make server name short but random to prevent stray status messages from previous tests affecting this test
     private static final String SERVER = Id.shortRandom();
@@ -68,9 +68,9 @@ public class TestSubscription {
         server = new MessageServer(new MqttServerConduit(serverMqtt, SERVER));
         server.start();
 
-        channelConduit = new MqttChannelConduitManager(clientMqtt);
+        channelConduit = new MqttChannelConduit(clientMqtt);
 
-        baseChannel = new MessageChannel(new MqttChannelConduitManager(clientMqtt));
+        baseChannel = new MessageChannel(new MqttChannelConduit(clientMqtt));
         baseChannel.start();
 
         channel = ClientInterceptors.intercept(baseChannel, new TopicInterceptor(SERVER));

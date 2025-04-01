@@ -8,7 +8,7 @@ import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
-import io.mgrpc.mqtt.MqttChannelConduitManager;
+import io.mgrpc.mqtt.MqttChannelConduit;
 import io.mgrpc.mqtt.MqttServerConduit;
 import io.mgrpc.mqtt.MqttUtils;
 import io.mgrpc.utils.StatusObserver;
@@ -68,7 +68,7 @@ public class TestCommsErrors {
         //Make unique server name for each test to prevent stray status messages from previous tests affecting this test
         final String serverName = Id.shortRandom();
 
-        MessageChannel baseChannel = new MessageChannel(new MqttChannelConduitManager(clientMqtt));
+        MessageChannel baseChannel = new MessageChannel(new MqttChannelConduit(clientMqtt));
         baseChannel.start();
         Channel channel = ClientInterceptors.intercept(baseChannel, new TopicInterceptor(serverName));
 
@@ -92,7 +92,7 @@ public class TestCommsErrors {
         //Make unique server name for each test to prevent stray status messages from previous tests affecting this test
         final String serverName = Id.shortRandom();
 
-        MessageChannel baseChannel = new MessageChannel(new MqttChannelConduitManager(clientMqtt));
+        MessageChannel baseChannel = new MessageChannel(new MqttChannelConduit(clientMqtt));
         baseChannel.start();
         Channel channel = ClientInterceptors.intercept(baseChannel, new TopicInterceptor(serverName));
 
@@ -132,7 +132,7 @@ public class TestCommsErrors {
         //Make unique server name for each test to prevent stray status messages from previous tests affecting this test
         final String serverName = Id.shortRandom();
 
-        MessageChannel baseChannel = new MessageChannel(new MqttChannelConduitManager(clientMqtt));
+        MessageChannel baseChannel = new MessageChannel(new MqttChannelConduit(clientMqtt));
         baseChannel.start();
         Channel channel = ClientInterceptors.intercept(baseChannel, new TopicInterceptor(serverName));
 
@@ -170,7 +170,7 @@ public class TestCommsErrors {
         //Make unique server name for each test to prevent stray status messages from previous tests affecting this test
         final String serverName = Id.shortRandom();
 
-        MessageChannel baseChannel = new MessageChannel(new MqttChannelConduitManager(clientMqtt));
+        MessageChannel baseChannel = new MessageChannel(new MqttChannelConduit(clientMqtt));
         baseChannel.start();
         Channel channel = ClientInterceptors.intercept(baseChannel, new TopicInterceptor(serverName));
 
@@ -218,8 +218,7 @@ public class TestCommsErrors {
         server.start();
         server.addService(listenForCancel);
 
-        MessageChannel baseChannel = new MessageChannelBuilder().channelStatusTopic(channelStatusTopic)
-                .conduitManager(new MqttChannelConduitManager(clientMqtt)).build();
+        MessageChannel baseChannel = new MessageChannel(new MqttChannelConduit(clientMqtt, channelStatusTopic));
         baseChannel.start();
         Channel channel = ClientInterceptors.intercept(baseChannel, new TopicInterceptor(serverName));
 
@@ -273,8 +272,7 @@ public class TestCommsErrors {
         MqttAsyncClient clientMqttWithLwt = MqttUtils.makeClient(channelStatusTopic, channelId, sf);
         MessageChannel baseChannel = new MessageChannelBuilder()
                 .channelId(channelId)
-                .channelStatusTopic(channelStatusTopic)
-                .conduitManager(new MqttChannelConduitManager(clientMqttWithLwt)).build();
+                .conduit(new MqttChannelConduit(clientMqttWithLwt, channelStatusTopic)).build();
 
         baseChannel.start();
         Channel channel = ClientInterceptors.intercept(baseChannel, new TopicInterceptor(serverName));

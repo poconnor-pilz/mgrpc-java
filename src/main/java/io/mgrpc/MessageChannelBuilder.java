@@ -1,13 +1,14 @@
 package io.mgrpc;
 
+import io.mgrpc.messaging.ChannelConduit;
+
 public class MessageChannelBuilder {
-    private ChannelConduitManager conduitManager;
+    private ChannelConduit conduit;
     private String channelId;
     private int queueSize;
-    private String channelStatusTopic;
 
-    public MessageChannelBuilder conduitManager(ChannelConduitManager conduitManager) {
-        this.conduitManager = conduitManager;
+    public MessageChannelBuilder conduit(ChannelConduit conduit) {
+        this.conduit = conduit;
         return this;
     }
 
@@ -21,12 +22,8 @@ public class MessageChannelBuilder {
         return this;
     }
 
-    public MessageChannelBuilder channelStatusTopic(String channelStatusTopic) {
-        this.channelStatusTopic = channelStatusTopic;
-        return this;
-    }
 
     public MessageChannel build() {
-        return new MessageChannel(conduitManager, channelId, queueSize, channelStatusTopic);
+        return new MessageChannel(conduit, channelId, queueSize);
     }
 }

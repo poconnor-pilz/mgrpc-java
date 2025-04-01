@@ -66,7 +66,7 @@ public class TestHelloJms extends TestHelloBase {
         server.start();
         server.addService(new HelloServiceForTest());
         Thread.sleep(1000);
-        baseChannel = new MessageChannel(new JmsChannelConduitManager(clientConnection, true));
+        baseChannel = new MessageChannel(new JmsChannelConduit(clientConnection, true));
         baseChannel.start();
 
         channel = ClientInterceptors.intercept(baseChannel, new TopicInterceptor(serverTopic));

@@ -3,7 +3,7 @@ package io.mgrpc.examples.hello;
 import io.grpc.Channel;
 import io.grpc.ClientInterceptors;
 import io.mgrpc.*;
-import io.mgrpc.mqtt.MqttChannelConduitManager;
+import io.mgrpc.mqtt.MqttChannelConduit;
 import io.mgrpc.mqtt.MqttServerConduit;
 import io.mgrpc.mqtt.MqttUtils;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
@@ -63,7 +63,7 @@ public class TestHelloMqtt extends TestHelloBase {
         server = new MessageServer(new MqttServerConduit(serverMqtt, serverTopic));
         server.start();
         server.addService(new HelloServiceForTest());
-        baseChannel = new MessageChannel(new MqttChannelConduitManager(clientMqtt));
+        baseChannel = new MessageChannel(new MqttChannelConduit(clientMqtt));
         baseChannel.start();
         channel = ClientInterceptors.intercept(baseChannel, new TopicInterceptor(serverTopic));
     }

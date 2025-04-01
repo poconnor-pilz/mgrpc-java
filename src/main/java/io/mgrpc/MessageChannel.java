@@ -4,10 +4,7 @@ import com.google.protobuf.ByteString;
 import com.google.protobuf.MessageLite;
 import io.grpc.*;
 import io.grpc.protobuf.StatusProto;
-import io.mgrpc.messaging.ChannelConduit;
-import io.mgrpc.messaging.ChannelListener;
-import io.mgrpc.messaging.DisconnectListener;
-import io.mgrpc.messaging.MessagingException;
+import io.mgrpc.messaging.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -38,12 +35,11 @@ public class MessageChannel extends Channel implements ChannelListener {
     private static volatile Executor executorSingleton;
 
 
-    private final ChannelConduitManager conduitFactory;
+    private final ChannelConduit conduit;
 
     private final String channelId;
     private final int queueSize;
 
-    private final String channelStatusTopic;
 
 
     private boolean started = false;
@@ -60,16 +56,16 @@ public class MessageChannel extends Channel implements ChannelListener {
 
 
     /**
-     * @param conduitFactory           PubsubClient
+     * @param conduit           PubsubClient
      * @param channelId         The client id for the channel. Should be unique.
      * @param queueSize        The size of the message queue for each call's replies
      */
-    public MessageChannel(ChannelConduitManager conduitFactory, String channelId, int queueSize, String channelStatusTopic) {
+    public MessageChannel(ChannelConduit conduit, String channelId, int queueSize) {
         log.debug("Creating MessageChannel with channelId={} and queueSize={}", channelId, queueSize);
-        if(conduitFactory == null) {
-            throw new NullPointerException("conduitFactory is null");
+        if(conduit == null) {
+            throw new NullPointerException("conduit is null");
         }
-        this.conduitFactory = conduitFactory;
+        this.conduit = conduit;
         if(channelId == null) {
             this.channelId = Id.random();
         } else {
@@ -80,14 +76,13 @@ public class MessageChannel extends Channel implements ChannelListener {
         } else {
             this.queueSize = queueSize;
         }
-        this.channelStatusTopic = channelStatusTopic;
     }
 
     /**
-     * @param conduitFactory      Mqtt client
+     * @param conduit      Mqtt client
      */
-    public MessageChannel(ChannelConduitManager conduitFactory) {
-        this(conduitFactory, Id.random(), DEFAULT_QUEUE_SIZE, null);
+    public MessageChannel(ChannelConduit conduit) {
+        this(conduit, Id.random(), DEFAULT_QUEUE_SIZE);
     }
 
 
@@ -123,8 +118,8 @@ public class MessageChannel extends Channel implements ChannelListener {
 
     }
 
-    ChannelConduit getConduit(String serverTopic){
-        return conduitFactory.getChannelConduitForServer(serverTopic, this);
+    ChannelTopicConduit getConduit(String serverTopic){
+        return conduit.getChannelTopicConduit(serverTopic, this);
     }
 
     /**
@@ -162,13 +157,13 @@ public class MessageChannel extends Channel implements ChannelListener {
 
 
     public void close() {
-        conduitFactory.close(this.channelId, this.channelStatusTopic);
+        conduit.close(this.channelId);
     }
 
 
     @Override
     public <RequestT, ResponseT> ClientCall newCall(MethodDescriptor<RequestT, ResponseT> methodDescriptor, CallOptions callOptions) {
-        MsgClientCall call = new MsgClientCall<>(methodDescriptor, callOptions, conduitFactory.getExecutor(), queueSize);
+        MsgClientCall call = new MsgClientCall<>(methodDescriptor, callOptions, conduit.getExecutor(), queueSize);
         clientCallsById.put(call.getCallId(), call);
 
         return call;
@@ -210,7 +205,7 @@ public class MessageChannel extends Channel implements ChannelListener {
         Deadline effectiveDeadline = null;
         Metadata metadata = null;
 
-        private ChannelConduit conduit;
+        private ChannelTopicConduit topicConduit;
 
         private String serverTopic;
 
@@ -254,7 +249,7 @@ public class MessageChannel extends Channel implements ChannelListener {
             }
 
             //This call may block until conduit is started if it is not started already.
-            this.conduit = getConduit(serverTopic);
+            this.topicConduit = getConduit(serverTopic);
 
 
             this.responseListener = responseListener;
@@ -338,7 +333,7 @@ public class MessageChannel extends Channel implements ChannelListener {
 
             msgBuilder.setStart(start);
             try {
-                conduit.send(msgBuilder);
+                topicConduit.send(msgBuilder);
             } catch (MessagingException ex) {
                 throw new StatusRuntimeException(Status.INTERNAL.withDescription(ex.getMessage()).withCause(ex));
             }
@@ -465,7 +460,7 @@ public class MessageChannel extends Channel implements ChannelListener {
             cancelTimeouts();
             clientExec(() -> responseListener.onClose(status, EMPTY_METADATA));
             clientCallsById.remove(this.callId);
-            conduit.onCallClosed(callId);
+            topicConduit.onCallClosed(callId);
         }
 
         public void cancelTimeouts() {
@@ -481,7 +476,7 @@ public class MessageChannel extends Channel implements ChannelListener {
             //This would be used to send a message to the service to tell it to sent on numMessages
             //But our services will send on messages when they have them (for the moment anyway)
 //            log.debug("request({})", numMessages);
-            conduit.request(callId, numMessages);
+            topicConduit.request(callId, numMessages);
         }
 
         @Override
@@ -551,7 +546,7 @@ public class MessageChannel extends Channel implements ChannelListener {
             final RpcMessage rpcMessage = messageBuilder.build();
             log.debug("Sending {} {} {} to {} ",
                     new Object[]{rpcMessage.getCallId(), rpcMessage.getSequence(), rpcMessage.getMessageCase(), methodDescriptor.getFullMethodName()});
-            conduit.send(messageBuilder);
+            topicConduit.send(messageBuilder);
         }
 
 

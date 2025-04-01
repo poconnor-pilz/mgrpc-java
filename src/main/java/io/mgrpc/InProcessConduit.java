@@ -30,13 +30,13 @@ public class InProcessConduit {
 
     private static volatile Executor executorSingleton;
 
-    private final InprocChannelConduit channelConduit = new InprocChannelConduit();
+    private final InprocChannelTopicConduit channelConduit = new InprocChannelTopicConduit();
 
 
-    public ChannelConduitManager getChannelConduitManager(){
-        return new ChannelConduitManager() {
+    public ChannelConduit getChannelConduit(){
+        return new ChannelConduit() {
             @Override
-            public ChannelConduit getChannelConduitForServer(String serverTopic, ChannelListener channelListener) {
+            public ChannelTopicConduit getChannelTopicConduit(String serverTopic, ChannelListener channelListener) {
                 channelConduit.start(channelListener);
                 return channelConduit;
             }
@@ -45,7 +45,7 @@ public class InProcessConduit {
                 return getExecutorInstance();
             }
             @Override
-            public void close(String channelId, String channelStatusTopic) {}
+            public void close(String channelId) {}
         };
     }
 
@@ -125,7 +125,7 @@ public class InProcessConduit {
 
     }
 
-    private class InprocChannelConduit implements ChannelConduit {
+    private class InprocChannelTopicConduit implements ChannelTopicConduit {
 
         private String channelId;
 

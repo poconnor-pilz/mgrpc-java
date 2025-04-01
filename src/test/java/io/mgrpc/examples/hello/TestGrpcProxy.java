@@ -8,7 +8,7 @@ import io.grpc.stub.StreamObserver;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
 import io.mgrpc.*;
-import io.mgrpc.mqtt.MqttChannelConduitManager;
+import io.mgrpc.mqtt.MqttChannelConduit;
 import io.mgrpc.mqtt.MqttServerConduit;
 import io.mgrpc.mqtt.MqttUtils;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
@@ -59,7 +59,7 @@ public class TestGrpcProxy {
         final Channel httpChannelWithTopic = ClientInterceptors.intercept(httpChannel, new TopicInterceptor(SERVER));
 
         final MqttAsyncClient clientMqttConnection = MqttUtils.makeClient();
-        MessageChannel messageChannel = new MessageChannel(new MqttChannelConduitManager(clientMqttConnection));
+        MessageChannel messageChannel = new MessageChannel(new MqttChannelConduit(clientMqttConnection));
         messageChannel.start();
 
         //We want to wire this:
@@ -136,7 +136,7 @@ public class TestGrpcProxy {
         final String SERVER = Id.shortRandom();
 
         final MqttAsyncClient clientMqttConnection = MqttUtils.makeClient();
-        MessageChannel messageChannel = new MessageChannel(new MqttChannelConduitManager(clientMqttConnection));
+        MessageChannel messageChannel = new MessageChannel(new MqttChannelConduit(clientMqttConnection));
         messageChannel.start();
 
         final Channel messageChannelWithTopic = ClientInterceptors.intercept(messageChannel, new TopicInterceptor(SERVER));

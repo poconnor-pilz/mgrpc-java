@@ -67,7 +67,7 @@ public class TestJmsFlowControl {
         server.start();
 
         //Set up a channel without broker flow control
-        MessageChannel messageChannel = new MessageChannel(new JmsChannelConduitManager(clientConnection, false));
+        MessageChannel messageChannel = new MessageChannel(new JmsChannelConduit(clientConnection, false));
         messageChannel.start();
         Channel channel = ClientInterceptors.intercept(messageChannel, new TopicInterceptor(serverId));
 
@@ -140,7 +140,7 @@ public class TestJmsFlowControl {
 
         //Make a channel with queue size 10 without broker flow control
         MessageChannel messageChannel = new MessageChannelBuilder()
-                .conduitManager(new JmsChannelConduitManager(clientConnection, false))
+                .conduit(new JmsChannelConduit(clientConnection, false))
                 .queueSize(10).build();
         messageChannel.start();
         Channel channel = ClientInterceptors.intercept(messageChannel, new TopicInterceptor(serverId));
@@ -233,7 +233,7 @@ public class TestJmsFlowControl {
         server.start();
 
         //Set up a channel with broker flow control
-        MessageChannel messageChannel = new MessageChannel(new JmsChannelConduitManager(clientConnection, true));
+        MessageChannel messageChannel = new MessageChannel(new JmsChannelConduit(clientConnection, true));
         messageChannel.start();
         Channel channel = ClientInterceptors.intercept(messageChannel, new TopicInterceptor(serverId));
 
@@ -319,7 +319,7 @@ public class TestJmsFlowControl {
         server.start();
 
         //Set up a channel with broker flow control
-        MessageChannel messageChannel = new MessageChannel(new JmsChannelConduitManager(clientConnection, true));
+        MessageChannel messageChannel = new MessageChannel(new JmsChannelConduit(clientConnection, true));
         messageChannel.start();
         Channel channel = ClientInterceptors.intercept(messageChannel, new TopicInterceptor(serverId));
 

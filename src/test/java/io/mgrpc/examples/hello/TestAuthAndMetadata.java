@@ -8,7 +8,7 @@ import io.grpc.stub.StreamObserver;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
 import io.mgrpc.*;
-import io.mgrpc.mqtt.MqttChannelConduitManager;
+import io.mgrpc.mqtt.MqttChannelConduit;
 import io.mgrpc.mqtt.MqttServerConduit;
 import io.mgrpc.mqtt.MqttUtils;
 import org.junit.jupiter.api.Test;
@@ -59,7 +59,7 @@ public class TestAuthAndMetadata {
                 new ServerAuthInterceptor());
         server.addService(serviceWithIntercept);
 
-        MessageChannel messageChannel = new MessageChannel(new MqttChannelConduitManager(MqttUtils.makeClient()));
+        MessageChannel messageChannel = new MessageChannel(new MqttChannelConduit(MqttUtils.makeClient()));
         messageChannel.start();
         Channel channel = ClientInterceptors.intercept(messageChannel, new TopicInterceptor(SERVER));
 

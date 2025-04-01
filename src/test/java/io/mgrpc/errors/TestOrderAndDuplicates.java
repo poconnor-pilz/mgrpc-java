@@ -8,7 +8,7 @@ import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
-import io.mgrpc.mqtt.MqttChannelConduitManager;
+import io.mgrpc.mqtt.MqttChannelConduit;
 import io.mgrpc.mqtt.MqttExceptionLogger;
 import io.mgrpc.mqtt.MqttServerConduit;
 import io.mgrpc.mqtt.MqttUtils;
@@ -214,7 +214,7 @@ public class TestOrderAndDuplicates {
 
         MessageChannel messageChannel = new MessageChannelBuilder()
                 .channelId(channelId)
-                .conduitManager(new MqttChannelConduitManager(clientMqtt)).build();
+                .conduit(new MqttChannelConduit(clientMqtt)).build();
         messageChannel.start();
         Channel channel = ClientInterceptors.intercept(messageChannel, new TopicInterceptor(SERVER));
 

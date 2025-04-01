@@ -2,7 +2,7 @@ package io.mgrpc.examples.hello;
 
 import io.grpc.*;
 import io.mgrpc.*;
-import io.mgrpc.mqtt.MqttChannelConduitManager;
+import io.mgrpc.mqtt.MqttChannelConduit;
 import io.mgrpc.mqtt.MqttServerConduit;
 import io.mgrpc.mqtt.MqttUtils;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
@@ -65,7 +65,7 @@ public class TestHelloGrpcProxy extends TestHelloBase {
         messageServer.start();
         messageServer.addService(new HelloServiceForTest());
 
-        messageChannel = new MessageChannel(new MqttChannelConduitManager(clientMqtt));
+        messageChannel = new MessageChannel(new MqttChannelConduit(clientMqtt));
         messageChannel.start();
 
         GrpcProxy proxy = new GrpcProxy(messageChannel);
