@@ -21,7 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
  * Make a http client and server where the http server proxies calls to the broker and test it
  * httpChannel -> httpServer -> GrpcProxy -> messageChannel -> broker-> messageServer
 */
-public class TestHelloGrpcProxy extends TestHelloBase {
+public class TestHelloGrpcProxyClientSide extends TestHelloBase {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -84,37 +84,7 @@ public class TestHelloGrpcProxy extends TestHelloBase {
 
     }
 
-//    @BeforeEach
-//    void setup() throws Exception{
-//
-//      //This setup is for http clients and servers.
 
-//        //We want to wire this:
-//        //channel -> server -> GrpcProxy -> channel2 -> server2
-//
-//        int port2 = 8982;
-//        Server server2 = ServerBuilder.forPort(port2)
-//                .addService(new HelloServiceForTest())
-//                .build()
-//                .start();
-//
-//        String target2 = "localhost:" + port2;
-//        ManagedChannel channel2 = Grpc.newChannelBuilder(target2, InsecureChannelCredentials.create())
-//                .build();
-//
-//        GrpcProxy2<byte[], byte[]> proxy = new GrpcProxy2<byte[], byte[]>(channel2);
-//
-//        int port1 = 8981;
-//        Server server = Grpc.newServerBuilderForPort(port1, InsecureServerCredentials.create())
-//                .fallbackHandlerRegistry(new GrpcProxy2.Registry(proxy))
-//                .build()
-//                .start();
-//
-//        String target = "localhost:" + port1;
-//        channel = Grpc.newChannelBuilder(target, InsecureChannelCredentials.create())
-//                .build();
-//
-//    }
 
     @AfterEach
     void tearDown() throws Exception{
