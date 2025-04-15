@@ -72,7 +72,6 @@ public class TestErrors {
         server = new MessageServer(new MqttServerConduit(serverMqtt, SERVER));
         server.start();
         messageChannel = new MessageChannel(new MqttChannelConduit(clientMqtt));
-        messageChannel.start();
         channel = ClientInterceptors.intercept(messageChannel, new TopicInterceptor(SERVER));
     }
 

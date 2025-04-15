@@ -60,7 +60,6 @@ public class TestGrpcProxy {
 
         final MqttAsyncClient clientMqttConnection = MqttUtils.makeClient();
         MessageChannel messageChannel = new MessageChannel(new MqttChannelConduit(clientMqttConnection));
-        messageChannel.start();
 
         //We want to wire this:
         //HttpServer -> GrpcProxy -> MqttChannel
@@ -137,7 +136,6 @@ public class TestGrpcProxy {
 
         final MqttAsyncClient clientMqttConnection = MqttUtils.makeClient();
         MessageChannel messageChannel = new MessageChannel(new MqttChannelConduit(clientMqttConnection));
-        messageChannel.start();
 
         final Channel messageChannelWithTopic = ClientInterceptors.intercept(messageChannel, new TopicInterceptor(SERVER));
 

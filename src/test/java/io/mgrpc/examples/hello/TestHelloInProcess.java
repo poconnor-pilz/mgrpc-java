@@ -37,7 +37,6 @@ public class TestHelloInProcess extends TestHelloBase {
         server.start();
         server.addService(new HelloServiceForTest());
         channel = new MessageChannel(conduit.getChannelConduit());
-        channel.start();
     }
 
     @AfterEach

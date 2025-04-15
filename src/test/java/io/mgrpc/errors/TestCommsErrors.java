@@ -69,7 +69,6 @@ public class TestCommsErrors {
         final String serverName = Id.shortRandom();
 
         MessageChannel baseChannel = new MessageChannel(new MqttChannelConduit(clientMqtt));
-        baseChannel.start();
         Channel channel = ClientInterceptors.intercept(baseChannel, new TopicInterceptor(serverName));
 
         StatusObserver statusObserver = new StatusObserver("obs");
@@ -93,8 +92,7 @@ public class TestCommsErrors {
         final String serverName = Id.shortRandom();
 
         MessageChannel baseChannel = new MessageChannel(new MqttChannelConduit(clientMqtt));
-        baseChannel.start();
-        Channel channel = ClientInterceptors.intercept(baseChannel, new TopicInterceptor(serverName));
+         Channel channel = ClientInterceptors.intercept(baseChannel, new TopicInterceptor(serverName));
 
         StatusObserver statusObserver = new StatusObserver("obs");
 
@@ -133,7 +131,6 @@ public class TestCommsErrors {
         final String serverName = Id.shortRandom();
 
         MessageChannel baseChannel = new MessageChannel(new MqttChannelConduit(clientMqtt));
-        baseChannel.start();
         Channel channel = ClientInterceptors.intercept(baseChannel, new TopicInterceptor(serverName));
 
         MqttAsyncClient serverMqttWithLwt = MqttUtils.makeClient();
@@ -171,7 +168,6 @@ public class TestCommsErrors {
         final String serverName = Id.shortRandom();
 
         MessageChannel baseChannel = new MessageChannel(new MqttChannelConduit(clientMqtt));
-        baseChannel.start();
         Channel channel = ClientInterceptors.intercept(baseChannel, new TopicInterceptor(serverName));
 
         final String statusTopic = new ServerTopics(serverName).status;
@@ -219,7 +215,6 @@ public class TestCommsErrors {
         server.addService(listenForCancel);
 
         MessageChannel baseChannel = new MessageChannel(new MqttChannelConduit(clientMqtt, channelStatusTopic));
-        baseChannel.start();
         Channel channel = ClientInterceptors.intercept(baseChannel, new TopicInterceptor(serverName));
 
         final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
@@ -274,7 +269,6 @@ public class TestCommsErrors {
                 .channelId(channelId)
                 .conduit(new MqttChannelConduit(clientMqttWithLwt, channelStatusTopic)).build();
 
-        baseChannel.start();
         Channel channel = ClientInterceptors.intercept(baseChannel, new TopicInterceptor(serverName));
 
         final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);

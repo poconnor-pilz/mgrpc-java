@@ -64,7 +64,6 @@ public class TestHelloMqtt extends TestHelloBase {
         server.start();
         server.addService(new HelloServiceForTest());
         baseChannel = new MessageChannel(new MqttChannelConduit(clientMqtt));
-        baseChannel.start();
         channel = ClientInterceptors.intercept(baseChannel, new TopicInterceptor(serverTopic));
     }
 

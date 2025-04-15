@@ -69,7 +69,6 @@ public class TestHelloGrpcProxyServerSide extends TestHelloBase {
         String target = "localhost:" + port;
 
         messageChannel = new MessageChannel(new MqttChannelConduit(clientMqtt));
-        messageChannel.start();
 
         messageChannelWithTopic = ClientInterceptors.intercept(messageChannel, new TopicInterceptor(SERVER));
 

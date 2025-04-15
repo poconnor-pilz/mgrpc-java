@@ -81,22 +81,6 @@ public class MessageChannel extends Channel implements ChannelListener {
     }
 
 
-
-
-    /**
-     * A client must call init() before using any other methods on the channel.
-     *
-     * @throws StatusException
-     */
-    public void start() throws MessagingException {
-
-        started = true;
-    }
-
-    boolean isStarted(){
-        return started;
-    }
-
     @Override
     public String getChannelId() {
         return this.channelId;
@@ -527,9 +511,6 @@ public class MessageChannel extends Channel implements ChannelListener {
 
         private void send(MethodDescriptor methodDescriptor, RpcMessage.Builder messageBuilder) throws MessagingException {
             //fullMethodName will be e.g. "helloworld.ExampleHelloService/LotsOfReplies"
-            if (!started) {
-                throw new MessagingException("channel.init() was not called");
-            }
             final RpcMessage rpcMessage = messageBuilder.build();
             log.debug("Sending {} {} {} to {} ",
                     new Object[]{rpcMessage.getCallId(), rpcMessage.getSequence(), rpcMessage.getMessageCase(), methodDescriptor.getFullMethodName()});

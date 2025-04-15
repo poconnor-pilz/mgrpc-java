@@ -60,7 +60,6 @@ public class TestAuthAndMetadata {
         server.addService(serviceWithIntercept);
 
         MessageChannel messageChannel = new MessageChannel(new MqttChannelConduit(MqttUtils.makeClient()));
-        messageChannel.start();
         Channel channel = ClientInterceptors.intercept(messageChannel, new TopicInterceptor(SERVER));
 
 

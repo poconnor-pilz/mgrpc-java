@@ -68,7 +68,6 @@ public class TestJmsFlowControl {
 
         //Set up a channel without broker flow control
         MessageChannel messageChannel = new MessageChannel(new JmsChannelConduit(clientConnection, false));
-        messageChannel.start();
         Channel channel = ClientInterceptors.intercept(messageChannel, new TopicInterceptor(serverId));
 
 
@@ -142,7 +141,6 @@ public class TestJmsFlowControl {
         MessageChannel messageChannel = new MessageChannelBuilder()
                 .conduit(new JmsChannelConduit(clientConnection, false))
                 .queueSize(10).build();
-        messageChannel.start();
         Channel channel = ClientInterceptors.intercept(messageChannel, new TopicInterceptor(serverId));
 
         final CountDownLatch serverCancelledLatch = new CountDownLatch(1);
@@ -234,7 +232,6 @@ public class TestJmsFlowControl {
 
         //Set up a channel with broker flow control
         MessageChannel messageChannel = new MessageChannel(new JmsChannelConduit(clientConnection, true));
-        messageChannel.start();
         Channel channel = ClientInterceptors.intercept(messageChannel, new TopicInterceptor(serverId));
 
         final CountDownLatch serviceLatch = new CountDownLatch(1);
@@ -320,7 +317,6 @@ public class TestJmsFlowControl {
 
         //Set up a channel with broker flow control
         MessageChannel messageChannel = new MessageChannel(new JmsChannelConduit(clientConnection, true));
-        messageChannel.start();
         Channel channel = ClientInterceptors.intercept(messageChannel, new TopicInterceptor(serverId));
 
         class ServiceThatTriesToCauseOverflow extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {

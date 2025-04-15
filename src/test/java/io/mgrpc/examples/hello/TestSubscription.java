@@ -71,7 +71,6 @@ public class TestSubscription {
         channelConduit = new MqttChannelConduit(clientMqtt);
 
         baseChannel = new MessageChannel(new MqttChannelConduit(clientMqtt));
-        baseChannel.start();
 
         channel = ClientInterceptors.intercept(baseChannel, new TopicInterceptor(SERVER));
 

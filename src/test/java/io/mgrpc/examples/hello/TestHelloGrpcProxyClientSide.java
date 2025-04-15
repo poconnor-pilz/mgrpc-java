@@ -66,7 +66,6 @@ public class TestHelloGrpcProxyClientSide extends TestHelloBase {
         messageServer.addService(new HelloServiceForTest());
 
         messageChannel = new MessageChannel(new MqttChannelConduit(clientMqtt));
-        messageChannel.start();
 
         GrpcProxy proxy = new GrpcProxy(messageChannel);
 

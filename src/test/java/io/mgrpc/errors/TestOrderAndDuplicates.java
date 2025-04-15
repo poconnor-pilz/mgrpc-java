@@ -215,7 +215,6 @@ public class TestOrderAndDuplicates {
         MessageChannel messageChannel = new MessageChannelBuilder()
                 .channelId(channelId)
                 .conduit(new MqttChannelConduit(clientMqtt)).build();
-        messageChannel.start();
         Channel channel = ClientInterceptors.intercept(messageChannel, new TopicInterceptor(SERVER));
 
 

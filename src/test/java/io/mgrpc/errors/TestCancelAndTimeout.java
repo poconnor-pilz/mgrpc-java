@@ -68,7 +68,6 @@ public class TestCancelAndTimeout {
         server = new MessageServer(new MqttServerConduit(serverMqtt, SERVER));
         server.start();
         messageChannel = new MessageChannel(new MqttChannelConduit(clientMqtt));
-        messageChannel.start();
         channel = ClientInterceptors.intercept(messageChannel, new TopicInterceptor(SERVER));
     }
 
@@ -334,7 +333,6 @@ public class TestCancelAndTimeout {
         messageChannel = new MessageChannelBuilder()
                 .conduit(new MqttChannelConduit(serverMqtt))
                 .queueSize(10).build();
-        messageChannel.start();
         channel = ClientInterceptors.intercept(messageChannel, new TopicInterceptor(SERVER));
 
 
