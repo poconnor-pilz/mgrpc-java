@@ -1,7 +1,5 @@
 package io.mgrpc;
 
-import io.mgrpc.messaging.ChannelConduit;
-
 public class MessageChannelBuilder {
     private ChannelConduit conduit;
     private String channelId;

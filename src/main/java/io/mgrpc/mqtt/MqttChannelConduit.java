@@ -3,13 +3,7 @@ package io.mgrpc.mqtt;
 import com.google.protobuf.Parser;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
-import io.mgrpc.messaging.ChannelConduit;
-import io.mgrpc.messaging.ChannelTopicConduit;
-import io.mgrpc.messaging.ChannelListener;
-import io.mgrpc.messaging.MessagingException;
-import io.mgrpc.messaging.pubsub.BufferToStreamObserver;
-import io.mgrpc.messaging.pubsub.MessageSubscriber;
-import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
+import org.eclipse.paho.client.mqttv3.IMqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
 import org.slf4j.Logger;
@@ -30,7 +24,7 @@ public class MqttChannelConduit implements ChannelConduit, MessageSubscriber {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-    private final MqttAsyncClient client;
+    private final IMqttAsyncClient client;
 
     private final String channelStatusTopic;
 
@@ -77,7 +71,7 @@ public class MqttChannelConduit implements ChannelConduit, MessageSubscriber {
      *                           If this value is null then the conduit will not attempt to publish
      *                           channel status messages.
      **/
-    public MqttChannelConduit(MqttAsyncClient client, String channelStatusTopic) {
+    public MqttChannelConduit(IMqttAsyncClient client, String channelStatusTopic) {
         this.client = client;
         this.channelStatusTopic = channelStatusTopic;
     }
@@ -85,7 +79,7 @@ public class MqttChannelConduit implements ChannelConduit, MessageSubscriber {
     /**
      * @param client The Mqtt client
      **/
-    public MqttChannelConduit(MqttAsyncClient client) {
+    public MqttChannelConduit(IMqttAsyncClient client) {
         this(client, null);
     }
 

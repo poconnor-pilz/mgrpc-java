@@ -1,7 +1,5 @@
-package io.mgrpc.messaging;
+package io.mgrpc;
 
-
-import io.mgrpc.RpcMessage;
 
 /**
  * Interface implemented by the server

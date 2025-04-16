@@ -3,10 +3,7 @@ package io.mgrpc.mqtt;
 import com.google.protobuf.InvalidProtocolBufferException;
 import io.grpc.Status;
 import io.mgrpc.*;
-import io.mgrpc.messaging.MessagingException;
-import io.mgrpc.messaging.ServerConduit;
-import io.mgrpc.messaging.ServerListener;
-import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
+import org.eclipse.paho.client.mqttv3.IMqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
 import org.slf4j.Logger;
@@ -26,7 +23,7 @@ public class MqttServerConduit implements ServerConduit {
 
     private static final com.google.rpc.Status GOOGLE_RPC_OK_STATUS = io.grpc.protobuf.StatusProto.fromStatusAndTrailers(Status.OK, null);
 
-    private final MqttAsyncClient client;
+    private final IMqttAsyncClient client;
     private final static long SUBSCRIBE_TIMEOUT_MILLIS = 5000;
 
     private Map<String, RpcMessage> startMessages = new ConcurrentHashMap<>();
@@ -78,7 +75,7 @@ public class MqttServerConduit implements ServerConduit {
      *                           If this value is null then the conduit will not attempt to subscribe for
      *                           channel status messages.
      */
-    public MqttServerConduit(MqttAsyncClient client, String serverTopic, String channelStatusTopic) {
+    public MqttServerConduit(IMqttAsyncClient client, String serverTopic, String channelStatusTopic) {
         this.client = client;
         this.serverTopics = new ServerTopics(serverTopic);
         this.channelStatusTopic = channelStatusTopic;
@@ -94,7 +91,7 @@ public class MqttServerConduit implements ServerConduit {
      *                    Where if the gRPC fullMethodName is "helloworld.HelloService/SayHello"
      *                    then {slashedFullMethod} is "helloworld/HelloService/SayHello"
      */
-    public MqttServerConduit(MqttAsyncClient client, String serverTopic) {
+    public MqttServerConduit(IMqttAsyncClient client, String serverTopic) {
         this(client, serverTopic, null);
     }
 

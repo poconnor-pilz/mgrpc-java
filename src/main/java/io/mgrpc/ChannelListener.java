@@ -1,6 +1,4 @@
-package io.mgrpc.messaging;
-
-import io.mgrpc.RpcMessage;
+package io.mgrpc;
 
 /**
  * Interface implemented by the channel

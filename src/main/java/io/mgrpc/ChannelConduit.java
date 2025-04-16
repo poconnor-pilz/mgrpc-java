@@ -1,4 +1,4 @@
-package io.mgrpc.messaging;
+package io.mgrpc;
 
 import java.util.concurrent.Executor;
 

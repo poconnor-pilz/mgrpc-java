@@ -7,7 +7,6 @@ import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
-import io.mgrpc.messaging.MessagingException;
 import io.mgrpc.mqtt.MqttChannelConduit;
 import io.mgrpc.mqtt.MqttServerConduit;
 import io.mgrpc.mqtt.MqttUtils;

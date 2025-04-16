@@ -6,7 +6,7 @@
 
 plugins {
     id 'java-library'
-    id "com.google.protobuf" version "0.8.19"
+    id "com.google.protobuf" version "0.9.5"
     id 'maven-publish'
 }
 
@@ -18,7 +18,7 @@ repositories {
     mavenCentral()
 }
 
-def grpcVersion = '1.47.0'
+def grpcVersion = '1.72.0'
 
 dependencies {
 
@@ -27,13 +27,20 @@ dependencies {
     implementation group: 'ch.qos.logback', name: 'logback-classic', version: '0.9.26'
 
 
-    implementation group: 'com.google.protobuf', name: 'protobuf-java', version: '3.21.2'
+    implementation group: 'com.google.protobuf', name: 'protobuf-java', version: '4.30.2'
     //For StatusException and Status
     implementation group: 'io.grpc', name: 'grpc-api', version: grpcVersion
     //For StreamObserver
     implementation group: 'io.grpc', name: 'grpc-stub', version: grpcVersion
     //For errors using com.google.rpc.Status
     implementation group: 'io.grpc', name: 'grpc-protobuf', version: grpcVersion
+
+    //mqtt support
+    implementation group: 'org.eclipse.paho', name: 'org.eclipse.paho.client.mqttv3', version: '1.2.5'
+
+    //JMS support
+    implementation group:"org.apache.activemq", name: "artemis-jms-client", version: "2.29.0"
+
 
     //Need this because grpc will generate code that has annotations from javax.annotation (@generated)
     if (JavaVersion.current().isJava9Compatible()) {
@@ -53,8 +60,9 @@ dependencies {
     //For tests that use https server (as opposed to inprocess server)
     testImplementation group: "io.grpc", name: "grpc-netty", version: grpcVersion
 
-    //For tests that use mqtt
-    testImplementation group: 'org.eclipse.paho', name: 'org.eclipse.paho.client.mqttv3', version: '1.2.5'
+    //For tests that use inprocess
+    testImplementation group: "io.grpc", name: "grpc-inprocess", version: grpcVersion
+
 
     //For TestAuth
     testImplementation group: 'io.jsonwebtoken', name: 'jjwt', version: '0.9.1'
@@ -65,8 +73,6 @@ dependencies {
     testImplementation group:"org.apache.activemq", name: "artemis-server", version: "2.29.0"
     testImplementation group:"org.apache.activemq", name: "artemis-mqtt-protocol", version: "2.29.0"
 
-    //For JMS test
-    testImplementation group:"org.apache.activemq", name: "artemis-jms-client", version: "2.29.0"
 }
 
 //Tell gradle and intellij about where the generated proto java files are
@@ -95,6 +101,19 @@ jar {
     includeEmptyDirs false
 }
 
+//Make it possible to publish sources to maven repo.
+task sourceJar(type: Jar) {
+    archiveClassifier = 'sources'
+    from sourceSets.main.allJava
+}
+//Do this or else gradle will fail to  build with the error:
+//Task ':sourceJar' uses this output of task ':generateProto' without declaring an explicit or implicit dependency.
+//This can lead to incorrect results being produced, depending on what order the tasks are executed.
+afterEvaluate {
+    sourceJar.dependsOn tasks.generateProto
+}
+
+
 publishing {
     repositories {
         mavenLocal()
@@ -102,13 +121,16 @@ publishing {
     publications {
         mavenJava(MavenPublication) {
             from components.java
+            artifact sourceJar
         }
     }
 }
 
+//Configuration for the com.google.protobuf gradle plugin
 protobuf {
+    //This will pull down the protoc compiler from maven so there is no need to install it separately
     protoc {
-        artifact = 'com.google.protobuf:protoc:3.12.2'
+        artifact = 'com.google.protobuf:protoc:4.30.2'
     }
 
     plugins {
@@ -123,7 +145,7 @@ protobuf {
     }
 }
 
-//only necessary if protoc is not on path
+//only necessary if protoc is not on path and if the maven protoc compiler is not being used.
 //protobuf {
 //    protoc {
 //        path = 'c:/bin/protoc/bin/protoc'

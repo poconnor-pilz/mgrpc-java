@@ -1,6 +1,4 @@
-package io.mgrpc.messaging;
-
-import io.mgrpc.RpcMessage;
+package io.mgrpc;
 
 /**
  * Interface to messaging client. Adapters should implement this to work with different message protocols.

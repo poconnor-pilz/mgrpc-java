@@ -3,9 +3,6 @@ package io.mgrpc.jms;
 import com.google.protobuf.InvalidProtocolBufferException;
 import io.grpc.Status;
 import io.mgrpc.*;
-import io.mgrpc.messaging.MessagingException;
-import io.mgrpc.messaging.ServerConduit;
-import io.mgrpc.messaging.ServerListener;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

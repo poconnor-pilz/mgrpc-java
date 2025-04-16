@@ -3,10 +3,7 @@ package io.mgrpc.mqtt;
 import com.google.protobuf.InvalidProtocolBufferException;
 import io.grpc.Status;
 import io.mgrpc.*;
-import io.mgrpc.messaging.ChannelTopicConduit;
-import io.mgrpc.messaging.ChannelListener;
-import io.mgrpc.messaging.MessagingException;
-import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
+import org.eclipse.paho.client.mqttv3.IMqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
 import org.slf4j.Logger;
@@ -58,7 +55,7 @@ public class MqttChannelTopicConduit implements ChannelTopicConduit {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-    private final MqttAsyncClient client;
+    private final IMqttAsyncClient client;
     private final static long SUBSCRIBE_TIMEOUT_MILLIS = 5000;
 
     private static final com.google.rpc.Status GOOGLE_RPC_OK_STATUS = io.grpc.protobuf.StatusProto.fromStatusAndTrailers(Status.OK, null);
@@ -106,7 +103,7 @@ public class MqttChannelTopicConduit implements ChannelTopicConduit {
      *                           If this value is null then the conduit will not attempt to send
      *                           channel status messages.
      */
-    public MqttChannelTopicConduit(MqttAsyncClient client, String serverTopic, String channelStatusTopic) {
+    public MqttChannelTopicConduit(IMqttAsyncClient client, String serverTopic, String channelStatusTopic) {
         this.client = client;
         this.serverTopics = new ServerTopics(serverTopic);
         this.channelStatusTopic = channelStatusTopic;
@@ -122,7 +119,7 @@ public class MqttChannelTopicConduit implements ChannelTopicConduit {
      *                    Where if the gRPC fullMethodName is "helloworld.HelloService/SayHello"
      *                    then {slashedFullMethod} is "helloworld/HelloService/SayHello"
      */
-    public MqttChannelTopicConduit(MqttAsyncClient client, String serverTopic) {
+    public MqttChannelTopicConduit(IMqttAsyncClient client, String serverTopic) {
         this(client, serverTopic, null);
     }
 

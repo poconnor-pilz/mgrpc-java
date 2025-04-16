@@ -1,4 +1,4 @@
-package io.mgrpc.messaging;
+package io.mgrpc;
 
 public class MessagingException extends Exception{
 
