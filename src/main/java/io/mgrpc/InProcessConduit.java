@@ -21,36 +21,15 @@ public class InProcessConduit {
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
     private final Map<String, ChannelListener> channelsById = new ConcurrentHashMap<>();
-    private ServerListener server;
 
-    private final ServerConduit serverConduit = new InprocServerConduit();
+    private final Map<String, InprocServerConduit> serverConduits = new ConcurrentHashMap<>();
+    private final Map<String, InprocChannelTopicConduit> channelTopicConduits = new ConcurrentHashMap<>();
 
     private final Map<String, String> callIdToChannelIdMap = new ConcurrentHashMap<>();
 
     private static volatile Executor executorSingleton;
 
-    private final InprocChannelTopicConduit channelConduit = new InprocChannelTopicConduit();
 
-
-    public ChannelConduit getChannelConduit(){
-        return new ChannelConduit() {
-            @Override
-            public ChannelTopicConduit getChannelTopicConduit(String serverTopic, ChannelListener channelListener) {
-                channelConduit.start(channelListener);
-                return channelConduit;
-            }
-            @Override
-            public Executor getExecutor() {
-                return getExecutorInstance();
-            }
-            @Override
-            public void close(String channelId) {}
-        };
-    }
-
-    public ServerConduit getServerConduit(){
-        return serverConduit;
-    }
 
     private static Executor getExecutorInstance() {
         if (executorSingleton == null) {
@@ -74,17 +53,55 @@ public class InProcessConduit {
         return executorSingleton;
     }
 
+    private static final InProcessConduit instance = new InProcessConduit();
+
+    private InProcessConduit() {}
+
+    public static InProcessConduit getInstance() {
+        return instance;
+    }
+
+    private final ChannelConduit channelConduit = new ChannelConduit() {
+        @Override
+        public ChannelTopicConduit getChannelTopicConduit(String serverTopic, ChannelListener channelListener) {
+            InprocChannelTopicConduit inprocChannelTopicConduit = channelTopicConduits.get(serverTopic);
+            if(inprocChannelTopicConduit == null) {
+                inprocChannelTopicConduit = new InprocChannelTopicConduit(serverTopic);
+                channelTopicConduits.put(serverTopic, inprocChannelTopicConduit);
+                inprocChannelTopicConduit.start(channelListener);
+            }
+            return inprocChannelTopicConduit;
+        }
+        @Override
+        public Executor getExecutor() {
+            return getExecutorInstance();
+        }
+        @Override
+        public void close(String channelId) {}
+    };
+
+
+    public ChannelConduit getChannelConduit(){
+      return this.channelConduit;
+    }
+
+    public ServerConduit getServerConduit(String serverTopic){
+        InprocServerConduit serverConduit = serverConduits.get(serverTopic);
+        if(serverConduit == null) {
+            serverConduit = new InprocServerConduit();
+            serverConduits.put(serverTopic, serverConduit);
+        }
+        return serverConduit;
+    }
+
+
     private class InprocServerConduit implements ServerConduit {
 
+        public ServerListener server;
 
         @Override
         public void start(ServerListener server) throws MessagingException {
-            if(InProcessConduit.this.server != null){
-                String err = "InProcessConduit instance can only be associated with one Server";
-                log.error(err);
-                throw new MessagingException(err);
-            }
-            InProcessConduit.this.server = server;
+            this.server = server;
         }
 
         @Override
@@ -128,6 +145,12 @@ public class InProcessConduit {
 
         private String channelId;
 
+        private final String serverTopic;
+
+        private InprocChannelTopicConduit(String serverTopic) {
+            this.serverTopic = serverTopic;
+        }
+
         @Override
         public void start(ChannelListener channel) {
             if(this.channelId == null) {
@@ -152,7 +175,15 @@ public class InProcessConduit {
             if(rpcMessageBuilder.hasStart()){
                 callIdToChannelIdMap.put(rpcMessageBuilder.getCallId(), rpcMessageBuilder.getStart().getChannelId());
             }
-            server.onMessage(rpcMessageBuilder.build());
+
+            final InprocServerConduit inprocServerConduit = serverConduits.get(this.serverTopic);
+            if(inprocServerConduit == null) {
+                throw new RuntimeException("Server conduit " + this.serverTopic + " does not exist");
+            }
+            if(inprocServerConduit.server == null) {
+                throw new RuntimeException("Server not set for topic " + this.serverTopic);
+            }
+            inprocServerConduit.server.onMessage(rpcMessageBuilder.build());
         }
 
     }

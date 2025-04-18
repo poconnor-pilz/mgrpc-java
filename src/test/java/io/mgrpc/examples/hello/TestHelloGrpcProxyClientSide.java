@@ -1,7 +1,10 @@
 package io.mgrpc.examples.hello;
 
 import io.grpc.*;
-import io.mgrpc.*;
+import io.mgrpc.EmbeddedBroker;
+import io.mgrpc.GrpcProxy;
+import io.mgrpc.MessageChannel;
+import io.mgrpc.MessageServer;
 import io.mgrpc.mqtt.MqttChannelConduit;
 import io.mgrpc.mqtt.MqttServerConduit;
 import io.mgrpc.mqtt.MqttUtils;
@@ -15,8 +18,6 @@ import org.slf4j.LoggerFactory;
 
 import java.lang.invoke.MethodHandles;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-
 /**
  * Make a http client and server where the http server proxies calls to the broker and test it
  * httpChannel -> httpServer -> GrpcProxy -> messageChannel -> broker-> messageServer
@@ -28,14 +29,11 @@ public class TestHelloGrpcProxyClientSide extends TestHelloBase {
     private static MqttAsyncClient serverMqtt;
     private static MqttAsyncClient clientMqtt;
 
-    //Make server name short but random to prevent stray status messages from previous tests affecting this test
-    private static final String SERVER = Id.shortRandom();
 
     MessageChannel messageChannel;
-    MessageServer messageServer;
+    ManagedChannel httpChannel;
     Server httpServer;
 
-    Channel interceptedHttpChannel;
 
     @BeforeAll
     public static void startClients() throws Exception {
@@ -61,10 +59,6 @@ public class TestHelloGrpcProxyClientSide extends TestHelloBase {
         //We want to wire this:
         //httpChannel -> httpServer -> GrpcProxy -> messageChannel -> broker-> messageServer
 
-        messageServer = new MessageServer(new MqttServerConduit(serverMqtt, SERVER));
-        messageServer.start();
-        messageServer.addService(new HelloServiceForTest());
-
         messageChannel = new MessageChannel(new MqttChannelConduit(clientMqtt));
 
         GrpcProxy proxy = new GrpcProxy(messageChannel);
@@ -76,19 +70,17 @@ public class TestHelloGrpcProxyClientSide extends TestHelloBase {
                 .start();
 
         String target = "localhost:" + port1;
-        Channel httpChannel = Grpc.newChannelBuilder(target, InsecureChannelCredentials.create())
+        httpChannel = Grpc.newChannelBuilder(target, InsecureChannelCredentials.create())
                 .build();
 
-        interceptedHttpChannel = ClientInterceptors.intercept(httpChannel, new TopicInterceptor(SERVER));
 
     }
 
 
-
     @AfterEach
     void tearDown() throws Exception{
+        httpChannel.shutdownNow();
         messageChannel.close();
-        messageServer.close();
         httpServer.shutdownNow();
         httpServer.awaitTermination();
     }
@@ -96,12 +88,19 @@ public class TestHelloGrpcProxyClientSide extends TestHelloBase {
 
     @Override
     public Channel getChannel() {
-        return interceptedHttpChannel;
+        return httpChannel;
     }
 
+
     @Override
-    public void checkNumActiveCalls(int numActiveCalls) {
-        assertEquals(messageServer.getStats().getActiveCalls(), numActiveCalls);
-        assertEquals(messageChannel.getStats().getActiveCalls(), numActiveCalls);
+    public int getChannelActiveCalls() {
+        return this.messageChannel.getStats().getActiveCalls();
     }
+
+    public MessageServer makeMessageServer(String serverTopic) throws Exception {
+        MessageServer server  = new MessageServer(new MqttServerConduit(serverMqtt, serverTopic));
+        server.start();
+        return server;
+    }
+
 }

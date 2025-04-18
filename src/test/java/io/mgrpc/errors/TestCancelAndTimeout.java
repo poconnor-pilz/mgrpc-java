@@ -1,6 +1,9 @@
 package io.mgrpc.errors;
 
-import io.grpc.*;
+import io.grpc.Channel;
+import io.grpc.Context;
+import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
 import io.grpc.examples.helloworld.ExampleHelloServiceGrpc;
 import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
@@ -68,7 +71,7 @@ public class TestCancelAndTimeout {
         server = new MessageServer(new MqttServerConduit(serverMqtt, SERVER));
         server.start();
         messageChannel = new MessageChannel(new MqttChannelConduit(clientMqtt));
-        channel = ClientInterceptors.intercept(messageChannel, new TopicInterceptor(SERVER));
+        channel = TopicInterceptor.intercept(messageChannel, SERVER);
     }
 
     @AfterEach
@@ -333,7 +336,7 @@ public class TestCancelAndTimeout {
         messageChannel = new MessageChannelBuilder()
                 .conduit(new MqttChannelConduit(serverMqtt))
                 .queueSize(10).build();
-        channel = ClientInterceptors.intercept(messageChannel, new TopicInterceptor(SERVER));
+        channel = TopicInterceptor.intercept(messageChannel, SERVER);
 
 
         final CountDownLatch serverCancelledLatch = new CountDownLatch(1);

@@ -1,7 +1,6 @@
 package io.mgrpc.examples.hello;
 
 import io.grpc.Channel;
-import io.mgrpc.Id;
 import io.mgrpc.InProcessConduit;
 import io.mgrpc.MessageChannel;
 import io.mgrpc.MessageServer;
@@ -12,36 +11,23 @@ import org.slf4j.LoggerFactory;
 
 import java.lang.invoke.MethodHandles;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-
 
 public class TestHelloInProcess extends TestHelloBase {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
     MessageChannel channel;
-    MessageServer server;
 
-
-    //Make server name short but random to prevent stray status messages from previous tests affecting this test
-    private static final String SERVER = Id.shortRandom();
-
-    private static final long REQUEST_TIMEOUT = 2000;
 
     @BeforeEach
     void setup() throws Exception{
 
         //Set up the serverb
-        InProcessConduit conduit = new InProcessConduit();
-        server = new MessageServer(conduit.getServerConduit());
-        server.start();
-        server.addService(new HelloServiceForTest());
-        channel = new MessageChannel(conduit.getChannelConduit());
+        channel = new MessageChannel(InProcessConduit.getInstance().getChannelConduit());
     }
 
     @AfterEach
     void tearDown() throws Exception{
-        server.close();
         channel.close();
     }
 
@@ -51,11 +37,16 @@ public class TestHelloInProcess extends TestHelloBase {
         return this.channel;
     }
 
-
-
     @Override
-    public void checkNumActiveCalls(int numActiveCalls) {
-        assertEquals(numActiveCalls, this.channel.getStats().getActiveCalls());
-        assertEquals(numActiveCalls, this.server.getStats().getActiveCalls());
+    public int getChannelActiveCalls() {
+        return this.channel.getStats().getActiveCalls();
     }
+
+    public MessageServer makeMessageServer(String serverTopic) throws Exception {
+        MessageServer server = new MessageServer(InProcessConduit.getInstance().getServerConduit(serverTopic));
+        server.start();
+        return server;
+    }
+
+
 }

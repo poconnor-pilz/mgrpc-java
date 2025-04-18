@@ -46,12 +46,13 @@ service ExampleHelloService {
 
 // The request message containing the user's name.
 message HelloRequest {
-  string name = 2;
+  string name = 1;
+  int32 numResponses = 2;
 }
 
 // The response message containing the greetings
 message HelloReply {
-  string message = 2;
+  string message = 1;
 }
 
 //Example rich error

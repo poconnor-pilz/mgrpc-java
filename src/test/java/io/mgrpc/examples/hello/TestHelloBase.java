@@ -9,8 +9,10 @@ import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.inprocess.InProcessChannelBuilder;
 import io.grpc.inprocess.InProcessServerBuilder;
 import io.grpc.stub.StreamObserver;
-import io.mgrpc.NoopStreamObserver;
+import io.mgrpc.Id;
+import io.mgrpc.MessageServer;
 import io.mgrpc.StreamWaiter;
+import io.mgrpc.TopicInterceptor;
 import io.mgrpc.utils.ToList;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
@@ -23,6 +25,7 @@ import java.util.concurrent.TimeUnit;
 
 import static java.lang.Thread.sleep;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 
 public abstract class TestHelloBase {
@@ -33,91 +36,178 @@ public abstract class TestHelloBase {
     private static final long REQUEST_TIMEOUT = 2000;
 
 
-    public void checkForLeaks(int numActiveCalls) {
 
-        try {
-            //Give the channel and server time to process messages and release resources
-            Thread.sleep(50);
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
-        }
-
-        checkNumActiveCalls(numActiveCalls);
-    }
 
     public abstract Channel getChannel();
 
 
-    public abstract void checkNumActiveCalls(int numActiveCalls);
+
+    public int getChannelActiveCalls() {
+        return 0;
+    }
+
+    public abstract MessageServer makeMessageServer(String serverTopic) throws Exception;
 
     @Test
-    public void testSayHello() {
-        final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub blockingStub = ExampleHelloServiceGrpc.newBlockingStub(getChannel())
+    public void testSayHello() throws Exception {
+
+        String serverTopic = "mgrpc/" + Id.shortRandom();
+        Channel channel = TopicInterceptor.intercept(getChannel(), serverTopic);
+        MessageServer server = makeMessageServer(serverTopic);
+        server.addService(new HelloServiceForTest());
+
+        final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub blockingStub = ExampleHelloServiceGrpc.newBlockingStub(channel)
                 .withDeadlineAfter(REQUEST_TIMEOUT, TimeUnit.MILLISECONDS);
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
         final HelloReply helloReply = blockingStub.sayHello(joe);
         assertEquals("Hello joe", helloReply.getMessage());
-        checkForLeaks(0);
+
+        //Check for leaks
+        Thread.sleep(50); //Give close() threads a chance to complete
+        assertEquals(0, server.getStats().getActiveCalls());
+        assertEquals(0, getChannelActiveCalls());
+        server.close();
     }
+
 
 
     @Test
     public void testLotsOfReplies() throws Throwable {
 
-        final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub stub = ExampleHelloServiceGrpc
-                .newBlockingStub(getChannel())
-                .withDeadlineAfter(REQUEST_TIMEOUT, TimeUnit.MILLISECONDS);
-        HelloRequest twoReplies = HelloRequest.newBuilder().setName("2").build();
-        List<HelloReply> responseList = ToList.toList(stub.lotsOfReplies(twoReplies));
-        assertEquals(responseList.size(), 2);
-        assertEquals("Hello 0", responseList.get(0).getMessage());
-        assertEquals("Hello 1", responseList.get(1).getMessage());
-        checkForLeaks(0);
+        String serverTopic = "mgrpc/" + Id.shortRandom();
+        MessageServer server = runtLotsOfReplies(getChannel(), serverTopic, "somename");
+        Thread.sleep(50); //Give close() threads a chance to complete
+        assertEquals(0, server.getStats().getActiveCalls());
+        assertEquals(0, getChannelActiveCalls());
+        server.close();
     }
 
+
+    @Test
+    public void testLotsOfReplies2Servers() throws Throwable {
+
+        //Verify that messages get dispatched and returned correctly to two
+        //different servers on two different topics via one base channel
+        Channel channel = getChannel();
+        String serverTopic = "mgrpc/" + Id.shortRandom();
+        MessageServer server = runtLotsOfReplies(channel, serverTopic, "somename1");
+        String serverTopic2 = "mgrpc/" + Id.shortRandom();
+        MessageServer server2 = runtLotsOfReplies(channel, serverTopic2, "somename2");
+        Thread.sleep(50); //Give close() threads a chance to complete
+        assertEquals(0, server.getStats().getActiveCalls());
+        assertEquals(0, server2.getStats().getActiveCalls());
+        assertEquals(0, getChannelActiveCalls());
+        server.close();
+    }
+
+    public MessageServer runtLotsOfReplies(Channel baseChannel, String serverTopic, String name) throws Throwable {
+
+        Channel channel = TopicInterceptor.intercept(baseChannel, serverTopic);
+        MessageServer server = makeMessageServer(serverTopic);
+        server.addService(new HelloServiceForTest());
+
+        final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub stub = ExampleHelloServiceGrpc
+                .newBlockingStub(channel)
+                .withDeadlineAfter(REQUEST_TIMEOUT, TimeUnit.MILLISECONDS);
+        HelloRequest twoReplies = HelloRequest.newBuilder()
+                .setName(name)
+                .setNumResponses(2)
+                .build();
+        List<HelloReply> responseList = ToList.toList(stub.lotsOfReplies(twoReplies));
+        assertEquals(responseList.size(), 2);
+        assertEquals("Hello " + name + " 0", responseList.get(0).getMessage());
+        assertEquals("Hello " + name + " 1", responseList.get(1).getMessage());
+
+        return server;
+    }
 
     @Test
     public void testParallelReplies() throws Throwable {
 
-        //This test doesn't check anything except leaks.
-        //It just runs calls in parallel. Sometimes it may show up a concurrency bug.
+        //This test runs calls in parallel and checks that messages are received in order
+        //Sometimes it may show up a concurrency bug by freezing or timing out.
 
-        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(getChannel());
+        String serverTopic = "mgrpc/" + Id.shortRandom();
+        Channel channel = TopicInterceptor.intercept(getChannel(), serverTopic);
+        MessageServer server = makeMessageServer(serverTopic);
+        server.addService(new HelloServiceForTest());
+        String serverTopic2 = "mgrpc/" + Id.shortRandom();
+        Channel channel2 = TopicInterceptor.intercept(getChannel(), serverTopic2);
+        MessageServer server2 = makeMessageServer(serverTopic2);
+        server2.addService(new HelloServiceForTest());
+
+        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
+        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub2 = ExampleHelloServiceGrpc.newStub(channel2);
         //Tell lotsOfReplies to reply 10 times
-        HelloRequest tenTimes = HelloRequest.newBuilder().setName("10").build();
-        int numRequests = 100;
-        final CountDownLatch latch = new CountDownLatch(numRequests);
-        for (int i = 0; i < numRequests; i++) {
-            final int index = i;
-            stub.lotsOfReplies(tenTimes, new NoopStreamObserver<HelloReply>() {
-                @Override
-                public void onNext(HelloReply value) {
-                    log.debug(index + " - " + value.getMessage());
-                    try {
-                        sleep(100);
-                    } catch (InterruptedException e) {
-                        throw new RuntimeException(e);
-                    }
-                }
+        HelloRequest tenTimes = HelloRequest.newBuilder()
+                .setNumResponses(10)
+                .setName("Joe").build();
+        int numRequests = 50;
+        final CountDownLatch latch = new CountDownLatch(numRequests * 2);
+        final boolean [] messagesInOrder =  {true};
 
-                @Override
-                public void onCompleted() {
-                    latch.countDown();
+        class ParObserver implements StreamObserver<HelloReply> {
+
+            private int count = 0;
+            @Override
+            public void onNext(HelloReply value) {
+                if(!value.getMessage().equals("Hello Joe " + count)){
+                    messagesInOrder[0] = false;
                 }
-            });
+                count++;
+                try {
+                    sleep(100);
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+            @Override
+            public void onError(Throwable throwable) {}
+            @Override
+            public void onCompleted() {
+                latch.countDown();
+            }
         }
 
+
+        Thread t1 = new Thread(() -> {
+            for (int i = 0; i < numRequests; i++) {
+                stub.lotsOfReplies(tenTimes, new ParObserver());
+            }
+
+        });
+        Thread t2 = new Thread(() -> {
+            for (int i = 0; i < numRequests; i++) {
+                stub2.lotsOfReplies(tenTimes, new ParObserver());
+            }
+        });
+
+        t1.start();
+        t2.start();
+
         latch.await();
-        checkForLeaks(0);
+
+        assertTrue(messagesInOrder[0], "Messages were not received in order");
+
+        //Check for leaks
+        Thread.sleep(50); //Give close() threads a chance to complete
+        assertEquals(0, server.getStats().getActiveCalls());
+        assertEquals(0, server2.getStats().getActiveCalls());
+        assertEquals(0, getChannelActiveCalls());
+        server.close();
+        server2.close();
     }
 
 
     @Test
-    public void testLotsOfGreetings() {
+    public void testLotsOfGreetings() throws Exception {
 
-        log.debug("testLotsOfGreetings");
-        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(getChannel());
+        String serverTopic = "mgrpc/" + Id.shortRandom();
+        Channel channel = TopicInterceptor.intercept(getChannel(), serverTopic);
+        MessageServer server = makeMessageServer(serverTopic);
+        server.addService(new HelloServiceForTest());
 
+        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
         HelloRequest jane = HelloRequest.newBuilder().setName("jane").build();
         HelloRequest john = HelloRequest.newBuilder().setName("john").build();
@@ -129,14 +219,23 @@ public abstract class TestHelloBase {
         clientStreamObserver.onCompleted();
         final HelloReply reply = waiter.getSingle();
         assertEquals("Hello joe,jane,john,", reply.getMessage());
-        checkForLeaks(0);
+        //Check for leaks
+        Thread.sleep(50); //Give close() threads a chance to complete
+        assertEquals(0, server.getStats().getActiveCalls());
+        assertEquals(0, getChannelActiveCalls());
+        server.close();
     }
 
 
     @Test
     public void testBidiHello() throws Throwable {
 
-        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(getChannel());
+        String serverTopic = "mgrpc/" + Id.shortRandom();
+        Channel channel = TopicInterceptor.intercept(getChannel(), serverTopic);
+        MessageServer server = makeMessageServer(serverTopic);
+        server.addService(new HelloServiceForTest());
+
+        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
 
         class TestHelloReplyObserver implements StreamObserver<HelloReply> {
             public HelloReply lastReply;
@@ -173,7 +272,11 @@ public abstract class TestHelloBase {
         replyObserver.latch = new CountDownLatch(1);
         clientStreamObserver.onCompleted();
         replyObserver.latch.await(10, TimeUnit.SECONDS);
-        checkForLeaks(0);
+        //Check for leaks
+        Thread.sleep(50); //Give close() threads a chance to complete
+        assertEquals(0, server.getStats().getActiveCalls());
+        assertEquals(0, getChannelActiveCalls());
+        server.close();
     }
 
 
@@ -196,7 +299,6 @@ public abstract class TestHelloBase {
 
         channel.shutdown();
         server.shutdown();
-        checkForLeaks(0);
     }
 
 

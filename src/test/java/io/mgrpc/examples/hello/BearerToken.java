@@ -13,7 +13,7 @@ public class BearerToken extends CallCredentials{
     public static final Metadata.Key<String> AUTHORIZATION_METADATA_KEY = Metadata.Key.of("Authorization", Metadata.ASCII_STRING_MARSHALLER);
 
 
-    private String value;
+    private final String value;
 
     public BearerToken(String value) {
         this.value = value;
@@ -32,8 +32,5 @@ public class BearerToken extends CallCredentials{
         });
     }
 
-    @Override
-    public void thisUsesUnstableApi() {
-        // noop
-    }
+
 }

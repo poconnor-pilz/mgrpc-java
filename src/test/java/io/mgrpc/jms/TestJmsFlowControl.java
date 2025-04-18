@@ -1,7 +1,6 @@
 package io.mgrpc.jms;
 
 import io.grpc.Channel;
-import io.grpc.ClientInterceptors;
 import io.grpc.Status;
 import io.grpc.examples.helloworld.ExampleHelloServiceGrpc;
 import io.grpc.examples.helloworld.HelloReply;
@@ -68,7 +67,7 @@ public class TestJmsFlowControl {
 
         //Set up a channel without broker flow control
         MessageChannel messageChannel = new MessageChannel(new JmsChannelConduit(clientConnection, false));
-        Channel channel = ClientInterceptors.intercept(messageChannel, new TopicInterceptor(serverId));
+        Channel channel = TopicInterceptor.intercept(messageChannel, serverId);
 
 
         final CountDownLatch serviceLatch = new CountDownLatch(1);
@@ -141,7 +140,7 @@ public class TestJmsFlowControl {
         MessageChannel messageChannel = new MessageChannelBuilder()
                 .conduit(new JmsChannelConduit(clientConnection, false))
                 .queueSize(10).build();
-        Channel channel = ClientInterceptors.intercept(messageChannel, new TopicInterceptor(serverId));
+        Channel channel = TopicInterceptor.intercept(messageChannel, serverId);
 
         final CountDownLatch serverCancelledLatch = new CountDownLatch(1);
         class BlockingListenForCancel extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
@@ -232,7 +231,7 @@ public class TestJmsFlowControl {
 
         //Set up a channel with broker flow control
         MessageChannel messageChannel = new MessageChannel(new JmsChannelConduit(clientConnection, true));
-        Channel channel = ClientInterceptors.intercept(messageChannel, new TopicInterceptor(serverId));
+        Channel channel = TopicInterceptor.intercept(messageChannel, serverId);
 
         final CountDownLatch serviceLatch = new CountDownLatch(1);
         class BlockedService extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
@@ -317,7 +316,7 @@ public class TestJmsFlowControl {
 
         //Set up a channel with broker flow control
         MessageChannel messageChannel = new MessageChannel(new JmsChannelConduit(clientConnection, true));
-        Channel channel = ClientInterceptors.intercept(messageChannel, new TopicInterceptor(serverId));
+        Channel channel = TopicInterceptor.intercept(messageChannel, serverId);
 
         class ServiceThatTriesToCauseOverflow extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
             @Override

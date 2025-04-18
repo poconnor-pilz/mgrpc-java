@@ -1,9 +1,9 @@
 package io.mgrpc.jms;
 
 import io.grpc.Channel;
-import io.grpc.ClientInterceptors;
-import io.mgrpc.*;
-import io.mgrpc.examples.hello.HelloServiceForTest;
+import io.mgrpc.EmbeddedBroker;
+import io.mgrpc.MessageChannel;
+import io.mgrpc.MessageServer;
 import io.mgrpc.examples.hello.TestHelloBase;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
@@ -18,8 +18,6 @@ import javax.jms.JMSException;
 import javax.naming.InitialContext;
 import java.lang.invoke.MethodHandles;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-
 
 public class TestHelloJms extends TestHelloBase {
 
@@ -28,12 +26,7 @@ public class TestHelloJms extends TestHelloBase {
     private static Connection serverConnection;
     private static Connection clientConnection;
 
-    Channel channel;
-    MessageChannel baseChannel;
-
-    MessageServer server;
-
-
+    MessageChannel channel;
 
 
     @BeforeAll
@@ -56,27 +49,12 @@ public class TestHelloJms extends TestHelloBase {
 
     @BeforeEach
     void setup() throws Exception{
-
-
-        //Make server name short but random to prevent stray status messages from previous tests affecting this test
-        final String serverTopic = "mgprc/" + Id.shortRandom();
-
-        //Set up the serverb
-        server = new MessageServer(new JmsServerConduit(serverConnection, serverTopic));
-        server.start();
-        server.addService(new HelloServiceForTest());
-        Thread.sleep(1000);
-        baseChannel = new MessageChannel(new JmsChannelConduit(clientConnection, true));
-
-        channel = ClientInterceptors.intercept(baseChannel, new TopicInterceptor(serverTopic));
-
+        channel = new MessageChannel(new JmsChannelConduit(clientConnection, true));
     }
 
     @AfterEach
     void tearDown() throws Exception{
-        server.close();
-        baseChannel.close();
-
+        channel.close();
     }
 
 
@@ -85,10 +63,16 @@ public class TestHelloJms extends TestHelloBase {
         return this.channel;
     }
 
+
     @Override
-    public void checkNumActiveCalls(int numActiveCalls) {
-        assertEquals(numActiveCalls, this.baseChannel.getStats().getActiveCalls());
-        assertEquals(numActiveCalls, this.server.getStats().getActiveCalls());
+    public int getChannelActiveCalls() {
+        return this.channel.getStats().getActiveCalls();
+    }
+
+    public MessageServer makeMessageServer(String serverTopic) throws Exception {
+        MessageServer server  = new MessageServer(new JmsServerConduit(serverConnection, serverTopic));
+        server.start();
+        return server;
     }
 
 }

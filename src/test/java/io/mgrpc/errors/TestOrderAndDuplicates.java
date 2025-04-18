@@ -1,7 +1,6 @@
 package io.mgrpc.errors;
 
 import io.grpc.Channel;
-import io.grpc.ClientInterceptors;
 import io.grpc.Status;
 import io.grpc.examples.helloworld.ExampleHelloServiceGrpc;
 import io.grpc.examples.helloworld.HelloReply;
@@ -215,7 +214,7 @@ public class TestOrderAndDuplicates {
         MessageChannel messageChannel = new MessageChannelBuilder()
                 .channelId(channelId)
                 .conduit(new MqttChannelConduit(clientMqtt)).build();
-        Channel channel = ClientInterceptors.intercept(messageChannel, new TopicInterceptor(SERVER));
+        Channel channel = TopicInterceptor.intercept(messageChannel, SERVER);
 
 
         final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub stub = ExampleHelloServiceGrpc.newBlockingStub(channel);

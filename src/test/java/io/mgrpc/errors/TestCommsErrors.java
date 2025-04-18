@@ -1,7 +1,6 @@
 package io.mgrpc.errors;
 
 import io.grpc.Channel;
-import io.grpc.ClientInterceptors;
 import io.grpc.Status;
 import io.grpc.examples.helloworld.ExampleHelloServiceGrpc;
 import io.grpc.examples.helloworld.HelloReply;
@@ -69,7 +68,7 @@ public class TestCommsErrors {
         final String serverName = Id.shortRandom();
 
         MessageChannel baseChannel = new MessageChannel(new MqttChannelConduit(clientMqtt));
-        Channel channel = ClientInterceptors.intercept(baseChannel, new TopicInterceptor(serverName));
+        Channel channel = TopicInterceptor.intercept(baseChannel, serverName);
 
         StatusObserver statusObserver = new StatusObserver("obs");
 
@@ -92,7 +91,7 @@ public class TestCommsErrors {
         final String serverName = Id.shortRandom();
 
         MessageChannel baseChannel = new MessageChannel(new MqttChannelConduit(clientMqtt));
-         Channel channel = ClientInterceptors.intercept(baseChannel, new TopicInterceptor(serverName));
+         Channel channel = TopicInterceptor.intercept(baseChannel, serverName);
 
         StatusObserver statusObserver = new StatusObserver("obs");
 
@@ -131,7 +130,7 @@ public class TestCommsErrors {
         final String serverName = Id.shortRandom();
 
         MessageChannel baseChannel = new MessageChannel(new MqttChannelConduit(clientMqtt));
-        Channel channel = ClientInterceptors.intercept(baseChannel, new TopicInterceptor(serverName));
+        Channel channel = TopicInterceptor.intercept(baseChannel, serverName);
 
         MqttAsyncClient serverMqttWithLwt = MqttUtils.makeClient();
         MessageServer server = new MessageServer(new MqttServerConduit(serverMqttWithLwt, serverName));
@@ -168,7 +167,7 @@ public class TestCommsErrors {
         final String serverName = Id.shortRandom();
 
         MessageChannel baseChannel = new MessageChannel(new MqttChannelConduit(clientMqtt));
-        Channel channel = ClientInterceptors.intercept(baseChannel, new TopicInterceptor(serverName));
+        Channel channel = TopicInterceptor.intercept(baseChannel, serverName);
 
         final String statusTopic = new ServerTopics(serverName).status;
         CloseableSocketFactory sf = new CloseableSocketFactory();
@@ -215,7 +214,7 @@ public class TestCommsErrors {
         server.addService(listenForCancel);
 
         MessageChannel baseChannel = new MessageChannel(new MqttChannelConduit(clientMqtt, channelStatusTopic));
-        Channel channel = ClientInterceptors.intercept(baseChannel, new TopicInterceptor(serverName));
+        Channel channel = TopicInterceptor.intercept(baseChannel, serverName);
 
         final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
@@ -269,7 +268,7 @@ public class TestCommsErrors {
                 .channelId(channelId)
                 .conduit(new MqttChannelConduit(clientMqttWithLwt, channelStatusTopic)).build();
 
-        Channel channel = ClientInterceptors.intercept(baseChannel, new TopicInterceptor(serverName));
+        Channel channel = TopicInterceptor.intercept(baseChannel, serverName);
 
         final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
         HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();

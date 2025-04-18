@@ -31,9 +31,8 @@ public class HelloServiceForTest extends ExampleHelloServiceGrpc.ExampleHelloSer
      */
     @Override
     public void lotsOfReplies(HelloRequest request, StreamObserver<HelloReply> multipleResponses) {
-        int numReplies = Integer.parseInt(request.getName());
-        for(int i = 0; i < numReplies; i++){
-            HelloReply reply = HelloReply.newBuilder().setMessage("Hello " + i).build();
+        for(int i = 0; i < request.getNumResponses(); i++){
+            HelloReply reply = HelloReply.newBuilder().setMessage("Hello " + request.getName() + " " + i).build();
             multipleResponses.onNext(reply);
         }
         multipleResponses.onCompleted();

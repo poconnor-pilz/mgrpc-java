@@ -5,7 +5,6 @@ import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.rpc.Code;
 import com.google.rpc.ErrorInfo;
 import io.grpc.Channel;
-import io.grpc.ClientInterceptors;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 import io.grpc.examples.helloworld.ExampleHelloServiceGrpc;
@@ -72,7 +71,7 @@ public class TestErrors {
         server = new MessageServer(new MqttServerConduit(serverMqtt, SERVER));
         server.start();
         messageChannel = new MessageChannel(new MqttChannelConduit(clientMqtt));
-        channel = ClientInterceptors.intercept(messageChannel, new TopicInterceptor(SERVER));
+        channel = TopicInterceptor.intercept(messageChannel, SERVER);
     }
 
     @AfterEach

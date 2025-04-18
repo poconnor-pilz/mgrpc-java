@@ -60,7 +60,7 @@ public class TestAuthAndMetadata {
         server.addService(serviceWithIntercept);
 
         MessageChannel messageChannel = new MessageChannel(new MqttChannelConduit(MqttUtils.makeClient()));
-        Channel channel = ClientInterceptors.intercept(messageChannel, new TopicInterceptor(SERVER));
+        Channel channel = TopicInterceptor.intercept(messageChannel, SERVER);
 
 
         //Make a jwt token and add it to the call credentials

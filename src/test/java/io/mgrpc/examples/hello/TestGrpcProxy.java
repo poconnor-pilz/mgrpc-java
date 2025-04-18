@@ -56,7 +56,7 @@ public class TestGrpcProxy {
         ManagedChannel httpChannel = ManagedChannelBuilder.forTarget(target)
                 .usePlaintext().build();
 
-        final Channel httpChannelWithTopic = ClientInterceptors.intercept(httpChannel, new TopicInterceptor(SERVER));
+        final Channel httpChannelWithTopic = TopicInterceptor.intercept(httpChannel,SERVER);
 
         final MqttAsyncClient clientMqttConnection = MqttUtils.makeClient();
         MessageChannel messageChannel = new MessageChannel(new MqttChannelConduit(clientMqttConnection));
@@ -137,7 +137,7 @@ public class TestGrpcProxy {
         final MqttAsyncClient clientMqttConnection = MqttUtils.makeClient();
         MessageChannel messageChannel = new MessageChannel(new MqttChannelConduit(clientMqttConnection));
 
-        final Channel messageChannelWithTopic = ClientInterceptors.intercept(messageChannel, new TopicInterceptor(SERVER));
+        final Channel messageChannelWithTopic = TopicInterceptor.intercept(messageChannel, SERVER);
 
         final ServerServiceDefinition serviceWithIntercept = ServerInterceptors.intercept(
                 new ListenForHello(),

@@ -1,8 +1,9 @@
 package io.mgrpc.examples.hello;
 
 import io.grpc.Channel;
-import io.grpc.ClientInterceptors;
-import io.mgrpc.*;
+import io.mgrpc.EmbeddedBroker;
+import io.mgrpc.MessageChannel;
+import io.mgrpc.MessageServer;
 import io.mgrpc.mqtt.MqttChannelConduit;
 import io.mgrpc.mqtt.MqttServerConduit;
 import io.mgrpc.mqtt.MqttUtils;
@@ -17,8 +18,6 @@ import org.slf4j.LoggerFactory;
 
 import java.lang.invoke.MethodHandles;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-
 
 public class TestHelloMqtt extends TestHelloBase {
 
@@ -27,14 +26,7 @@ public class TestHelloMqtt extends TestHelloBase {
     private static MqttAsyncClient serverMqtt;
     private static MqttAsyncClient clientMqtt;
 
-    Channel channel;
-    MessageChannel baseChannel;
-
-    MessageServer server;
-
-
-
-    private static final long REQUEST_TIMEOUT = 2000;
+    MessageChannel channel;
 
     @BeforeAll
     public static void startClients() throws Exception {
@@ -56,21 +48,12 @@ public class TestHelloMqtt extends TestHelloBase {
     @BeforeEach
     void setup() throws Exception{
 
-        //Make server name short but random to prevent stray status messages from previous tests affecting this test
-        final String serverTopic = "mgprc/" + Id.shortRandom();
-
-        //Set up the serverb
-        server = new MessageServer(new MqttServerConduit(serverMqtt, serverTopic));
-        server.start();
-        server.addService(new HelloServiceForTest());
-        baseChannel = new MessageChannel(new MqttChannelConduit(clientMqtt));
-        channel = ClientInterceptors.intercept(baseChannel, new TopicInterceptor(serverTopic));
+        channel = new MessageChannel(new MqttChannelConduit(clientMqtt));
     }
 
     @AfterEach
     void tearDown() throws Exception{
-        server.close();
-        baseChannel.close();
+        channel.close();
     }
 
 
@@ -80,9 +63,15 @@ public class TestHelloMqtt extends TestHelloBase {
     }
 
     @Override
-    public void checkNumActiveCalls(int numActiveCalls) {
-        assertEquals(numActiveCalls, this.baseChannel.getStats().getActiveCalls());
-        assertEquals(numActiveCalls, this.server.getStats().getActiveCalls());
+    public int getChannelActiveCalls() {
+        return this.channel.getStats().getActiveCalls();
     }
+
+    public MessageServer makeMessageServer(String serverTopic) throws Exception {
+        MessageServer server = new MessageServer(new MqttServerConduit(serverMqtt, serverTopic));
+        server.start();
+        return server;
+    }
+
 
 }

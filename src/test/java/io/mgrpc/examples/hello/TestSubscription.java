@@ -1,7 +1,6 @@
 package io.mgrpc.examples.hello;
 
 import io.grpc.Channel;
-import io.grpc.ClientInterceptors;
 import io.grpc.examples.helloworld.ExampleHelloServiceGrpc;
 import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
@@ -71,7 +70,7 @@ public class TestSubscription {
 
         baseChannel = new MessageChannel(new MqttChannelConduit(clientMqtt));
 
-        channel = ClientInterceptors.intercept(baseChannel, new TopicInterceptor(SERVER));
+        channel = TopicInterceptor.intercept(baseChannel, SERVER);
 
     }
 
@@ -163,7 +162,9 @@ public class TestSubscription {
                 ExampleHelloServiceGrpc.newBlockingStub(getChannel())
                         .withOption(MessageChannel.OPT_OUT_TOPIC, responseTopic1);
 
-        HelloRequest request1 = HelloRequest.newBuilder().setName("2").build();
+        HelloRequest request1 = HelloRequest.newBuilder()
+                .setNumResponses(2)
+                .setName("sub1").build();
         final Iterator<HelloReply> helloReplyIterator = blockingStub1.lotsOfReplies(request1);
         //The request should have no responses because all the responses are sent to the response topic
         //instead of the replyTo
@@ -172,7 +173,9 @@ public class TestSubscription {
         final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub blockingStub2 =
                 ExampleHelloServiceGrpc.newBlockingStub(getChannel())
                         .withOption(MessageChannel.OPT_OUT_TOPIC, responseTopic2);
-        HelloRequest request2 = HelloRequest.newBuilder().setName("3").build();
+        HelloRequest request2 = HelloRequest.newBuilder()
+                .setNumResponses(3)
+                .setName("sub2").build();
         blockingStub2.lotsOfReplies(request2);
 
         latch.await();
@@ -181,17 +184,17 @@ public class TestSubscription {
         assertEquals(channelConduit.getStats().getSubscribers(), 0);
 
         assertEquals(obs1.replies.size(), 2);
-        assertEquals("Hello 0", obs1.replies.get(0).getMessage());
-        assertEquals("Hello 1", obs1.replies.get(1).getMessage());
+        assertEquals("Hello sub1 0", obs1.replies.get(0).getMessage());
+        assertEquals("Hello sub1 1", obs1.replies.get(1).getMessage());
 
         assertEquals(obs2.replies.size(), 2);
-        assertEquals("Hello 0", obs2.replies.get(0).getMessage());
-        assertEquals("Hello 1", obs2.replies.get(1).getMessage());
+        assertEquals("Hello sub1 0", obs2.replies.get(0).getMessage());
+        assertEquals("Hello sub1 1", obs2.replies.get(1).getMessage());
 
         assertEquals(obs3.replies.size(), 3);
-        assertEquals("Hello 0", obs3.replies.get(0).getMessage());
-        assertEquals("Hello 1", obs3.replies.get(1).getMessage());
-        assertEquals("Hello 2", obs3.replies.get(2).getMessage());
+        assertEquals("Hello sub2 0", obs3.replies.get(0).getMessage());
+        assertEquals("Hello sub2 1", obs3.replies.get(1).getMessage());
+        assertEquals("Hello sub2 2", obs3.replies.get(2).getMessage());
 
         //obsTemp was unsubscribed and so should not receive any responses
         assertEquals(obsTemp.replies.size(), 0);
