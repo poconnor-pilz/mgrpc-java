@@ -126,6 +126,40 @@ public class TestErrors {
 
 
     @Test
+    public void testSingleResponseWithException() throws InterruptedException {
+        class SingleResponseWithError extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
+            @Override
+            public void sayHello(HelloRequest request, StreamObserver<HelloReply> responseObserver) {
+                throw new RuntimeException("an exception message");
+            }
+        }
+        server.addService(new SingleResponseWithError());
+
+        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
+        HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
+        final Throwable[] ex = {null};
+        CountDownLatch latch = new CountDownLatch(1);
+        stub.sayHello(joe, new NoopStreamObserver<HelloReply>() {
+            @Override
+            public void onError(Throwable t) {
+                ex[0] = t;
+                latch.countDown();
+            }
+        });
+
+        assertTrue(latch.await(5, TimeUnit.SECONDS));
+
+        assertTrue(ex[0] instanceof StatusRuntimeException);
+
+        Status status = ((StatusRuntimeException) ex[0]).getStatus();
+
+        assertEquals(status.getCode(), Status.Code.UNKNOWN);
+        assertEquals("an exception message", status.getDescription());
+        checkForLeaks(0);
+    }
+
+
+    @Test
     public void testSingleResponseWithBlockingStub() throws InterruptedException {
 
         class SingleResponseWithError extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
@@ -182,6 +216,43 @@ public class TestErrors {
         assertEquals("the value is out of range", status.getDescription());
         checkForLeaks(0);
     }
+
+    @Test
+    public void testMultiResponseWithException() throws InterruptedException {
+
+        class MultiResponseWithError extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
+            @Override
+            public void lotsOfReplies(HelloRequest request, StreamObserver<HelloReply> responseObserver) {
+                HelloReply reply = HelloReply.newBuilder().setMessage("Hello " + request.getName()).build();
+                responseObserver.onNext(reply);
+                throw new RuntimeException("an exception message");
+            }
+        }
+        server.addService(new MultiResponseWithError());
+
+        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
+        HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
+        final Throwable[] ex = {null};
+        CountDownLatch latch = new CountDownLatch(1);
+        stub.lotsOfReplies(joe, new NoopStreamObserver<HelloReply>() {
+            @Override
+            public void onError(Throwable t) {
+                ex[0] = t;
+                latch.countDown();
+            }
+        });
+
+        assertTrue(latch.await(5, TimeUnit.SECONDS));
+
+        assertTrue(ex[0] instanceof StatusRuntimeException);
+
+        Status status = ((StatusRuntimeException) ex[0]).getStatus();
+
+        assertEquals(status.getCode(), Status.Code.UNKNOWN);
+        assertEquals("an exception message", status.getDescription());
+        checkForLeaks(0);
+    }
+
 
     @Test
     public void testMultiResponseWithErrorBlockingStub() {

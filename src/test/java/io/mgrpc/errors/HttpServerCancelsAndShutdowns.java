@@ -22,6 +22,9 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 /**
  * This is used to observe the behaviour of standard grpc for cancels and shutdowns as this
  * behaviour does not seem to be documented clearly anywhere.
@@ -461,6 +464,47 @@ public class HttpServerCancelsAndShutdowns {
             channel.shutdownNow().awaitTermination(5, TimeUnit.SECONDS);
             httpServer.shutdown();
         }
+    }
+
+
+    @Test
+    public void testSingleResponseWithException() throws Exception {
+        class SingleResponseWithError extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
+            @Override
+            public void sayHello(HelloRequest request, StreamObserver<HelloReply> responseObserver) {
+                throw new RuntimeException("testexception");
+            }
+        }
+
+        int port = 50051;
+        Server httpServer = ServerBuilder.forPort(port)
+                .addService(new SingleResponseWithError())
+                .build().start();
+        String target = "localhost:" + port;
+        ManagedChannel channel = ManagedChannelBuilder.forTarget(target)
+                .usePlaintext().build();
+
+
+        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
+        HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
+        final Throwable[] ex = {null};
+        CountDownLatch latch = new CountDownLatch(1);
+        stub.sayHello(joe, new NoopStreamObserver<HelloReply>() {
+            @Override
+            public void onError(Throwable t) {
+                ex[0] = t;
+                latch.countDown();
+            }
+        });
+
+        assertTrue(latch.await(5, TimeUnit.SECONDS));
+
+        assertTrue(ex[0] instanceof StatusRuntimeException);
+
+        Status status = ((StatusRuntimeException) ex[0]).getStatus();
+
+        assertEquals(status.getCode(), Status.Code.UNKNOWN);
+        assertEquals("Application error processing RPC", status.getDescription());
     }
 
 

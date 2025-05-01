@@ -17,6 +17,6 @@ public class JmsCallQueues {
             consumer.close();
         }
         //TODO: JMS doesn't allow deleting queues. Find out how to delete the queue using artemis api.
-        //it may be the case that it is released when all producers, consumers are closed.
+        //(it may be the case that it is released when all producers, consumers are closed.)
     }
 }

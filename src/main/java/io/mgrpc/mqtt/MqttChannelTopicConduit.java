@@ -226,9 +226,12 @@ public class MqttChannelTopicConduit implements ChannelTopicConduit {
 
         if (MethodTypeConverter.fromStart(start).clientSendsOneMessage()) {
             //If clientSendsOneMessage we only want to send one broker message containing
-            //start, request, status.
+            //start, request, status. This means that we don't send a Start message now but wait for the
+            //client to send request message. When we receive the request message we immediately send
+            //start, request, status in one single broker message. Finally when then client actually sends the status
+            //message we just ignore it.
             if (messageBuilder.hasStart()) {
-                //Wait for the request
+                //Wait for the client to send the request message
                 return;
             }
             if (messageBuilder.hasStatus()) {
@@ -239,6 +242,7 @@ public class MqttChannelTopicConduit implements ChannelTopicConduit {
                     return;
                 }
             } else {
+                //Send start, request, status as a single broker message
                 rpcSet.addMessages(start);
                 rpcSet.addMessages(messageBuilder);
                 final RpcMessage.Builder statusBuilder = RpcMessage.newBuilder()

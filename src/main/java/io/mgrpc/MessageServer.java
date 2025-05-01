@@ -90,12 +90,10 @@ public class MessageServer implements ServerListener {
 
 
     public void addService(BindableService service) {
-        //TODO: Make a removeService
         registry.addService(service);
     }
 
     public void addService(ServerServiceDefinition service) {
-        //TODO: Make a removeService
         registry.addService(service);
     }
 
@@ -260,7 +258,8 @@ public class MessageServer implements ServerListener {
 
 
         /**
-         * onMessage() may be called from multiple threads but only one onMessage will be active at a time.
+         * Handle a message send by the client (via an ordered queue in MessageProcessor)
+         * onProviderMessage() may be called from multiple threads but only one onProviderMessage will be active at a time.
          * So it is thread safe with respect to itself but cannot use thread locals
          *
          * @param message
@@ -300,6 +299,7 @@ public class MessageServer implements ServerListener {
                 if (serverMethodDefinition == null) {
                     sendStatus(callId, 1,
                             Status.UNIMPLEMENTED.withDescription("No method registered for " + fullMethodName));
+                    this.remove();
                     return;
                 }
 
@@ -326,7 +326,10 @@ public class MessageServer implements ServerListener {
                 serverCall.start(serverCallHandler);
 
             } catch (Exception ex) {
-                log.error("Error processing RpcMessage", ex);
+                log.error("Exception processing RpcMessage", ex);
+                this.remove();
+                sendStatus(callId, MessageProcessor.INTERRUPT_SEQUENCE,
+                        Status.UNKNOWN.withDescription(ex.getMessage()));
             }
 
         }
@@ -367,7 +370,6 @@ public class MessageServer implements ServerListener {
             private ScheduledFuture<?> deadlineCancellationFuture = null;
 
             private Context.CancellableContext cancellableContext = null;
-            private Context context = null;
 
             MsgServerCall(MethodDescriptor<ReqT, RespT> methodDescriptor, Start start, String callId) {
                 this.methodDescriptor = methodDescriptor;
@@ -384,11 +386,7 @@ public class MessageServer implements ServerListener {
                         MessageHandler.this.remove();
                     });
                 }
-                //TODO: Populate the key,value pairs of cancellableContext with e.g. auth credentials from this.header
-                //For the moment just put in a dummy key to help with identification/debugging of context
                 cancellableContext = Context.ROOT.withCancellation();
-                Context.Key<Integer> akey = Context.key("akey");
-                context = cancellableContext.withValue(akey, 99);
 
                 Metadata metadata = new Metadata();
                 final List<MetadataEntry> entries = start.getMetadataList();
@@ -396,12 +394,12 @@ public class MessageServer implements ServerListener {
                     final Metadata.Key<String> key = Metadata.Key.of(entry.getKey(), Metadata.ASCII_STRING_MARSHALLER);
                     metadata.put(key, entry.getValue());
                 }
-                //Not that serverCallHandler.startCall() will call the implementation of e.g. sayHello() so
+                //Note that serverCallHandler.startCall() will call the implementation of e.g. sayHello() so
                 //all the context etc must be set up so that sayHello can add cancel listeners, get creds,
                 //possibly send an error on the responseStream etc.
                 //After the implementation of sayHello is called the rest of the interaction is done via
                 //the streams that sayHello returns and accepts
-                context.run(() -> {
+                cancellableContext.run(() -> {
                     this.listener = serverCallHandler.startCall(serverCall, metadata);
                 });
             }
@@ -450,7 +448,7 @@ public class MessageServer implements ServerListener {
                 //Note its importan to use the run method here which will swap this.context back out of the
                 //threadlocal in a finally block. If it didn't then the context and its listeners could remain
                 //in the threadlocal indefinitely and not get garbage collected.
-                context.run(() -> {
+                cancellableContext.run(() -> {
                     listener.onMessage(objValue);
                 });
 
