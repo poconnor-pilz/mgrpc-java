@@ -114,7 +114,7 @@ public class MqttServerConduit implements ServerConduit {
                             //Cache the start message so that we can use it to get information about the call later.
                             startMessages.put(message.getCallId(), message);
                             log.debug("Will send output messages for call " + message.getCallId() + " to "
-                            + getTopicForSend(message));
+                            + message.getStart().getServerStreamTopic());
                         }
                         server.onMessage(message);
                     }
@@ -205,22 +205,18 @@ public class MqttServerConduit implements ServerConduit {
             setBuilder.addMessages(message);
         }
         try {
-            client.publish(getTopicForSend(startMessage), new MqttMessage(setBuilder.build().toByteArray()));
+            final String topic =  startMessage.getStart().getServerStreamTopic();
+            if(topic.isEmpty()){
+                log.error("Cannot send a reply because the start message did not specify a topic on which to send it. serverStreamTopic is empty");
+            } else {
+                client.publish(topic, new MqttMessage(setBuilder.build().toByteArray()));
+            }
         } catch (MqttException e) {
             log.error("Failed to send mqtt message", e);
             throw new MessagingException(e);
         }
     }
 
-    private String getTopicForSend(RpcMessage startMessage){
-        String topic = startMessage.getStart().getServerStreamTopic();
-        if(topic == null || topic.isEmpty()){
-            return serverTopics.replyTopic(startMessage.getStart().getChannelId(),
-                    startMessage.getStart().getMethodName());
-        } else {
-            return topic;
-        }
-    }
 
     private void notifyConnected(boolean connected) {
         //Notify any clients that the server has been connected

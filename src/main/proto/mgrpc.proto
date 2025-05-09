@@ -77,13 +77,13 @@ message Start{
   //(to prevent other clients stealing the tokens and using them)
   repeated MetadataEntry metadata = 5;
 
-  //Topic or queue that should be used for the client stream for this call
-  //Will not be set for a unary or server streaming call and may not be set depending on the conduit strategy
-  string clientStreamTopic = 6;
+  //Topic or queue that should be used for the stream sent by the server (reply stream) for this call
+  //This must always be set.
+  string serverStreamTopic = 6;
 
-  //Topic or queue that should be used for the server stream for this call
-  //Will not be set for a unary or client streaming call and may not be set depending on the conduit strategy
-  string serverStreamTopic = 7;
+  //Topic or queue that should be used for the stream sent by the client (request stream) for this call
+  //Will not be set for a unary or server streaming call and may not be set depending on the conduit strategy
+  string clientStreamTopic = 7;
 }
 
 //Any message that is not a Status or the first message in a client stream is a Value

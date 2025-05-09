@@ -24,14 +24,18 @@ public class MqttChannelConduit implements ChannelConduit, MessageSubscriber {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-    private final IMqttAsyncClient client;
 
     private final String channelStatusTopic;
 
 
     private final Map<String, ChannelTopicConduit> conduitsByServerTopic = new ConcurrentHashMap<>();
 
+    private final MqttTopicConduitManager topicConduitManager;
+
     private final Map<String, List<StreamObserver>> subscribersByTopic = new ConcurrentHashMap<>();
+
+    private final IMqttAsyncClient client;
+
 
 
     private static volatile Executor executorSingleton;
@@ -65,20 +69,37 @@ public class MqttChannelConduit implements ChannelConduit, MessageSubscriber {
 
 
     /**
-     * @param client The Mqtt client
+     * @param clientFactory The Mqtt client factory
      * @param channelStatusTopic The topic on which messages regarding the channel status will be published.
      *                           (For MQTT this topic will be the same topic as the MQTT LWT for the channel client)
      *                           If this value is null then the conduit will not attempt to publish
      *                           channel status messages.
      **/
-    public MqttChannelConduit(IMqttAsyncClient client, String channelStatusTopic) {
-        this.client = client;
+    public MqttChannelConduit(MqttClientFactory clientFactory, String channelStatusTopic) {
+        this.topicConduitManager = new MqttTopicConduitManager(clientFactory);
+        this.client = topicConduitManager.makeMainClient();
         this.channelStatusTopic = channelStatusTopic;
     }
 
     /**
-     * @param client The Mqtt client
+     * @param clientFactory The Mqtt client factory
      **/
+    public MqttChannelConduit(MqttClientFactory clientFactory) {
+        this(clientFactory, null);
+    }
+
+    public MqttChannelConduit(IMqttAsyncClient client, String channelStatusTopic) {
+
+        this.client = client;
+        this.topicConduitManager = new MqttTopicConduitManager(new MqttClientFactory() {
+            @Override
+            public IMqttAsyncClient createMqttClient() {
+                return client;
+            }
+        });
+        this.channelStatusTopic = channelStatusTopic;
+    }
+
     public MqttChannelConduit(IMqttAsyncClient client) {
         this(client, null);
     }
@@ -86,18 +107,12 @@ public class MqttChannelConduit implements ChannelConduit, MessageSubscriber {
     @Override
     public ChannelTopicConduit getChannelTopicConduit(String serverTopic, ChannelListener channelListener) {
 
-        ChannelTopicConduit conduit;
-        synchronized (conduitsByServerTopic) {
-            conduit = conduitsByServerTopic.get(serverTopic);
-            if (conduit == null) {
-                conduit = new MqttChannelTopicConduit(client, serverTopic);
-                conduitsByServerTopic.put(serverTopic, conduit);
-            }
-        }
+        final ChannelTopicConduit channelTopicConduit = this.topicConduitManager.getChannelTopicConduit(serverTopic, channelListener);
+
         try {
             //start should be idempotent and synchronized
-            conduit.start(channelListener);
-            return conduit;
+            channelTopicConduit.start(channelListener);
+            return channelTopicConduit;
         } catch (MessagingException e) {
             throw new RuntimeException(e);
         }
@@ -210,7 +225,7 @@ public class MqttChannelConduit implements ChannelConduit, MessageSubscriber {
             subscribers += subscribersByTopic.get(topic).size();
         }
 
-        return new MqttChannelTopicConduit.Stats(subscribers);
+        return new MqttChannelTopicConduit.Stats(subscribers, topicConduitManager.limitedClients.size());
     }
 
 }

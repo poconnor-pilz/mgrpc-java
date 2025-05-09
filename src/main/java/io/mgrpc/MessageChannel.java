@@ -96,7 +96,7 @@ public class MessageChannel extends Channel implements ChannelListener {
 
     }
 
-    ChannelTopicConduit getConduit(String serverTopic){
+    ChannelTopicConduit getTopicConduit(String serverTopic){
         return conduit.getChannelTopicConduit(serverTopic, this);
     }
 
@@ -219,7 +219,7 @@ public class MessageChannel extends Channel implements ChannelListener {
             }
 
             //This call may block until conduit is started if it is not started already.
-            this.topicConduit = getConduit(serverTopic);
+            this.topicConduit = getTopicConduit(serverTopic);
 
 
             this.responseListener = responseListener;
@@ -266,7 +266,7 @@ public class MessageChannel extends Channel implements ChannelListener {
                     //We close the call here which will call listener.onClose(Status.DEADLINE_EXCEEDED)
                     //because this is what the listener expects.
                     //The listener will then call cancel on this call.
-                    log.debug("Deadline exceeded for call " + callId);
+                    log.debug("Deadline exceeded for call " + callId + ": " + deadlineMessage);
                     close(Status.DEADLINE_EXCEEDED.augmentDescription(deadlineMessage));
                 });
             }

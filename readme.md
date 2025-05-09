@@ -3,6 +3,15 @@
 
 See also transport.md for stuff about the transport
 
+Key attributes:
+Tunnels grpc over mqtt.
+Can talk to multiple servers over one channel by specifying the root topic for that server.
+If a client or server is disconnected, all calls will be cancelled.
+Orders messages (some cloud brokers do not guarantee ordering)
+If direct mqtt connection is used in java client then it will only send one mqtt message for a single request
+Supports a proxy/http server to which any grpc client (in any language) can connect.
+Topic structure makes it possible to implement security via broker policies but can also use auth tokens. 
+
 We should try for smart endpoints, dumb pipes. So let the final user client code deal with exceptions and lost connections and re-connecting etc.
 Responsibility of proxy and stub classes is just to map method names and protobufs to actual methods and typed messages.
 

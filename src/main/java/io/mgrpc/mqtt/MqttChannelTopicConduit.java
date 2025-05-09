@@ -58,6 +58,7 @@ public class MqttChannelTopicConduit implements ChannelTopicConduit {
     private final IMqttAsyncClient client;
     private final static long SUBSCRIBE_TIMEOUT_MILLIS = 5000;
 
+
     private static final com.google.rpc.Status GOOGLE_RPC_OK_STATUS = io.grpc.protobuf.StatusProto.fromStatusAndTrailers(Status.OK, null);
 
     private Map<String, RpcMessage.Builder> startMessages = new ConcurrentHashMap<>();
@@ -69,20 +70,30 @@ public class MqttChannelTopicConduit implements ChannelTopicConduit {
 
     private ChannelListener channel;
 
+
     private final String channelStatusTopic;
 
     private volatile boolean isStarted = false;
 
+    private long timeLastUsed = System.currentTimeMillis();
+
+
 
     public static class Stats {
         private final int subscribers;
+        private final int numClients;
 
-        public Stats(int subscribers) {
+        public Stats(int subscribers, int numClients) {
             this.subscribers = subscribers;
+            this.numClients = numClients;
         }
 
         public int getSubscribers() {
             return subscribers;
+        }
+
+        public int getNumClients() {
+            return numClients;
         }
 
     }
@@ -119,8 +130,8 @@ public class MqttChannelTopicConduit implements ChannelTopicConduit {
      *                    Where if the gRPC fullMethodName is "helloworld.HelloService/SayHello"
      *                    then {slashedFullMethod} is "helloworld/HelloService/SayHello"
      */
-    public MqttChannelTopicConduit(IMqttAsyncClient client, String serverTopic) {
-        this(client, serverTopic, null);
+    public MqttChannelTopicConduit(MqttTopicConduitManager topicConduitManager, IMqttAsyncClient client, String serverTopic) {
+        this(client, serverTopic,  null);
     }
 
 
@@ -150,6 +161,7 @@ public class MqttChannelTopicConduit implements ChannelTopicConduit {
                 }
             })).waitForCompletion(SUBSCRIBE_TIMEOUT_MILLIS);
 
+            log.debug("Subscribing for server status at " + serverTopics.status);
             client.subscribe(serverTopics.status, 1, new MqttExceptionLogger((String topic, MqttMessage mqttMessage) -> {
                 try {
                     this.serverConnected = ConnectionStatus.parseFrom(mqttMessage.getPayload()).getConnected();
@@ -179,37 +191,59 @@ public class MqttChannelTopicConduit implements ChannelTopicConduit {
         startMessages.remove(callId);
     }
 
+    public int getNumOpenCalls(){
+        return startMessages.size();
+    }
+
+    public void unsubscribe(){
+        try {
+            final String replyTopicPrefix = serverTopics.servicesOutForChannel(channel.getChannelId()) + "/#";
+            client.unsubscribe(replyTopicPrefix);
+            client.unsubscribe(serverTopics.status);
+        } catch (MqttException exception) {
+            log.error("Exception unsubscribing " + exception);
+        }
+        this.isStarted = false;
+    }
+
+    public long getTimeLastUsed(){
+        return timeLastUsed;
+    }
+
+
     @Override
     public void request(String callId, int numMessages){}
 
     @Override
     public void close() {
         try {
-            //Notify that this client has been closed so that any server with ongoing calls can cancel them and
-            //release resources.
-            if(this.channelStatusTopic == null){
-                return;
-            }
-            log.debug("Closing channel. Sending notification on " + channelStatusTopic);
+            unsubscribe();
+            log.debug("Closing channel topic. Sending notification on " + channelStatusTopic);
             final byte[] connectedMsg = ConnectionStatus.newBuilder().
                     setConnected(false).setChannelId(channel.getChannelId()).build().toByteArray();
             client.publish(channelStatusTopic, new MqttMessage(connectedMsg));
-            final String replyTopicPrefix = serverTopics.servicesOutForChannel(channel.getChannelId()) + "/#";
-            client.unsubscribe(replyTopicPrefix);
-            client.unsubscribe(serverTopics.status);
         } catch (MqttException exception) {
             log.error("Exception closing " + exception);
         }
     }
 
+
     @Override
     public void send(RpcMessage.Builder messageBuilder) throws MessagingException {
+
+        timeLastUsed = System.currentTimeMillis();
 
         RpcMessage.Builder start = startMessages.get(messageBuilder.getCallId());
         if(start == null){
             if(messageBuilder.hasStart()){
                 start = messageBuilder;
-                startMessages.put(messageBuilder.getCallId(), messageBuilder);
+                final Start.Builder startBuilder = start.getStartBuilder();
+                //If the client has not specified a server stream topic then set it to the default
+                if(startBuilder.getServerStreamTopic().isEmpty()) {
+                    final String replyTopic = serverTopics.replyTopic(this.channel.getChannelId(), start.getStart().getMethodName());
+                    startBuilder.setServerStreamTopic(replyTopic);
+                }
+                startMessages.put(messageBuilder.getCallId(), start);
                 log.debug("Will send input messages for call " + messageBuilder.getCallId()
                         + " to " + serverTopics.methodIn(start.getStart().getMethodName()));
             } else {

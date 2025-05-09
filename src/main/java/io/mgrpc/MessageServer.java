@@ -378,10 +378,12 @@ public class MessageServer implements ServerListener {
             }
 
             public void start(ServerCallHandler<?, ?> serverCallHandler) {
-                log.debug("Starting call " + callId + " to " + this.methodDescriptor.getFullMethodName());
+                log.debug("Starting call " + callId + " to " + this.methodDescriptor.getFullMethodName()
+                        + " with timeout " + start.getTimeoutMillis() + " ms");
                 if (start.getTimeoutMillis() > 0) {
                     Deadline deadline = Deadline.after(start.getTimeoutMillis(), TimeUnit.MILLISECONDS);
                     this.deadlineCancellationFuture = DeadlineTimer.start(deadline, (String deadlineMessage) -> {
+                        log.debug("Deadline exceeded for call " + callId + ": " + deadlineMessage);
                         cancel();
                         MessageHandler.this.remove();
                     });

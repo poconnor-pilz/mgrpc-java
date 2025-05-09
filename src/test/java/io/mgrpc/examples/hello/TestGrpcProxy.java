@@ -44,8 +44,7 @@ public class TestGrpcProxy {
     @Test
     public void testClientSideProxy() throws Exception{
 
-        //This tests the case where a single http server is connected to a single device (a single MessageServer)
-        //Any client of the http grpc server can only communicate with that device
+        //This tests the case where a http client calls a service in an MqttServer
 
         //HttpChannel -> HttpServer -> GrpcProxy -> MqttChannel -> Broker -> MqttServer
         int port = 50051;
@@ -56,7 +55,7 @@ public class TestGrpcProxy {
         ManagedChannel httpChannel = ManagedChannelBuilder.forTarget(target)
                 .usePlaintext().build();
 
-        final Channel httpChannelWithTopic = TopicInterceptor.intercept(httpChannel,SERVER);
+        final Channel httpChannelWithTopic = TopicInterceptor.intercept(httpChannel, SERVER);
 
         final MqttAsyncClient clientMqttConnection = MqttUtils.makeClient();
         MessageChannel messageChannel = new MessageChannel(new MqttChannelConduit(clientMqttConnection));

@@ -3,7 +3,6 @@ package io.mgrpc;
 import io.grpc.Deadline;
 
 import javax.annotation.Nullable;
-import java.util.Locale;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -19,37 +18,27 @@ public class DeadlineTimer implements Runnable{
     }
 
 
-    private final long remainingNanos;
+    private final long remainingMillis;
     private final DeadlineTimerListener listener;
 
 
 
-    DeadlineTimer(long remainingNanos, DeadlineTimerListener listener) {
-        this.remainingNanos = remainingNanos;
+    DeadlineTimer(long remainingMillis, DeadlineTimerListener listener) {
+        this.remainingMillis = remainingMillis;
         this.listener = listener;
     }
 
 
     public static ScheduledFuture<?> start(Deadline deadline, DeadlineTimerListener listener) {
-        long remainingNanos = deadline.timeRemaining(TimeUnit.NANOSECONDS);
+        long remainingMillis = deadline.timeRemaining(TimeUnit.MILLISECONDS);
         return TimerService.get().schedule(
-                new DeadlineTimer(remainingNanos, listener), remainingNanos, TimeUnit.NANOSECONDS);
+                new DeadlineTimer(remainingMillis, listener), remainingMillis, TimeUnit.MILLISECONDS);
     }
 
     @Override
     public void run() {
-        long seconds = Math.abs(remainingNanos) / TimeUnit.SECONDS.toNanos(1);
-        long nanos = Math.abs(remainingNanos) % TimeUnit.SECONDS.toNanos(1);
-
-        StringBuilder buf = new StringBuilder();
-        buf.append("deadline exceeded after ");
-        if (remainingNanos < 0) {
-            buf.append('-');
-        }
-        buf.append(seconds);
-        buf.append(String.format(Locale.US, ".%09d", nanos));
-        buf.append("s. ");
-        listener.onDeadline(buf.toString());
+        float seconds = ((float)remainingMillis/(float)1000);
+        listener.onDeadline(String.format("deadline exceeded after %.3fs", seconds));
     }
 
 
