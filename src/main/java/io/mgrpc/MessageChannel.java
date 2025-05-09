@@ -96,8 +96,8 @@ public class MessageChannel extends Channel implements ChannelListener {
 
     }
 
-    ChannelTopicConduit getTopicConduit(String serverTopic){
-        return conduit.getChannelTopicConduit(serverTopic, this);
+    TopicConduit getTopicConduit(String serverTopic){
+        return conduit.getTopicConduit(serverTopic, this);
     }
 
     /**
@@ -175,7 +175,7 @@ public class MessageChannel extends Channel implements ChannelListener {
         Deadline effectiveDeadline = null;
         Metadata metadata = null;
 
-        private ChannelTopicConduit topicConduit;
+        private TopicConduit topicConduit;
 
         private String serverTopic;
 

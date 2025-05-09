@@ -46,7 +46,7 @@ import java.util.concurrent.TimeUnit;
 // The Channel will have a waitForServer method which a client can use to determine if a sever is up.
 // This will method will subscribe to server/o/sys/status and send a prompt to server/i/sys/status/prompt
 
-public class JmsChannelTopicConduit implements ChannelTopicConduit {
+public class JmsTopicConduit implements TopicConduit {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -94,7 +94,7 @@ public class JmsChannelTopicConduit implements ChannelTopicConduit {
      *                           If this value is null then the conduit will not attempt to send
      *                           channel status messages.
      */
-    public JmsChannelTopicConduit(Session session, String serverTopic, boolean useBrokerFlowControl, Executor executor, String channelStatusTopic) {
+    public JmsTopicConduit(Session session, String serverTopic, boolean useBrokerFlowControl, Executor executor, String channelStatusTopic) {
         this.session = session;
         this.useBrokerFlowControl = useBrokerFlowControl;
         this.serverTopics = new ServerTopics(serverTopic, TOPIC_SEPARATOR);
@@ -113,7 +113,7 @@ public class JmsChannelTopicConduit implements ChannelTopicConduit {
      *                             pull from this queue when the next message is required meaning that the
      *                             channel and the server do not need to use their internal buffers.
      */
-    public JmsChannelTopicConduit(Session session, String serverTopic, boolean useBrokerFlowControl, Executor executor) {
+    public JmsTopicConduit(Session session, String serverTopic, boolean useBrokerFlowControl, Executor executor) {
         this(session, serverTopic, useBrokerFlowControl, executor, null);
     }
 

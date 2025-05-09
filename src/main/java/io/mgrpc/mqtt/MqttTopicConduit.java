@@ -51,7 +51,7 @@ import java.util.concurrent.TimeUnit;
 // The Channel will have a waitForServer method which a client can use to determine if a sever is up.
 // This will method will subscribe to server/o/sys/status and send a prompt to server/i/sys/status/prompt
 
-public class MqttChannelTopicConduit implements ChannelTopicConduit {
+public class MqttTopicConduit implements TopicConduit {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -114,7 +114,7 @@ public class MqttChannelTopicConduit implements ChannelTopicConduit {
      *                           If this value is null then the conduit will not attempt to send
      *                           channel status messages.
      */
-    public MqttChannelTopicConduit(IMqttAsyncClient client, String serverTopic, String channelStatusTopic) {
+    public MqttTopicConduit(IMqttAsyncClient client, String serverTopic, String channelStatusTopic) {
         this.client = client;
         this.serverTopics = new ServerTopics(serverTopic);
         this.channelStatusTopic = channelStatusTopic;
@@ -130,7 +130,7 @@ public class MqttChannelTopicConduit implements ChannelTopicConduit {
      *                    Where if the gRPC fullMethodName is "helloworld.HelloService/SayHello"
      *                    then {slashedFullMethod} is "helloworld/HelloService/SayHello"
      */
-    public MqttChannelTopicConduit(MqttTopicConduitManager topicConduitManager, IMqttAsyncClient client, String serverTopic) {
+    public MqttTopicConduit(MqttTopicConduitManager topicConduitManager, IMqttAsyncClient client, String serverTopic) {
         this(client, serverTopic,  null);
     }
 

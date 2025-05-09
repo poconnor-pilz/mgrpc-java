@@ -23,7 +23,7 @@ public class InProcessConduit {
     private final Map<String, ChannelListener> channelsById = new ConcurrentHashMap<>();
 
     private final Map<String, InprocServerConduit> serverConduits = new ConcurrentHashMap<>();
-    private final Map<String, InprocChannelTopicConduit> channelTopicConduits = new ConcurrentHashMap<>();
+    private final Map<String, InprocTopicConduit> topicConduits = new ConcurrentHashMap<>();
 
     private final Map<String, String> callIdToChannelIdMap = new ConcurrentHashMap<>();
 
@@ -63,14 +63,14 @@ public class InProcessConduit {
 
     private final ChannelConduit channelConduit = new ChannelConduit() {
         @Override
-        public ChannelTopicConduit getChannelTopicConduit(String serverTopic, ChannelListener channelListener) {
-            InprocChannelTopicConduit inprocChannelTopicConduit = channelTopicConduits.get(serverTopic);
-            if(inprocChannelTopicConduit == null) {
-                inprocChannelTopicConduit = new InprocChannelTopicConduit(serverTopic);
-                channelTopicConduits.put(serverTopic, inprocChannelTopicConduit);
-                inprocChannelTopicConduit.start(channelListener);
+        public TopicConduit getTopicConduit(String serverTopic, ChannelListener channelListener) {
+            InprocTopicConduit topicConduit = topicConduits.get(serverTopic);
+            if(topicConduit == null) {
+                topicConduit = new InprocTopicConduit(serverTopic);
+                topicConduits.put(serverTopic, topicConduit);
+                topicConduit.start(channelListener);
             }
-            return inprocChannelTopicConduit;
+            return topicConduit;
         }
         @Override
         public Executor getExecutor() {
@@ -141,13 +141,13 @@ public class InProcessConduit {
 
     }
 
-    private class InprocChannelTopicConduit implements ChannelTopicConduit {
+    private class InprocTopicConduit implements TopicConduit {
 
         private String channelId;
 
         private final String serverTopic;
 
-        private InprocChannelTopicConduit(String serverTopic) {
+        private InprocTopicConduit(String serverTopic) {
             this.serverTopic = serverTopic;
         }
 

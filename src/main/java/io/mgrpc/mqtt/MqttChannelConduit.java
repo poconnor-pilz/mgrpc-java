@@ -28,7 +28,7 @@ public class MqttChannelConduit implements ChannelConduit, MessageSubscriber {
     private final String channelStatusTopic;
 
 
-    private final Map<String, ChannelTopicConduit> conduitsByServerTopic = new ConcurrentHashMap<>();
+    private final Map<String, TopicConduit> conduitsByServerTopic = new ConcurrentHashMap<>();
 
     private final MqttTopicConduitManager topicConduitManager;
 
@@ -105,14 +105,14 @@ public class MqttChannelConduit implements ChannelConduit, MessageSubscriber {
     }
 
     @Override
-    public ChannelTopicConduit getChannelTopicConduit(String serverTopic, ChannelListener channelListener) {
+    public TopicConduit getTopicConduit(String serverTopic, ChannelListener channelListener) {
 
-        final ChannelTopicConduit channelTopicConduit = this.topicConduitManager.getChannelTopicConduit(serverTopic, channelListener);
+        final TopicConduit topicConduit = this.topicConduitManager.getTopicConduit(serverTopic, channelListener);
 
         try {
             //start should be idempotent and synchronized
-            channelTopicConduit.start(channelListener);
-            return channelTopicConduit;
+            topicConduit.start(channelListener);
+            return topicConduit;
         } catch (MessagingException e) {
             throw new RuntimeException(e);
         }
@@ -121,7 +121,7 @@ public class MqttChannelConduit implements ChannelConduit, MessageSubscriber {
 
     @Override
     public void close(String channelId) {
-        for (ChannelTopicConduit conduit : conduitsByServerTopic.values()) {
+        for (TopicConduit conduit : conduitsByServerTopic.values()) {
             conduit.close();
         }
         if (channelStatusTopic != null) {
@@ -217,7 +217,7 @@ public class MqttChannelConduit implements ChannelConduit, MessageSubscriber {
     }
 
 
-    public MqttChannelTopicConduit.Stats getStats() {
+    public MqttTopicConduit.Stats getStats() {
 
         int subscribers = 0;
         final Set<String> topics = subscribersByTopic.keySet();
@@ -225,7 +225,7 @@ public class MqttChannelConduit implements ChannelConduit, MessageSubscriber {
             subscribers += subscribersByTopic.get(topic).size();
         }
 
-        return new MqttChannelTopicConduit.Stats(subscribers, topicConduitManager.limitedClients.size());
+        return new MqttTopicConduit.Stats(subscribers, topicConduitManager.limitedClients.size());
     }
 
 }

@@ -3,7 +3,7 @@ package io.mgrpc;
 /**
  * Interface to messaging client. Adapters should implement this to work with different message protocols.
  */
-public interface ChannelTopicConduit {
+public interface TopicConduit {
 
     /**
      * Called by the channel when it starts. This should be idempotent.

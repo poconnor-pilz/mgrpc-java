@@ -25,7 +25,7 @@ public class JmsChannelConduit implements ChannelConduit {
 
     private static volatile Executor executorSingleton;
 
-    private final Map<String, ChannelTopicConduit> conduitsByServerTopic = new ConcurrentHashMap<>();
+    private final Map<String, TopicConduit> conduitsByServerTopic = new ConcurrentHashMap<>();
 
 
 
@@ -85,7 +85,7 @@ public class JmsChannelConduit implements ChannelConduit {
 
 
     @Override
-    public ChannelTopicConduit getChannelTopicConduit(String serverTopic, ChannelListener channelListener) {
+    public TopicConduit getTopicConduit(String serverTopic, ChannelListener channelListener) {
 
         if(session == null) {
             try {
@@ -95,11 +95,11 @@ public class JmsChannelConduit implements ChannelConduit {
             }
         }
 
-        ChannelTopicConduit conduit;
+        TopicConduit conduit;
         synchronized (conduitsByServerTopic) {
             conduit = conduitsByServerTopic.get(serverTopic);
             if (conduit == null) {
-                conduit = new JmsChannelTopicConduit(session, serverTopic, useBrokerFlowControl, getExecutor());
+                conduit = new JmsTopicConduit(session, serverTopic, useBrokerFlowControl, getExecutor());
                 conduitsByServerTopic.put(serverTopic, conduit);
             }
         }
@@ -117,7 +117,7 @@ public class JmsChannelConduit implements ChannelConduit {
     @Override
     public void close(String channelId) {
 
-        for (ChannelTopicConduit conduit : conduitsByServerTopic.values()) {
+        for (TopicConduit conduit : conduitsByServerTopic.values()) {
             conduit.close();
         }
 

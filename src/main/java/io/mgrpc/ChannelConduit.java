@@ -10,7 +10,7 @@ public interface ChannelConduit {
      * @param serverTopic The root topic of the server corresponding to the conduit
      * @return
      */
-    ChannelTopicConduit getChannelTopicConduit(String serverTopic, ChannelListener channelListener);
+    TopicConduit getTopicConduit(String serverTopic, ChannelListener channelListener);
 
     /**
      * @return The executor with which to execute calls
