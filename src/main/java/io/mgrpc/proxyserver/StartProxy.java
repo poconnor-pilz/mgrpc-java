@@ -28,7 +28,7 @@ public class StartProxy {
 
         //We want to wire this:
         //HttpServer -> GrpcProxy -> MqttChannel
-        GrpcProxy proxy = new GrpcProxy(messageChannel);
+        GrpcProxy<byte[], byte[]> proxy = new GrpcProxy(messageChannel);
         final GrpcProxy.Registry registry = new GrpcProxy.Registry(proxy);
         //Connect the proxy to the http server
         int port = 50051;

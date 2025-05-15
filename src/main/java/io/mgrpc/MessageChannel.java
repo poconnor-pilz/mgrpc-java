@@ -33,10 +33,6 @@ public class MessageChannel extends Channel implements ChannelListener {
     private final int queueSize;
 
 
-
-    private boolean started = false;
-
-
     private final Map<String, MsgClientCall> clientCallsById = new ConcurrentHashMap<>();
 
 
@@ -394,7 +390,6 @@ public class MessageChannel extends Channel implements ChannelListener {
                     return;
                 default:
                     log.error("Invalid message case");
-                    return;
             }
         }
 

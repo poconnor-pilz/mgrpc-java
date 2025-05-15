@@ -27,7 +27,7 @@ public class StartHttpProxy {
         ManagedChannel channel = Grpc.newChannelBuilder(target, InsecureChannelCredentials.create())
                 .build();
         log.info("Proxy will connect to " + target);
-        GrpcProxy<byte[], byte[]> proxy = new GrpcProxy<byte[], byte[]>(channel);
+        GrpcProxy<byte[], byte[]> proxy = new GrpcProxy<>(channel);
         int port = 50051;
         Server server = Grpc.newServerBuilderForPort(port, InsecureServerCredentials.create())
                 .fallbackHandlerRegistry(new GrpcProxy.Registry(proxy))
@@ -35,19 +35,16 @@ public class StartHttpProxy {
                 .start();
         log.info("Proxy started, listening on " + port);
 
-        Runtime.getRuntime().addShutdownHook(new Thread() {
-            @Override
-            public void run() {
-                server.shutdown();
-                try {
-                    server.awaitTermination(10, TimeUnit.SECONDS);
-                } catch (InterruptedException ex) {
-                    Thread.currentThread().interrupt();
-                }
-                server.shutdownNow();
-                channel.shutdownNow();
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            server.shutdown();
+            try {
+                server.awaitTermination(10, TimeUnit.SECONDS);
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
             }
-        });
+            server.shutdownNow();
+            channel.shutdownNow();
+        }));
         server.awaitTermination();
         if (!channel.awaitTermination(1, TimeUnit.SECONDS)) {
             System.out.println("Channel didn't shut down promptly");

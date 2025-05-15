@@ -28,21 +28,6 @@ public class StartClients {
                 .setNumResponses(10)
                 .setName("Joe").build();
 
-//        String topic1 = "mgrpc/server-" + 0;
-//        ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub stub1 = ExampleHelloServiceGrpc.newBlockingStub(TopicInterceptor.intercept(httpChannel, topic1));
-//        final Iterator<HelloReply> helloReplyIterator1 = stub1.lotsOfReplies(tenTimes);
-//        int count1 = 0;
-//        for(; helloReplyIterator1.hasNext(); ) {
-//            final HelloReply reply = helloReplyIterator1.next();
-//            if(!reply.getMessage().equals("Hello Joe " + count1++)) {
-//                log.error("Reply is out of order");
-//                System.exit(1);
-//            }
-//        }
-//
-//        if(true) return;
-
-
         for(int i=0; i < numServers; i++) {
             String topic = "mgrpc/server-" + i;
             Thread t = new Thread(()->{
@@ -50,13 +35,11 @@ public class StartClients {
                 while(true) {
                     final Iterator<HelloReply> helloReplyIterator = stub.lotsOfReplies(tenTimes);
                     int count = 0;
-                    for(; helloReplyIterator.hasNext(); ) {
+                    while(helloReplyIterator.hasNext()) {
                         final HelloReply reply = helloReplyIterator.next();
                         if(!reply.getMessage().equals("Hello Joe " + count++)) {
                             log.error("Reply is out of order");
                             System.exit(1);
-                        } else {
-                            //log.debug("Received reply: {}", reply.getMessage());
                         }
                     }
                 }

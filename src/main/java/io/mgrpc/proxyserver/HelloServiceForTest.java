@@ -45,8 +45,9 @@ public class HelloServiceForTest extends ExampleHelloServiceGrpc.ExampleHelloSer
     @Override
     public StreamObserver<HelloRequest> lotsOfGreetings(StreamObserver<HelloReply> singleResponse) {
 
-        return new StreamObserver<HelloRequest>() {
-            private ArrayList<String> names = new ArrayList<>();
+        return new StreamObserver<>() {
+            private final ArrayList<String> names = new ArrayList<>();
+
             @Override
             public void onNext(HelloRequest value) {
                 log.debug("lotsOfGreetings received " + value);
@@ -62,7 +63,7 @@ public class HelloServiceForTest extends ExampleHelloServiceGrpc.ExampleHelloSer
             public void onCompleted() {
                 log.debug("lotsOfGreetings onCompleted()");
                 String everyone = "";
-                for(String name: names){
+                for (String name : names) {
                     everyone += name + ",";
                 }
                 HelloReply reply = HelloReply.newBuilder().setMessage("Hello " + everyone).build();
@@ -78,7 +79,7 @@ public class HelloServiceForTest extends ExampleHelloServiceGrpc.ExampleHelloSer
      */
     @Override
     public StreamObserver<HelloRequest> bidiHello(StreamObserver<HelloReply> multipleResponses) {
-        return new StreamObserver<HelloRequest>() {
+        return new StreamObserver<>() {
             @Override
             public void onNext(HelloRequest value) {
                 HelloReply reply = HelloReply.newBuilder().setMessage("Hello " + value.getName()).build();
