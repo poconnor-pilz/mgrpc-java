@@ -1,0 +1,65 @@
+// Copyright 2015 The gRPC Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+syntax = "proto3";
+
+
+
+option java_multiple_files = true;
+option java_package = "io.grpc.examples.helloworld";
+option java_outer_classname = "HelloWorldProto";
+option objc_class_prefix = "HLW";
+
+package helloworld;
+
+service ExampleHelloService {
+
+  //Unary request response
+  //Send a single HelloRequest message and return a single HelloReply
+  rpc SayHello(HelloRequest) returns (HelloReply);
+
+  //Server streaming
+  //Send a single HelloRequest message and return a stream of HelloReply messages
+  rpc LotsOfReplies(HelloRequest) returns (stream HelloReply);
+
+  //Client streaming
+  //Send a stream of HelloRequest messages and return a single HelloReply message
+  rpc LotsOfGreetings(stream HelloRequest) returns (HelloReply);
+
+  //Bidirectional streaming
+  //Send a stream of HelloRequest messages and return a stream of HelloReply messages
+  rpc BidiHello(stream HelloRequest) returns (stream HelloReply);
+
+
+}
+
+
+// The request message containing the user's name.
+message HelloRequest {
+  string name = 1;
+  int32 numResponses = 2;
+}
+
+// The response message containing the greetings
+message HelloReply {
+  string message = 1;
+}
+
+//Example rich error
+message HelloCustomError{
+  int32 hello_error_code = 1;
+  string hello_error_description = 2;
+}
+
+
+

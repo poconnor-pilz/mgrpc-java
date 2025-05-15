@@ -24,11 +24,7 @@ public class MessageChannel extends Channel implements ChannelListener {
     public static final CallOptions.Key<String> OPT_OUT_TOPIC = CallOptions.Key.create("out-topic");
 
 
-    private final static Metadata EMPTY_METADATA = new Metadata();
-
     private static final com.google.rpc.Status GOOGLE_RPC_OK_STATUS = io.grpc.protobuf.StatusProto.fromStatusAndTrailers(Status.OK, null);
-
-    private static volatile Executor executorSingleton;
 
 
     private final ChannelConduit conduit;
@@ -155,7 +151,11 @@ public class MessageChannel extends Channel implements ChannelListener {
      */
     public static Status googleRpcStatusToGrpcStatus(com.google.rpc.Status statusProto) {
         Status status = Status.fromCodeValue(statusProto.getCode());
-        return status.withDescription(statusProto.getMessage());
+        if (statusProto.getMessage() == null || statusProto.getMessage().isEmpty()) {
+            return status;
+        } else {
+            return status.withDescription(statusProto.getMessage());
+        }
     }
 
 
@@ -382,7 +382,7 @@ public class MessageChannel extends Channel implements ChannelListener {
                 case VALUE:
                     clientExec(() -> {
                         if(message.getSequence() == 1) { //only send headers if this is the first response
-                            responseListener.onHeaders(EMPTY_METADATA);
+                            responseListener.onHeaders(new Metadata());
                         }
                         responseListener.onMessage(methodDescriptor.parseResponse(message.getValue().getContents().newInput()));
                         if (message.getSequence() == SINGLE_MESSAGE_STREAM) {
@@ -428,7 +428,7 @@ public class MessageChannel extends Channel implements ChannelListener {
             log.debug("Closing call {} with status: {} {}", new Object[]{this.callId, status.getCode(), status.getDescription()});
             context.removeListener(cancellationListener);
             cancelTimeouts();
-            clientExec(() -> responseListener.onClose(status, EMPTY_METADATA));
+            clientExec(() -> responseListener.onClose(status, new Metadata()));
             clientCallsById.remove(this.callId);
             topicConduit.onCallClosed(callId);
         }

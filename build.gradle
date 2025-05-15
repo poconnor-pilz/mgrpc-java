@@ -8,6 +8,8 @@ plugins {
     id 'java-library'
     id "com.google.protobuf" version "0.9.5"
     id 'maven-publish'
+    id 'application'
+    id 'com.gradleup.shadow' version '8.3.5'
 }
 
 group 'io.mgrpc'
@@ -41,6 +43,9 @@ dependencies {
     //JMS support
     implementation group:"org.apache.activemq", name: "artemis-jms-client", version: "2.29.0"
 
+    //For https proxy server
+    implementation group: "io.grpc", name: "grpc-netty", version: grpcVersion
+
 
     //Need this because grpc will generate code that has annotations from javax.annotation (@generated)
     if (JavaVersion.current().isJava9Compatible()) {
@@ -56,9 +61,6 @@ dependencies {
     testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.8.1'
     //This is just for the RouteGuideExample to parse json to protobuf
     testImplementation group: 'com.google.protobuf', name: 'protobuf-java-util', version: '3.21.2'
-
-    //For tests that use https server (as opposed to inprocess server)
-    testImplementation group: "io.grpc", name: "grpc-netty", version: grpcVersion
 
     //For tests that use inprocess
     testImplementation group: "io.grpc", name: "grpc-inprocess", version: grpcVersion
@@ -111,6 +113,18 @@ task sourceJar(type: Jar) {
 //This can lead to incorrect results being produced, depending on what order the tasks are executed.
 afterEvaluate {
     sourceJar.dependsOn tasks.generateProto
+}
+
+
+//For shadow jar
+application {
+    mainClassName = 'org.example.Main'
+}
+tasks.named('shadowJar', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+    mergeServiceFiles()
+    archiveBaseName.set('mgrpc-proxy')
+    archiveClassifier.set('')
+    archiveVersion.set('')
 }
 
 
