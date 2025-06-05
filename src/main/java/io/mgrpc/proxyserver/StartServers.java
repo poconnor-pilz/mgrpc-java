@@ -10,7 +10,7 @@ public class StartServers {
         public static void main(String[] args) throws Exception {
 
         if(args.length != 1) {
-            System.out.println("Usage: StartProxy mqtt broker url (e.g. tcp://localhost:1887)");
+            System.out.println("Usage: StartProxy mqtt broker url (e.g. tcp://localhost:1883)");
             return;
         }
 

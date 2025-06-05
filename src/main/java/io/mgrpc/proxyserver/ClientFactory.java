@@ -23,6 +23,7 @@ class ClientFactory implements MqttClientFactory {
     @Override
     public IMqttAsyncClient createMqttClient() {
         try {
+            log.debug("Creating MQTT Client at " + brokerUrl);
             final MqttAsyncClient client;
             final String clientId = MqttAsyncClient.generateClientId();
             client = new MqttAsyncClient(
