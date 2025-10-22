@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "example.filetransfer";
+option java_outer_classname = "FileTransferProto";
+
+package filetransfer;
+
+service FileTransfer {
+  rpc ServerStreamFile(FileRequest) returns (stream FileChunk);
+  rpc ClientStreamFile(stream FileChunk) returns (FileResult);
+}
+
+
+//Request message containing the path of the file to stream and the chunk size
+message FileRequest {
+  string filePath = 1;
+  uint32 chunkSize = 2;
+}
+
+//Message containing a chunk of a file
+message FileChunk {
+  bytes chunk = 1;
+}
+
+
+message FileResult{
+  bool ok = 1;
+}
