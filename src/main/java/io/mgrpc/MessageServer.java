@@ -121,7 +121,7 @@ public class MessageServer implements ServerListener {
         //but the client didn't detect this and is still sending messages for a previous call.
         //This could also occur when the call's queue has reached its limit but the client hasn't
         //received the error message yet.
-        if (recentlyRemovedCallIds.contains(callId)) {
+        if (recentlyRemovedCallIds.get(callId) != null){
             log.warn("Message received for removed call {}. Ignoring", callId);
             return;
         }
