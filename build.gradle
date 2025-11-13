@@ -59,8 +59,6 @@ dependencies {
     testImplementation 'org.junit.jupiter:junit-jupiter-api:5.8.1'
     testImplementation 'org.junit.platform:junit-platform-suite:1.9.2'
     testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.8.1'
-    //This is just for the RouteGuideExample to parse json to protobuf
-    testImplementation group: 'com.google.protobuf', name: 'protobuf-java-util', version: '3.21.2'
 
     //For tests that use inprocess
     testImplementation group: "io.grpc", name: "grpc-inprocess", version: grpcVersion
