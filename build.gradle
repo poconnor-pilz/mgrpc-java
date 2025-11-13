@@ -94,6 +94,14 @@ sourceSets {
 }
 
 
+java {
+
+    //Make sure that the source code is compliant with 1.8 so that people have the possibility
+    //to build this against a with a java 1.8 toolchain so that they can run with older VMs.
+    //(grpc-java is fully compatible with java 1.8)
+    sourceCompatibility = JavaVersion.VERSION_1_8
+}
+
 test {
     useJUnitPlatform()
 }
@@ -123,7 +131,7 @@ application {
 tasks.named('shadowJar', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
     mergeServiceFiles()
     archiveBaseName.set('mgrpc-proxy')
-    archiveClassifier.set('')
+    archiveClassifier.set('mgrpc-proxy')
     archiveVersion.set('')
 }
 
@@ -165,3 +173,4 @@ protobuf {
 //        path = 'c:/bin/protoc/bin/protoc'
 //    }
 //}
+

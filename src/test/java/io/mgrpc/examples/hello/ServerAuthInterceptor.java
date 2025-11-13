@@ -51,7 +51,7 @@ public class ServerAuthInterceptor implements ServerInterceptor {
         }
 
         serverCall.close(status, metadata);
-        return new ServerCall.Listener<>() {
+        return new ServerCall.Listener<ReqT>() {
             // noop
         };
     }
