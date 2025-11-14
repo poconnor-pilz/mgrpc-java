@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "io.grpc.examples.helloworld";
+option java_outer_classname = "HelloWorldProto";
+option objc_class_prefix = "HLW";
+
+package helloworld;
+
+service Greeter {
+
+  //Unary request response
+  //Send a single HelloRequest message and return a single HelloReply
+  rpc SayHello(HelloRequest) returns (HelloReply);
+
+  //Server streaming
+  //Send a single HelloRequest message and return a stream of HelloReply messages
+  rpc LotsOfReplies(HelloRequest) returns (stream HelloReply);
+
+  //Client streaming
+  //Send a stream of HelloRequest messages and return a single HelloReply message
+  rpc LotsOfGreetings(stream HelloRequest) returns (HelloReply);
+
+  //Bidirectional streaming
+  //Send a stream of HelloRequest messages and return a stream of HelloReply messages
+  rpc BidiHello(stream HelloRequest) returns (stream HelloReply);
+
+
+}
+
+
+// The request message containing the user's name.
+message HelloRequest {
+  string name = 1;
+  int32 numResponses = 2;
+}
+
+// The response message containing the greetings
+message HelloReply {
+  string message = 1;
+}
+
+//Example rich error
+message HelloCustomError{
+  int32 hello_error_code = 1;
+  string hello_error_description = 2;
+}
+
+
+
