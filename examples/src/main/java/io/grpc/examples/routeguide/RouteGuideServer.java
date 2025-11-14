@@ -47,7 +47,7 @@ public class RouteGuideServer {
     MqttUtils.EmbeddedBroker.start();
 
     final String serverTopic = "mgrpc/routeguideexample";
-    String target = "tcp://localhost:1887";
+    String target = MqttUtils.getBrokerUrl();
     if (args.length > 0) {
       if ("--help".equals(args[0])) {
         System.err.println("Usage: [target]");

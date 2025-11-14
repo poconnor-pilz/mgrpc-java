@@ -82,9 +82,9 @@ protobuf {
 
 
 if (project.hasProperty("args")) {
-    ext.javaMainClass = "org.example." + project.getProperty("args")
+    ext.javaMainClass = "org.example.greeter." + project.getProperty("args")
 } else {
-    ext.javaMainClass = "org.example.GreeterService"
+    ext.javaMainClass = "org.example.greeter.GreeterService"
 }
 
 application {

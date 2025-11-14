@@ -27,8 +27,7 @@ public class ClientStreaming {
     public static void main(String[] args) throws Exception {
 
 
-        String brokerUrl = "tcp://localhost:1887";
-        MqttAsyncClient clientMqtt = MqttUtils.makeClient(brokerUrl);
+        MqttAsyncClient clientMqtt = MqttUtils.makeClient(MqttUtils.getBrokerUrl());
 
         MessageChannel baseChannel = new MessageChannel(new MqttChannelConduit(clientMqtt));
         //Make sure all messages on the channel are routed through GreeterService.SERVER_TOPIC

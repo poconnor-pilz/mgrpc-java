@@ -6,7 +6,25 @@ import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
 
+import java.io.InputStream;
+import java.util.Properties;
+
 public class MqttUtils {
+
+    private static Properties PROPS = null;
+    public static Properties getProperties() throws Exception{
+        if(PROPS == null){
+            InputStream is = MqttUtils.class.getClassLoader().getResourceAsStream("broker.properties");
+            PROPS = new Properties();
+            PROPS.load(is);
+        }
+        return PROPS;
+    }
+
+    public  static String getBrokerUrl() throws Exception{
+        String brokerUrl = (String)getProperties().get("brokerUrl");
+        return brokerUrl;
+    }
 
     public static MqttAsyncClient makeClient(String brokerUrl) throws Exception {
         return makeClient(brokerUrl, null);

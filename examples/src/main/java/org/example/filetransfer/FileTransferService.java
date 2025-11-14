@@ -18,8 +18,7 @@ public class FileTransferService extends FileTransferGrpc.FileTransferImplBase {
 
         //Get an mqtt connection to the broker and make a MessageServer from it
         //Services in the server will listen on topics prefixed with "tenant1/device1"
-        final String brokerUrl = "tcp://localhost:1887";
-        MqttAsyncClient client = MqttUtils.makeClient(brokerUrl);
+        MqttAsyncClient client = MqttUtils.makeClient(MqttUtils.getBrokerUrl());
         String serverTopic = "tenant1/device1";
         MessageServer server = new MessageServer(new MqttServerConduit(client, serverTopic));
 

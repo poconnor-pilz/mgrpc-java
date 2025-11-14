@@ -1,11 +1,35 @@
 
-# mgrpc-java 
+# mgRPC-Java 
 
 
-This repository supports transport of gRPC over MQTT for java clients. It also contains a proxy that can support 
-gRPC clients written in any language. 
+This repository implements gRPC over MQTT for java clients. It also contains a proxy that can support 
+gRPC clients written in any language.
 
-Key attributes:
+
+## Building mgRPC-Java
+
+Building requires at least JDK 8
+
+
+To build, run:
+```
+$ ./gradlew build
+```
+
+To install the artifacts to your Maven local repository for use in your own
+project, run:
+```
+$ ./gradlew publishToMavenLocal
+```
+
+
+## Getting Started
+
+Have a look at the [examples](examples/readme.md)
+
+
+
+## Key Attributes
 - Maintains message order and detects duplicates even with underlying brokers that do not have these features.
 - Supports errors, cancellation and timeouts and authentication.
 - Can communicate with multiple servers over a single channel by specifying the root topic for each server.

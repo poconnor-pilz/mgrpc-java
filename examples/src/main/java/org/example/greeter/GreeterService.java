@@ -26,8 +26,7 @@ public class GreeterService extends GreeterGrpc.GreeterImplBase {
         //Start the embedded MQTT broker which will listen on port 1887.
         //The port is specified in src/main/resources/broker.properties
         MqttUtils.EmbeddedBroker.start();
-        String brokerUrl = "tcp://localhost:1887";
-        MqttAsyncClient serverMqtt = MqttUtils.makeClient(brokerUrl);
+        MqttAsyncClient serverMqtt = MqttUtils.makeClient(MqttUtils.getBrokerUrl());
         //Set up the server at topic serverTopic
         MessageServer server = new MessageServer(new MqttServerConduit(serverMqtt, SERVER_TOPIC));
         //Add our service
