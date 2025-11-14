@@ -234,6 +234,7 @@ public class TestJmsFlowControl {
         Channel channel = TopicInterceptor.intercept(messageChannel, serverId);
 
         final CountDownLatch serviceLatch = new CountDownLatch(1);
+        final CountDownLatch firstMessageLatch = new CountDownLatch(1);
         class BlockedService extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
             public List<HelloRequest> list = new ArrayList<>();
 
@@ -244,6 +245,7 @@ public class TestJmsFlowControl {
                     public void onNext(HelloRequest request) {
                         log.debug("Service received: " + request.getName());
                         list.add(request);
+                        firstMessageLatch.countDown();
                         if(list.size() == 15){
                             responseObserver.onNext(HelloReply.newBuilder().build());
                             responseObserver.onCompleted();
@@ -281,6 +283,8 @@ public class TestJmsFlowControl {
             client.onNext(request);
         }
 
+        //Wait until at least one message is received
+        firstMessageLatch.await(5, TimeUnit.SECONDS);
         assertEquals(1, blockedService.list.size());
 
         client.onCompleted();
@@ -288,6 +292,8 @@ public class TestJmsFlowControl {
         //Allow some time to make sure messages got to broker
         Thread.sleep(100);
 
+        //There should still only be one message because the service is blocked
+        assertEquals(1, blockedService.list.size());
         log.debug("Unblocking client stream");
 
         //unblock the service

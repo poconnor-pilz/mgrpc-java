@@ -181,6 +181,7 @@ public class TestSubscription {
         latch.await();
 
         //All subscriptions should be closed because the streams have completed
+        Thread.sleep(50); //Wait because it may take time for the unsubscribe after the latch is tripped in onCompleted
         assertEquals(channelConduit.getStats().getSubscribers(), 0);
 
         assertEquals(obs1.replies.size(), 2);
