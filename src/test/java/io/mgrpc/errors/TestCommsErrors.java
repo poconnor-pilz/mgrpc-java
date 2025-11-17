@@ -118,7 +118,7 @@ public class TestCommsErrors {
     public void testServerClosedMidstream() throws Exception{
 
         //Close a server while it is streaming responses
-        //The broker should send an LWT message. The channel should react to this by sending an UNVAILABLE error
+        //The broker should send a ConnectionStatus false message. The channel should react to this by sending an UNVAILABLE error
         //to the ongoing call on the client side.
 
 
