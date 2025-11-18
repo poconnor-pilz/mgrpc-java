@@ -79,26 +79,6 @@ public class MqttTopicConduit implements TopicConduit {
 
 
 
-    public static class Stats {
-        private final int subscribers;
-        private final int numClients;
-
-        public Stats(int subscribers, int numClients) {
-            this.subscribers = subscribers;
-            this.numClients = numClients;
-        }
-
-        public int getSubscribers() {
-            return subscribers;
-        }
-
-        public int getNumClients() {
-            return numClients;
-        }
-
-    }
-
-
     /**
      * @param client
      * @param serverTopic The root topic of the server to connect to e.g. "tenant1/device1"

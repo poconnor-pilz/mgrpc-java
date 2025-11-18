@@ -5,8 +5,8 @@ import com.google.protobuf.Parser;
 import io.grpc.stub.StreamObserver;
 
 /**
- * Some channel {@link ServerConduit}s may implement this interface if they want to support pub/sub
- * of gRPC streams. It is not necessary to implement this to support core gRPC
+ * A class can implement this if it wants to use the broker pub/sub to efficiently support more than one listener to
+ * a single gRPC server stream. The server stream must be sent to a specified broker topic for this to work.
  */
 public interface MessageSubscriber {
 

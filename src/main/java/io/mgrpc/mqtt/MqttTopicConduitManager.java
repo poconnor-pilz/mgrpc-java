@@ -1,8 +1,8 @@
 package io.mgrpc.mqtt;
 
 import io.mgrpc.ChannelListener;
-import io.mgrpc.TopicConduit;
 import io.mgrpc.TimerService;
+import io.mgrpc.TopicConduit;
 import org.eclipse.paho.client.mqttv3.IMqttAsyncClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
