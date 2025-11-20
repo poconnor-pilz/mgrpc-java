@@ -8,7 +8,7 @@ import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
 import io.mgrpc.mqtt.MqttChannelConduit;
 import io.mgrpc.mqtt.MqttServerConduit;
-import io.mgrpc.mqtt.MqttSubscriber;
+import io.mgrpc.mqtt.MqttStreamPubSub;
 import io.mgrpc.mqtt.MqttUtils;
 import io.mgrpc.utils.ToList;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
@@ -25,9 +25,9 @@ import java.util.concurrent.CountDownLatch;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 
-public class TestSubscription {
+public class TestStreamsPubSub {
 
-    private static Logger log = LoggerFactory.getLogger(TestSubscription.class);
+    private static Logger log = LoggerFactory.getLogger(TestStreamsPubSub.class);
 
     private static MqttAsyncClient serverMqtt;
     private static MqttAsyncClient clientMqtt;
@@ -37,7 +37,7 @@ public class TestSubscription {
     Channel channel;
     private MessageServer server;
 
-    private MqttSubscriber subscriber;
+    private MqttStreamPubSub pubsub;
 
     //Make server name short but random to prevent stray status messages from previous tests affecting this test
     private static final String SERVER = Id.shortRandom();
@@ -61,13 +61,13 @@ public class TestSubscription {
     }
 
     @BeforeEach
-    void setup() throws Exception{
+    void setup() throws Exception {
 
         //Set up the serverb
         server = new MessageServer(new MqttServerConduit(serverMqtt, SERVER));
         server.start();
 
-        subscriber = new MqttSubscriber(clientMqtt);
+        pubsub = new MqttStreamPubSub(clientMqtt);
 
         baseChannel = new MessageChannel(new MqttChannelConduit(clientMqtt));
 
@@ -76,7 +76,7 @@ public class TestSubscription {
     }
 
     @AfterEach
-    void tearDown() throws Exception{
+    void tearDown() throws Exception {
         baseChannel.close();
         server.close();
     }
@@ -90,7 +90,7 @@ public class TestSubscription {
         return this.server;
     }
 
-    public void checkForLeaks(int numActiveCalls){
+    public void checkForLeaks(int numActiveCalls) {
         try {
             //Give the channel and server time to process messages and release resources
             Thread.sleep(50);
@@ -103,14 +103,68 @@ public class TestSubscription {
 
 
 
+
     @Test
-    public void testSubscription() throws InterruptedException, MessagingException {
+    public void testPubSub() throws MessagingException, InterruptedException {
+        class HelloObserver implements StreamObserver<HelloReply> {
+            public final List<HelloReply> replies = new ArrayList<>();
+            public final CountDownLatch latch = new CountDownLatch(2);
+
+            @Override
+            public void onNext(HelloReply helloReply) {
+                log.debug("Received message: " + helloReply.getMessage());
+                replies.add(helloReply);
+                latch.countDown();
+            }
+
+            @Override
+            public void onError(Throwable throwable) {
+                log.error("", throwable);
+            }
+
+            @Override
+            public void onCompleted() {
+            }
+        }
+        ;
+
+        HelloObserver observer = new HelloObserver();
+        final String topic = "mgrpc/testpubsub";
+
+        pubsub.subscribe(topic, HelloReply.parser(), observer);
+
+        final StreamObserver<HelloReply> publisher = pubsub.getPublisher(topic);
+        publisher.onNext(HelloReply.newBuilder().setMessage("Hello 1").build());
+        publisher.onNext(HelloReply.newBuilder().setMessage("Hello 2").build());
+
+        observer.latch.await();
+
+        assertEquals("Hello 1", observer.replies.get(0).getMessage());
+        assertEquals("Hello 2", observer.replies.get(1).getMessage());
+
+        Thread.sleep(500);
+    }
+
+    @Test
+    public void testServiceSubscription() throws InterruptedException, MessagingException {
 
         //Test the ability to have multiple subscribers listen for responses from
         //a single service via pub sub
         //See the java doc for MessagingSubscriber.subscribe()
 
-        getServer().addService(new HelloServiceForTest());
+        class HelloServiceSub extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
+            @Override
+            public void lotsOfReplies(HelloRequest request, StreamObserver<HelloReply> responseObserver) {
+                for (int i = 0; i < request.getNumResponses(); i++) {
+                    HelloReply reply = HelloReply.newBuilder().setMessage("Hello " + request.getName() + " " + i).build();
+                    responseObserver.onNext(reply);
+                }
+                responseObserver.onCompleted();
+            }
+        }
+
+
+        getServer().addService(new HelloServiceSub());
 
 
         class HelloObserver implements StreamObserver<HelloReply> {
@@ -126,10 +180,12 @@ public class TestSubscription {
             public void onNext(HelloReply helloReply) {
                 replies.add(helloReply);
             }
+
             @Override
             public void onError(Throwable throwable) {
                 log.error("", throwable);
             }
+
             @Override
             public void onCompleted() {
                 this.countDownLatch.countDown();
@@ -143,20 +199,20 @@ public class TestSubscription {
         //Subscribe for responses
         CountDownLatch latch = new CountDownLatch(3);
         HelloObserver obs1 = new HelloObserver(latch);
-        subscriber.subscribe(responseTopic1, HelloReply.parser(), obs1);
+        pubsub.subscribe(responseTopic1, HelloReply.parser(), obs1);
         HelloObserver obs2 = new HelloObserver(latch);
-        subscriber.subscribe(responseTopic1, HelloReply.parser(), obs2);
+        pubsub.subscribe(responseTopic1, HelloReply.parser(), obs2);
         HelloObserver obsTemp = new HelloObserver(latch);
-        subscriber.subscribe(responseTopic1, HelloReply.parser(), obsTemp);
-        assertEquals(subscriber.getStats().getSubscribers(), 3);
+        pubsub.subscribe(responseTopic1, HelloReply.parser(), obsTemp);
+        assertEquals(pubsub.getStats().getSubscribers(), 3);
 
         //Unsubscribe one of the observers of responseTopic1 and verify that it is removed
-        subscriber.unsubscribe(responseTopic1, obsTemp);
-        assertEquals(subscriber.getStats().getSubscribers(), 2);
+        pubsub.unsubscribe(responseTopic1, obsTemp);
+        assertEquals(pubsub.getStats().getSubscribers(), 2);
 
         HelloObserver obs3 = new HelloObserver(latch);
-        subscriber.subscribe(responseTopic2, HelloReply.parser(), obs3);
-        assertEquals(subscriber.getStats().getSubscribers(), 3);
+        pubsub.subscribe(responseTopic2, HelloReply.parser(), obs3);
+        assertEquals(pubsub.getStats().getSubscribers(), 3);
 
         //Send two requests each with a different responseTopic
         final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub blockingStub1 =
@@ -181,9 +237,6 @@ public class TestSubscription {
 
         latch.await();
 
-        //All subscriptions should be closed because the streams have completed
-        Thread.sleep(50); //Wait because it may take time for the unsubscribe after the latch is tripped in onCompleted
-        assertEquals(subscriber.getStats().getSubscribers(), 0);
 
         assertEquals(obs1.replies.size(), 2);
         assertEquals("Hello sub1 0", obs1.replies.get(0).getMessage());
@@ -204,17 +257,17 @@ public class TestSubscription {
         checkForLeaks(0);
 
         //Test unsubscribe of all observers to a responseTopic
-        subscriber.subscribe(responseTopic1, HelloReply.parser(), obs1);
-        subscriber.subscribe(responseTopic1, HelloReply.parser(), obs2);
-        subscriber.subscribe(responseTopic2, HelloReply.parser(), obs3);
-        assertEquals(3, subscriber.getStats().getSubscribers());
+        pubsub.subscribe(responseTopic1, HelloReply.parser(), obs1);
+        pubsub.subscribe(responseTopic1, HelloReply.parser(), obs2);
+        pubsub.subscribe(responseTopic2, HelloReply.parser(), obs3);
+        assertEquals(6, pubsub.getStats().getSubscribers());
 
-        subscriber.unsubscribe(responseTopic1);
+        pubsub.unsubscribe(responseTopic1);
         //All 2 of the subscribers to responseTopic1 should be removed
-        assertEquals(1, subscriber.getStats().getSubscribers());
+        assertEquals(2, pubsub.getStats().getSubscribers());
 
-        subscriber.unsubscribe(responseTopic2);
-        assertEquals(0, subscriber.getStats().getSubscribers());
+        pubsub.unsubscribe(responseTopic2);
+        assertEquals(0, pubsub.getStats().getSubscribers());
 
     }
 

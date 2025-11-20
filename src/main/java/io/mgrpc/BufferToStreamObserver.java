@@ -23,7 +23,7 @@ public class BufferToStreamObserver {
      * @param <T> Stream type
      * @throws MessagingException
      */
-    public static <T> boolean convert(Parser<T> parser, RpcMessage message, final StreamObserver<T> observer) throws MessagingException {
+    public static <T> boolean convert(Parser<T> parser, RpcMessage message, final StreamObserver<T> observer) {
 
 
         switch (message.getMessageCase()) {
