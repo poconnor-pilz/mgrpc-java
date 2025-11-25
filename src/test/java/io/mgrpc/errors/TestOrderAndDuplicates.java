@@ -18,6 +18,7 @@ import org.eclipse.paho.client.mqttv3.MqttException;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,7 +31,7 @@ import java.util.concurrent.CountDownLatch;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-public class TestOrderAndDuplicates {
+class TestOrderAndDuplicates {
 
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
@@ -98,8 +99,8 @@ public class TestOrderAndDuplicates {
         log.debug(topic);
         String replyTo = serverTopics.replyTopic(channelId, fullMethodName);
         log.debug(replyTo);
-        publishAndPause(clientMqtt, topic, TestRpcMessageBuilder.makeStartRequest(fullMethodName, Start.MethodType.CLIENT_STREAMING, callId, 1, replyTo));
         publishAndPause(clientMqtt, topic, TestRpcMessageBuilder.makeValueRequest(callId, 5));
+        publishAndPause(clientMqtt, topic, TestRpcMessageBuilder.makeStartRequest(fullMethodName, Start.MethodType.CLIENT_STREAMING, callId, 1, replyTo));
         publishAndPause(clientMqtt, topic, TestRpcMessageBuilder.makeValueRequest(callId, 2));
         publishAndPause(clientMqtt, topic, TestRpcMessageBuilder.makeValueRequest(callId, 3));
         publishAndPause(clientMqtt, topic, TestRpcMessageBuilder.makeValueRequest(callId, 4));

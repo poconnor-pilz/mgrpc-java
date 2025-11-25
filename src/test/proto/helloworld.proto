@@ -48,6 +48,7 @@ service ExampleHelloService {
 message HelloRequest {
   string name = 1;
   int32 numResponses = 2;
+  int32 millisecondsDelay = 3;
 }
 
 // The response message containing the greetings

@@ -221,7 +221,7 @@ public class MessageServer implements ServerListener {
 
         private MessageHandler(String callId, Executor executor, int queueSize) {
             this.callId = callId;
-            messageProcessor = new MessageProcessor(executor, queueSize, this);
+            messageProcessor = new MessageProcessor(executor, queueSize, this, 1,"server callid = " + callId);
         }
 
         public String getChannelId() {
@@ -411,6 +411,7 @@ public class MessageServer implements ServerListener {
             public void request(int numMessages) {
                 //log.debug("request(" + numMessages + ")");
                 conduit.request(callId, numMessages);
+                messageProcessor.request(numMessages);
             }
 
             @Override

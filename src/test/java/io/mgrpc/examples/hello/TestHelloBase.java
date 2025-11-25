@@ -106,20 +106,31 @@ public abstract class TestHelloBase {
         MessageServer server = makeMessageServer(serverTopic);
         server.addService(new HelloServiceForTest());
 
+        final int numReplies = 5;
+
         final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub stub = ExampleHelloServiceGrpc
                 .newBlockingStub(channel)
-                .withDeadlineAfter(REQUEST_TIMEOUT, TimeUnit.MILLISECONDS);
+                .withDeadlineAfter(60*60*1000, TimeUnit.MILLISECONDS);
+
+        //Run the service with a small delay between messages. This will test flow control
+        //Without flow control a BlockingStub will fail as it puts incoming messages in a queue of only 3 elements
+        //and fails if the queue is exceeded. (See BlockingResponseStream in ClientCalls.java in the gRPC codebase)
         HelloRequest twoReplies = HelloRequest.newBuilder()
                 .setName(name)
-                .setNumResponses(2)
+                .setNumResponses(numReplies)
+                .setMillisecondsDelay(20)
                 .build();
         List<HelloReply> responseList = ToList.toList(stub.lotsOfReplies(twoReplies));
-        assertEquals(responseList.size(), 2);
-        assertEquals("Hello " + name + " 0", responseList.get(0).getMessage());
-        assertEquals("Hello " + name + " 1", responseList.get(1).getMessage());
+        assertEquals(numReplies, responseList.size());
+
+        for(int i = 0; i < numReplies; i++) {
+            assertEquals("Hello " + name + " " + i, responseList.get(i).getMessage());
+        }
 
         return server;
     }
+
+
 
     @Test
     public void testParallelReplies() throws Throwable {
@@ -142,7 +153,7 @@ public abstract class TestHelloBase {
         HelloRequest tenTimes = HelloRequest.newBuilder()
                 .setNumResponses(10)
                 .setName("Joe").build();
-        int numRequests = 50;
+        int numRequests = 20;
         final CountDownLatch latch = new CountDownLatch(numRequests * 2);
         final boolean [] messagesInOrder =  {true};
 

@@ -188,7 +188,7 @@ public class MessageChannel extends Channel implements ChannelListener {
             this.callOptions = callOptions;
             this.context = Context.current().withCancellation();
             this.callId = Id.random();
-            messageProcessor = new MessageProcessor(executor, queueSize, this);
+            messageProcessor = new MessageProcessor(executor, queueSize, this, 0, "channel callid = " + callId);
         }
 
         public String getCallId() {
@@ -437,11 +437,8 @@ public class MessageChannel extends Channel implements ChannelListener {
 
         @Override
         public void request(int numMessages) {
-            //Do nothing here as we don't implement backpressure.
-            //This would be used to send a message to the service to tell it to sent on numMessages
-            //But our services will send on messages when they have them (for the moment anyway)
-//            log.debug("request({})", numMessages);
             topicConduit.request(callId, numMessages);
+            messageProcessor.request(numMessages);
         }
 
         @Override

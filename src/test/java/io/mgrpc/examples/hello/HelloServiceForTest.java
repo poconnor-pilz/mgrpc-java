@@ -31,9 +31,18 @@ public class HelloServiceForTest extends ExampleHelloServiceGrpc.ExampleHelloSer
      */
     @Override
     public void lotsOfReplies(HelloRequest request, StreamObserver<HelloReply> multipleResponses) {
+
+        int delay = request.getMillisecondsDelay();
         for(int i = 0; i < request.getNumResponses(); i++){
             HelloReply reply = HelloReply.newBuilder().setMessage("Hello " + request.getName() + " " + i).build();
             multipleResponses.onNext(reply);
+            if(delay > 0){
+                try {
+                    Thread.sleep(delay);
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
+                }
+            }
         }
         multipleResponses.onCompleted();
     }

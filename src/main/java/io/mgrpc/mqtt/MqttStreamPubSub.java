@@ -69,7 +69,7 @@ public class MqttStreamPubSub implements StreamPubSub {
                 public void onQueueCapacityExceeded() {
                     observer.onError(new Throwable("MessageProcessor queue capacity exceeded."));
                 }
-            });
+            }, 0,"pubsub");
         }
     }
 
@@ -166,6 +166,7 @@ public class MqttStreamPubSub implements StreamPubSub {
             final RpcSet rpcSet = RpcSet.parseFrom(mqttMessage.getPayload());
             for (ObserverProcessor observer : observers) {
                 for(RpcMessage message: rpcSet.getMessagesList()) {
+                    observer.processor.request(1);
                     observer.processor.queueMessage(message);
                 }
             }
