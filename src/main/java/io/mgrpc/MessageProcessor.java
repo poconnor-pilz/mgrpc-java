@@ -96,7 +96,7 @@ public class MessageProcessor {
         //This way actors don't occupy any CPU resources when they are inactive."
 
         if (recents.contains(message.getSequence())) {
-            log.warn("{} with sequence {}, is duplicate. Ignoring.", message.getMessageCase(), message.getSequence());
+            log.warn(name + " {} with sequence {}, is duplicate. Ignoring.", message.getMessageCase(), message.getSequence());
             return;
         } else {
             recents.add(message.getSequence());
@@ -146,7 +146,7 @@ public class MessageProcessor {
         for (int i = 0; i < messagesDue; i++) {
             RpcMessage message = messageQueue.poll();
             if (message == null) {
-                log.debug(name + " not processing because no message on queue");
+                //log.debug(name + " not processing because no message on queue");
                 return;
             }
 
@@ -187,8 +187,8 @@ public class MessageProcessor {
             return false;
         }
         if (sequenceOfLastProcessedMessage == UNINITIALISED_SEQUENCE) {
-            //The first message we receive for a call must have sequence 0 or 1
-            if ((sequence != 0) && (sequence != 1)) {
+            //The first message we receive for a call must have sequence 1
+            if (sequence != 1) {
                 return true;
             }
         } else {

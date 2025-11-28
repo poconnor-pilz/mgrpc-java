@@ -41,7 +41,8 @@ message  RpcMessage{
   oneof message {
     Start start = 3;
     Value value = 4;
-    google.rpc.Status status = 5;
+    Flow flow = 5;
+    google.rpc.Status status = 6;
   }
 }
 
@@ -83,6 +84,10 @@ message Start{
   //Topic or queue that should be used for the stream sent by the client (request stream) for this call
   //Will not be set for a unary or server streaming call and may not be set depending on the conduit strategy
   string clientStreamTopic = 7;
+
+  //The number of messages that the source is allowed to send to the target.
+  //When the source runs out of credit it should stop sending messages.
+  uint32 credit = 8;
 }
 
 //Any message that is not a Status or the first message in a client stream is a Value
@@ -91,6 +96,12 @@ message Value{
   bytes contents = 1;
 }
 
+//Flow control message
+message Flow{
+  //The number of messages that the source is allowed to send to the target.
+  //When the source runs out of credit it should stop sending messages.
+  uint32 credit = 1;
+}
 
 message MetadataEntry{
 

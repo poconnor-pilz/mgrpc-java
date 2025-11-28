@@ -381,17 +381,10 @@ public class HttpServerCancelsAndShutdowns {
         }
     }
 
-    //@Test
+    @Test
     void slowServerFastClient() throws Exception {
 
-        //This is an invalid scenario. The client sends an error on an input stream. It should never have a reason
-        //to do this that is not satisfied by a cancel
-        //The behaviour that grpc does is that the "client" Observer logger will get onError()
-        //CANCELLED: Cancelled by client with StreamObserver.onError()
-        //But the server cancel handler does not get called and the server reqeust stream ObserverLogger
-        //does not get onError() called.
 
-        final CountDownLatch serverCancelledLatch = new CountDownLatch(1);
         class SlowService extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
             @Override
             public StreamObserver<HelloRequest> lotsOfGreetings(StreamObserver<HelloReply> responseObserver) {
@@ -505,6 +498,83 @@ public class HttpServerCancelsAndShutdowns {
 
         assertEquals(status.getCode(), Status.Code.UNKNOWN);
         assertEquals("Application error processing RPC", status.getDescription());
+    }
+
+    @Test
+    public void testSlowClient() throws Exception {
+        class FastService extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
+            @Override
+            public void lotsOfReplies(HelloRequest request, StreamObserver<HelloReply> responseObserver) {
+
+                ServerCallStreamObserver<HelloReply> serverCallObserver =
+                        (ServerCallStreamObserver<HelloReply>) responseObserver;
+
+                Runnable sendData = () -> {
+
+                    while (serverCallObserver.isReady()) {
+                        serverCallObserver.onNext(HelloReply.newBuilder().setMessage("a response").build());
+                        log.debug("Sent a response");
+                    }
+
+                    // If isReady() became false, we simply return and exit this thread.
+                    // We will wait for the callback to trigger again.
+                };
+
+                serverCallObserver.setOnReadyHandler(sendData);
+            }
+
+
+
+            @Override
+            public void sayHello(HelloRequest request, StreamObserver<HelloReply> responseObserver) {
+                responseObserver.onNext(HelloReply.newBuilder().setMessage("Hello " + request.getName()).build());
+            }
+        }
+
+        int port = 50051;
+        Server httpServer = ServerBuilder.forPort(port)
+                .addService(new FastService())
+                .build().start();
+        String target = "localhost:" + port;
+        ManagedChannel channel = ManagedChannelBuilder.forTarget(target)
+                .usePlaintext().build();
+
+
+        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
+        HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
+        final Throwable[] ex = {null};
+        CountDownLatch latch = new CountDownLatch(1);
+        stub.lotsOfReplies(joe, new NoopStreamObserver<HelloReply>() {
+            @Override
+            public void onNext(HelloReply value) {
+                log.debug("received " + value.getMessage());
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+
+            @Override
+            public void onCompleted() {
+                latch.countDown();
+            }
+        });
+
+
+        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub2 = ExampleHelloServiceGrpc.newStub(channel);
+        while(true){
+            stub2.sayHello(joe, new NoopStreamObserver<HelloReply>() {
+                @Override
+                public void onNext(HelloReply value) {
+                    log.debug("second received " + value.getMessage());
+                }
+            });
+            Thread.sleep(10000);
+        }
+
+
+
     }
 
 

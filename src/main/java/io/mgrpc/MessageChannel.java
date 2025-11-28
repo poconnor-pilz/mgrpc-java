@@ -175,6 +175,10 @@ public class MessageChannel extends Channel implements ChannelListener {
 
         private String serverTopic;
 
+        private static final int DEFAULT_CREDIT = 20;
+
+        private int serverCreditUsed = 0;
+
 
         private final ContextCancellationListener cancellationListener =
                 new ContextCancellationListener();
@@ -273,6 +277,7 @@ public class MessageChannel extends Channel implements ChannelListener {
 
             Start.Builder start = Start.newBuilder();
             start.setChannelId(channelId);
+            start.setCredit(DEFAULT_CREDIT);
             start.setMethodName(methodDescriptor.getFullMethodName());
             start.setMethodType(MethodTypeConverter.toStart(methodDescriptor.getType()));
             if (effectiveDeadline != null) {
@@ -385,12 +390,30 @@ public class MessageChannel extends Channel implements ChannelListener {
                             //There is only a single message in this stream and it will not be followed by
                             //a completed message so close the stream.
                             close(Status.OK.withDescription(""));
+                        } else {
+                           //Issue more credit to the server if it has sent all the messages it has credit for.
+                           serverCreditUsed++;
+                           if(serverCreditUsed == DEFAULT_CREDIT) {
+                               final RpcMessage.Builder flow = RpcMessage.newBuilder()
+                                       .setCallId(this.callId)
+                                       .setSequence(0) //Flow messages are not ordered. They are processed immediately
+                                       .setFlow(Flow.newBuilder().setCredit(DEFAULT_CREDIT));
+                               try {
+                                   log.debug("Sending flow message");
+                                   send(methodDescriptor, flow);
+                               } catch (MessagingException e) {
+                                   log.error("Failed to send flow control message", e);
+                               }
+                               serverCreditUsed = 0;
+                           }
                         }
                     });
                     return;
                 default:
                     log.error("Invalid message case");
             }
+
+
         }
 
         /**

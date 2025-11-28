@@ -61,7 +61,7 @@ public class MqttTopicConduit implements TopicConduit {
 
     private static final com.google.rpc.Status GOOGLE_RPC_OK_STATUS = io.grpc.protobuf.StatusProto.fromStatusAndTrailers(Status.OK, null);
 
-    private Map<String, RpcMessage.Builder> startMessages = new ConcurrentHashMap<>();
+    private Map<String, RpcMessage> startMessages = new ConcurrentHashMap<>();
 
     private final ServerTopics serverTopics;
 
@@ -213,16 +213,16 @@ public class MqttTopicConduit implements TopicConduit {
 
         timeLastUsed = System.currentTimeMillis();
 
-        RpcMessage.Builder start = startMessages.get(messageBuilder.getCallId());
+        RpcMessage start = startMessages.get(messageBuilder.getCallId());
         if(start == null){
             if(messageBuilder.hasStart()){
-                start = messageBuilder;
-                final Start.Builder startBuilder = start.getStartBuilder();
+                final Start.Builder startBuilder = messageBuilder.getStartBuilder();
                 //If the client has not specified a server stream topic then set it to the default
                 if(startBuilder.getServerStreamTopic().isEmpty()) {
-                    final String replyTopic = serverTopics.replyTopic(this.channel.getChannelId(), start.getStart().getMethodName());
+                    final String replyTopic = serverTopics.replyTopic(this.channel.getChannelId(), messageBuilder.getStart().getMethodName());
                     startBuilder.setServerStreamTopic(replyTopic);
                 }
+                start = messageBuilder.build();
                 startMessages.put(messageBuilder.getCallId(), start);
                 log.debug("Will send input messages for call " + messageBuilder.getCallId()
                         + " to " + serverTopics.methodIn(start.getStart().getMethodName()));
@@ -244,26 +244,35 @@ public class MqttTopicConduit implements TopicConduit {
             //client to send request message. When we receive the request message we immediately send
             //start, request, status in one single broker message. Finally when then client actually sends the status
             //message we just ignore it.
-            if (messageBuilder.hasStart()) {
-                //Wait for the client to send the request message
-                return;
-            }
-            if (messageBuilder.hasStatus()) {
-                if (messageBuilder.getStatus().getCode() != Status.OK.getCode().value()) {
-                    rpcSet.addMessages(messageBuilder);
-                } else {
-                    //Ignore non error status values (non cancel values) as the status will already have been sent automatically below
+
+            switch(messageBuilder.getMessageCase()){
+                case START:
+                    //Wait for the client to send the request message
                     return;
-                }
-            } else {
-                //Send start, request, status as a single broker message
-                rpcSet.addMessages(start);
-                rpcSet.addMessages(messageBuilder);
-                final RpcMessage.Builder statusBuilder = RpcMessage.newBuilder()
-                        .setCallId(messageBuilder.getCallId())
-                        .setSequence(messageBuilder.getSequence() + 1)
-                        .setStatus(GOOGLE_RPC_OK_STATUS);
-                rpcSet.addMessages(statusBuilder);
+
+                case STATUS:
+                    if (messageBuilder.getStatus().getCode() != Status.OK.getCode().value()) {
+                        rpcSet.addMessages(messageBuilder);
+                    } else {
+                        //Ignore non error status values (non cancel values) as the status will already have been sent automatically below
+                        return;
+                    }
+                    break;
+
+                case VALUE:
+                    //Send start, request, status as a single broker message
+                    rpcSet.addMessages(start);
+                    rpcSet.addMessages(messageBuilder);
+                    final RpcMessage.Builder statusBuilder = RpcMessage.newBuilder()
+                            .setCallId(messageBuilder.getCallId())
+                            .setSequence(messageBuilder.getSequence() + 1)
+                            .setStatus(GOOGLE_RPC_OK_STATUS);
+                    rpcSet.addMessages(statusBuilder);
+                    break;
+
+                case FLOW:
+                    rpcSet.addMessages(messageBuilder);
+                    break;
             }
         } else {
             rpcSet.addMessages(messageBuilder);

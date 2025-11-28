@@ -253,6 +253,15 @@ public class MessageServer implements ServerListener {
                     return;
                 }
             }
+
+            if(message.hasFlow()){
+                //Do not send flow messages through the queue as MessageProcessor().processQueue will
+                //be blocked on the call that is waiting for credit. Instead process it directly.
+                onProviderMessage(message);
+                return;
+            }
+            //Run the message through the MessageProcessor to be ordered and checked for duplicates.
+            //MessageProcsessor will then call this back in onProviderMessage
             messageProcessor.queueMessage(message);
         }
 
@@ -369,12 +378,15 @@ public class MessageServer implements ServerListener {
             private boolean cancelled = false;
             private ScheduledFuture<?> deadlineCancellationFuture = null;
 
+            private CreditHandler creditHandler;
+
             private Context.CancellableContext cancellableContext = null;
 
             MsgServerCall(MethodDescriptor<ReqT, RespT> methodDescriptor, Start start, String callId) {
                 this.methodDescriptor = methodDescriptor;
                 this.start = start;
                 this.callId = callId;
+                creditHandler = new CreditHandler(start.getCredit());
             }
 
             public void start(ServerCallHandler<?, ?> serverCallHandler) {
@@ -432,6 +444,9 @@ public class MessageServer implements ServerListener {
                         //It will be removed when close() is called by the listener/service implementation
                         listener.onHalfClose();
                         return;
+                    case FLOW:
+                        creditHandler.addCredit(message.getFlow().getCredit());
+                        return;
                     default:
                         log.error("Unrecognised message case " + message.getMessageCase());
                         return;
@@ -481,6 +496,9 @@ public class MessageServer implements ServerListener {
                 try {
                     log.debug("Sending {} {} {} to {} ",
                             new Object[]{rpcMessage.getCallId(), rpcMessage.getSequence(), rpcMessage.getMessageCase(), methodDescriptor.getFullMethodName()});
+                    //Flow control
+                    //If we are out of credit then wait for the target to send more credit before flooding it with messages.
+                    creditHandler.waitForCredit();
                     conduit.send(rpcMessage);
                 } catch (MessagingException e) {
                     log.error("Failed to send", e);
