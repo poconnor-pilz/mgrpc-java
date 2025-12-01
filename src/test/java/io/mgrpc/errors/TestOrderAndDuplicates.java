@@ -7,7 +7,7 @@ import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
-import io.mgrpc.mqtt.MqttChannelConduit;
+import io.mgrpc.mqtt.MqttChannelBuilder;
 import io.mgrpc.mqtt.MqttExceptionLogger;
 import io.mgrpc.mqtt.MqttServerConduit;
 import io.mgrpc.mqtt.MqttUtils;
@@ -18,7 +18,6 @@ import org.eclipse.paho.client.mqttv3.MqttException;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -212,9 +211,9 @@ class TestOrderAndDuplicates {
             publishAndPause(serverMqtt, replyTo, TestRpcMessageBuilder.makeValueResponse(callId, 4));
         }));
 
-        MessageChannel messageChannel = new MessageChannelBuilder()
-                .channelId(channelId)
-                .conduit(new MqttChannelConduit(clientMqtt)).build();
+        MessageChannel messageChannel =new MqttChannelBuilder()
+                .setClient(clientMqtt)
+                .setChannelId(channelId).build();
         Channel channel = TopicInterceptor.intercept(messageChannel, SERVER);
 
 

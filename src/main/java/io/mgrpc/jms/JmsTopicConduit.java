@@ -71,15 +71,12 @@ public class JmsTopicConduit implements TopicConduit {
 
     private Map<String, RpcMessage.Builder> startMessages = new ConcurrentHashMap<>();
 
-    private final String channelStatusTopic;
-
 
     private final Executor executor;
 
     private volatile boolean isStarted = false;
 
 
-
     /**
      * @param session
      * @param serverTopic The root topic of the server to connect to e.g. "tenant1/device1"
@@ -90,33 +87,22 @@ public class JmsTopicConduit implements TopicConduit {
      *                             an individual broker queue for the server or client streams and only
      *                             pull from this queue when the next message is required meaning that the
      *                             channel and the server do not need to use their internal buffers.
-     * @param channelStatusTopic The topic on which messages regarding channel status will be reported.
-     *                           If this value is null then the conduit will not attempt to send
-     *                           channel status messages.
+
      */
-    public JmsTopicConduit(Session session, String serverTopic, boolean useBrokerFlowControl, Executor executor, String channelStatusTopic) {
+    public JmsTopicConduit(Session session, String serverTopic, boolean useBrokerFlowControl, Executor executor) {
         this.session = session;
         this.useBrokerFlowControl = useBrokerFlowControl;
         this.serverTopics = new ServerTopics(serverTopic, TOPIC_SEPARATOR);
         this.executor = executor;
-        this.channelStatusTopic = channelStatusTopic;
     }
 
+    @Override
     /**
-     * @param session
-     * @param serverTopic The root topic of the server to connect to e.g. "tenant1/device1"
-     *                    This topic should be unique to the broker.
-     *                    Requests will be sent to {serverTopic}/i/svc
-     *                    The channel will subscribe for replies on {serverTopic}/o/svc/{channelId}
-     * @param useBrokerFlowControl If this is true then for non-unary calls the conduit will create
-     *                             an individual broker queue for the server or client streams and only
-     *                             pull from this queue when the next message is required meaning that the
-     *                             channel and the server do not need to use their internal buffers.
+     * For JMS there is no flow control unless the client specifies to use broker flow control
      */
-    public JmsTopicConduit(Session session, String serverTopic, boolean useBrokerFlowControl, Executor executor) {
-        this(session, serverTopic, useBrokerFlowControl, executor, null);
+    public int getFlowCredit() {
+        return Integer.MAX_VALUE;
     }
-
 
     @Override
     public synchronized void start(ChannelListener channel) throws MessagingException {

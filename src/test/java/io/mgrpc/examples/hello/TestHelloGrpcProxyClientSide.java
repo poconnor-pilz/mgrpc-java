@@ -5,7 +5,7 @@ import io.mgrpc.EmbeddedBroker;
 import io.mgrpc.GrpcProxy;
 import io.mgrpc.MessageChannel;
 import io.mgrpc.MessageServer;
-import io.mgrpc.mqtt.MqttChannelConduit;
+import io.mgrpc.mqtt.MqttChannelBuilder;
 import io.mgrpc.mqtt.MqttServerConduit;
 import io.mgrpc.mqtt.MqttUtils;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
@@ -59,7 +59,7 @@ public class TestHelloGrpcProxyClientSide extends TestHelloBase {
         //We want to wire this:
         //httpChannel -> httpServer -> GrpcProxy -> messageChannel -> broker-> messageServer
 
-        messageChannel = new MessageChannel(new MqttChannelConduit(clientMqtt));
+        messageChannel = new MqttChannelBuilder().setClient(clientMqtt).build();
 
         GrpcProxy proxy = new GrpcProxy(messageChannel);
 

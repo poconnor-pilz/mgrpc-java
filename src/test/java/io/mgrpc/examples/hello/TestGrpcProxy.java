@@ -8,7 +8,7 @@ import io.grpc.stub.StreamObserver;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
 import io.mgrpc.*;
-import io.mgrpc.mqtt.MqttChannelConduit;
+import io.mgrpc.mqtt.MqttChannelBuilder;
 import io.mgrpc.mqtt.MqttServerConduit;
 import io.mgrpc.mqtt.MqttUtils;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
@@ -58,7 +58,7 @@ public class TestGrpcProxy {
         final Channel httpChannelWithTopic = TopicInterceptor.intercept(httpChannel, SERVER);
 
         final MqttAsyncClient clientMqttConnection = MqttUtils.makeClient();
-        MessageChannel messageChannel = new MessageChannel(new MqttChannelConduit(clientMqttConnection));
+        MessageChannel messageChannel = new MqttChannelBuilder().setClient(clientMqttConnection).build();
 
         //We want to wire this:
         //HttpServer -> GrpcProxy -> MqttChannel
@@ -134,7 +134,7 @@ public class TestGrpcProxy {
         final String SERVER = Id.shortRandom();
 
         final MqttAsyncClient clientMqttConnection = MqttUtils.makeClient();
-        MessageChannel messageChannel = new MessageChannel(new MqttChannelConduit(clientMqttConnection));
+        MessageChannel messageChannel = messageChannel = new MqttChannelBuilder().setClient(clientMqttConnection).build();
 
         final Channel messageChannelWithTopic = TopicInterceptor.intercept(messageChannel, SERVER);
 

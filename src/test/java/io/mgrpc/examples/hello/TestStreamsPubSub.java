@@ -6,7 +6,7 @@ import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
-import io.mgrpc.mqtt.MqttChannelConduit;
+import io.mgrpc.mqtt.MqttChannelBuilder;
 import io.mgrpc.mqtt.MqttServerConduit;
 import io.mgrpc.mqtt.MqttStreamPubSub;
 import io.mgrpc.mqtt.MqttUtils;
@@ -69,7 +69,7 @@ public class TestStreamsPubSub {
 
         pubsub = new MqttStreamPubSub(clientMqtt);
 
-        baseChannel = new MessageChannel(new MqttChannelConduit(clientMqtt));
+        baseChannel = new MqttChannelBuilder().setClient(clientMqtt).build();
 
         channel = TopicInterceptor.intercept(baseChannel, SERVER);
 

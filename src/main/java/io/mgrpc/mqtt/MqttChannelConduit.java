@@ -30,8 +30,15 @@ public class MqttChannelConduit implements ChannelConduit {
 
     private final IMqttAsyncClient client;
 
+    private final int flowCredit;
 
     private static volatile Executor executorSingleton;
+
+
+
+    public static MqttChannelBuilder newBuilder(){
+        return new MqttChannelBuilder();
+    }
 
     public static class Stats {
         private final int numClients;
@@ -81,40 +88,32 @@ public class MqttChannelConduit implements ChannelConduit {
      *                           (For MQTT this topic will be the same topic as the MQTT LWT for the channel client)
      *                           If this value is null then the conduit will not attempt to publish
      *                           channel status messages.
+     * @param flowCredit The amount of credit that should be issued for flow control e.g. if flow credit is 20
+     *      then the sender will only send 20 messages before waiting for the receiver to send more flow credit.
      **/
-    public MqttChannelConduit(MqttClientFactory clientFactory, String channelStatusTopic) {
+    public MqttChannelConduit(MqttClientFactory clientFactory, IMqttAsyncClient mqttAsyncClient, String channelStatusTopic, int flowCredit) {
+        if(clientFactory == null) {
+            if(mqttAsyncClient == null){
+                throw new IllegalArgumentException("mqttAsyncClient is null. It must be specified if clientFactory is null");
+            }
+            clientFactory = new MqttClientFactory() {
+                @Override
+                public IMqttAsyncClient createMqttClient() {
+                    return mqttAsyncClient;
+                }
+            };
+        }
         this.topicConduitManager = new MqttTopicConduitManager(clientFactory);
         this.client = topicConduitManager.makeMainClient();
         this.channelStatusTopic = channelStatusTopic;
+        this.flowCredit = flowCredit;;
     }
 
-    /**
-     * @param clientFactory The Mqtt client factory
-     **/
-    public MqttChannelConduit(MqttClientFactory clientFactory) {
-        this(clientFactory, null);
-    }
-
-    public MqttChannelConduit(IMqttAsyncClient client, String channelStatusTopic) {
-
-        this.client = client;
-        this.topicConduitManager = new MqttTopicConduitManager(new MqttClientFactory() {
-            @Override
-            public IMqttAsyncClient createMqttClient() {
-                return client;
-            }
-        });
-        this.channelStatusTopic = channelStatusTopic;
-    }
-
-    public MqttChannelConduit(IMqttAsyncClient client) {
-        this(client, null);
-    }
 
     @Override
     public TopicConduit getTopicConduit(String serverTopic, ChannelListener channelListener) {
 
-        final TopicConduit topicConduit = this.topicConduitManager.getTopicConduit(serverTopic, channelListener);
+        final TopicConduit topicConduit = this.topicConduitManager.getTopicConduit(serverTopic, flowCredit);
 
         try {
             //start should be idempotent and synchronized

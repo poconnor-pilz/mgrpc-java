@@ -10,7 +10,7 @@ import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.stub.ServerCallStreamObserver;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
-import io.mgrpc.mqtt.MqttChannelConduit;
+import io.mgrpc.mqtt.MqttChannelBuilder;
 import io.mgrpc.mqtt.MqttServerConduit;
 import io.mgrpc.mqtt.MqttUtils;
 import io.mgrpc.utils.StatusObserver;
@@ -70,7 +70,7 @@ public class TestCancelAndTimeout {
         //Set up the server
         server = new MessageServer(new MqttServerConduit(serverMqtt, SERVER));
         server.start();
-        messageChannel = new MessageChannel(new MqttChannelConduit(clientMqtt));
+        messageChannel = new MqttChannelBuilder().setClient(clientMqtt).build();
         channel = TopicInterceptor.intercept(messageChannel, SERVER);
     }
 
@@ -333,9 +333,7 @@ public class TestCancelAndTimeout {
         //and the input stream to the server should get an error.
         messageChannel.close();
         //Make a channel with queue size 10
-        messageChannel = new MessageChannelBuilder()
-                .conduit(new MqttChannelConduit(serverMqtt))
-                .queueSize(10).build();
+        messageChannel = new MqttChannelBuilder().setClient(serverMqtt).setQueueSize(10).build();
         channel = TopicInterceptor.intercept(messageChannel, SERVER);
 
 

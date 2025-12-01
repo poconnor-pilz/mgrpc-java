@@ -27,6 +27,7 @@ public class MessageChannel extends Channel implements ChannelListener {
     private static final com.google.rpc.Status GOOGLE_RPC_OK_STATUS = io.grpc.protobuf.StatusProto.fromStatusAndTrailers(Status.OK, null);
 
 
+
     private final ChannelConduit conduit;
 
     private final String channelId;
@@ -76,6 +77,11 @@ public class MessageChannel extends Channel implements ChannelListener {
     public String getChannelId() {
         return this.channelId;
     }
+
+    public ChannelConduit getConduit() {
+        return conduit;
+    }
+
 
     @Override
     public void onMessage(RpcMessage message)  {
@@ -175,8 +181,6 @@ public class MessageChannel extends Channel implements ChannelListener {
 
         private String serverTopic;
 
-        private static final int DEFAULT_CREDIT = 20;
-
         private int serverCreditUsed = 0;
 
 
@@ -200,6 +204,10 @@ public class MessageChannel extends Channel implements ChannelListener {
         }
 
         public String getServerTopic() {return serverTopic;}
+
+        private int getFlowCredit(){
+            return this.topicConduit.getFlowCredit();
+        }
 
         @Override
         public void start(Listener<RespT> responseListener, Metadata headers) {
@@ -277,7 +285,7 @@ public class MessageChannel extends Channel implements ChannelListener {
 
             Start.Builder start = Start.newBuilder();
             start.setChannelId(channelId);
-            start.setCredit(DEFAULT_CREDIT);
+            start.setCredit(getFlowCredit());
             start.setMethodName(methodDescriptor.getFullMethodName());
             start.setMethodType(MethodTypeConverter.toStart(methodDescriptor.getType()));
             if (effectiveDeadline != null) {
@@ -393,11 +401,11 @@ public class MessageChannel extends Channel implements ChannelListener {
                         } else {
                            //Issue more credit to the server if it has sent all the messages it has credit for.
                            serverCreditUsed++;
-                           if(serverCreditUsed == DEFAULT_CREDIT) {
+                           if(serverCreditUsed == getFlowCredit()) {
                                final RpcMessage.Builder flow = RpcMessage.newBuilder()
                                        .setCallId(this.callId)
                                        .setSequence(0) //Flow messages are not ordered. They are processed immediately
-                                       .setFlow(Flow.newBuilder().setCredit(DEFAULT_CREDIT));
+                                       .setFlow(Flow.newBuilder().setCredit(getFlowCredit()));
                                try {
                                    log.debug("Sending flow message");
                                    send(methodDescriptor, flow);

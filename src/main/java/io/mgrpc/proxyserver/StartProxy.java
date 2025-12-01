@@ -4,7 +4,7 @@ import io.grpc.Server;
 import io.grpc.ServerBuilder;
 import io.mgrpc.GrpcProxy;
 import io.mgrpc.MessageChannel;
-import io.mgrpc.mqtt.MqttChannelConduit;
+import io.mgrpc.mqtt.MqttChannelBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -22,8 +22,7 @@ public class StartProxy {
             return;
         }
         final ClientFactory clientFactory = new ClientFactory(args[0]);
-        final MqttChannelConduit mqttChannelConduit = new MqttChannelConduit(clientFactory);
-        MessageChannel messageChannel = new MessageChannel(mqttChannelConduit);
+        MessageChannel messageChannel = new MqttChannelBuilder().setClientFactory(clientFactory).build();
 
 
         //We want to wire this:

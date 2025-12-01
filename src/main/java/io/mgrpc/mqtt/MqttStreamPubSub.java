@@ -1,6 +1,5 @@
 package io.mgrpc.mqtt;
 
-import com.google.protobuf.ByteString;
 import com.google.protobuf.MessageLite;
 import com.google.protobuf.Parser;
 import io.grpc.Status;

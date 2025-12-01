@@ -4,7 +4,7 @@ import io.grpc.Channel;
 import io.mgrpc.EmbeddedBroker;
 import io.mgrpc.MessageChannel;
 import io.mgrpc.MessageServer;
-import io.mgrpc.mqtt.MqttChannelConduit;
+import io.mgrpc.mqtt.MqttChannelBuilder;
 import io.mgrpc.mqtt.MqttServerConduit;
 import io.mgrpc.mqtt.MqttUtils;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
@@ -47,8 +47,7 @@ public class TestHelloMqtt extends TestHelloBase {
 
     @BeforeEach
     void setup() throws Exception{
-
-        channel = new MessageChannel(new MqttChannelConduit(clientMqtt));
+        channel = new MqttChannelBuilder().setClient(clientMqtt).build();
     }
 
     @AfterEach

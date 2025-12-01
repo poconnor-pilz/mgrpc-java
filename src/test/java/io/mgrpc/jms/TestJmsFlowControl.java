@@ -8,9 +8,6 @@ import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.stub.ServerCallStreamObserver;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
-import io.mgrpc.examples.hello.HelloServiceForTest;
-import io.mgrpc.mqtt.MqttChannelConduit;
-import io.mgrpc.mqtt.MqttServerConduit;
 import io.mgrpc.utils.StatusObserver;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -24,7 +21,6 @@ import javax.jms.JMSException;
 import javax.naming.InitialContext;
 import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -141,9 +137,9 @@ public class TestJmsFlowControl {
         server.start();
 
         //Make a channel with queue size 10 without broker flow control
-        MessageChannel messageChannel = new MessageChannelBuilder()
-                .conduit(new JmsChannelConduit(clientConnection, false))
-                .queueSize(10).build();
+        MessageChannel messageChannel = new MessageChannel(
+                new JmsChannelConduit(clientConnection, false),
+                null, 10);
         Channel channel = TopicInterceptor.intercept(messageChannel, serverId);
 
         final CountDownLatch serverCancelledLatch = new CountDownLatch(1);

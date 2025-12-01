@@ -5,7 +5,7 @@ import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
 import io.mgrpc.MessageChannel;
 import io.mgrpc.TopicInterceptor;
-import io.mgrpc.mqtt.MqttChannelConduit;
+import io.mgrpc.mqtt.MqttChannelBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -22,8 +22,7 @@ public class StartMqttClients {
             return;
         }
         final ClientFactory clientFactory = new ClientFactory(args[0]);
-        final MqttChannelConduit mqttChannelConduit = new MqttChannelConduit(clientFactory);
-        MessageChannel messageChannel = new MessageChannel(mqttChannelConduit);
+        MessageChannel messageChannel = new MqttChannelBuilder().setClientFactory(clientFactory).build();
 
         int numServers = 5;
 

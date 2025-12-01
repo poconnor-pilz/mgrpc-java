@@ -58,7 +58,6 @@ public class MqttTopicConduit implements TopicConduit {
     private final IMqttAsyncClient client;
     private final static long SUBSCRIBE_TIMEOUT_MILLIS = 5000;
 
-
     private static final com.google.rpc.Status GOOGLE_RPC_OK_STATUS = io.grpc.protobuf.StatusProto.fromStatusAndTrailers(Status.OK, null);
 
     private Map<String, RpcMessage> startMessages = new ConcurrentHashMap<>();
@@ -71,12 +70,11 @@ public class MqttTopicConduit implements TopicConduit {
     private ChannelListener channel;
 
 
-    private final String channelStatusTopic;
-
     private volatile boolean isStarted = false;
 
     private long timeLastUsed = System.currentTimeMillis();
 
+    private final int flowCredit;
 
 
     /**
@@ -89,31 +87,20 @@ public class MqttTopicConduit implements TopicConduit {
      *                    {serverTopic}/o/svc/{channelId}/{slashedFullMethod}
      *                    Where if the gRPC fullMethodName is "helloworld.HelloService/SayHello"
      *                    then {slashedFullMethod} is "helloworld/HelloService/SayHello"
-     * @param channelStatusTopic The topic on which messages regarding channel status will be reported.
-     *                           This topic will usually be the same topic as the MQTT LWT for the channel client.
-     *                           If this value is null then the conduit will not attempt to send
-     *                           channel status messages.
+     * @param flowCredit  The amount of credit that should be issued for flow control e.g. if flow credit is 20
+     *                    then the sender will only send 20 messages before waiting for the receiver to
+     *                    send more flow credit.
      */
-    public MqttTopicConduit(IMqttAsyncClient client, String serverTopic, String channelStatusTopic) {
+    public MqttTopicConduit(IMqttAsyncClient client, String serverTopic, int flowCredit) {
         this.client = client;
         this.serverTopics = new ServerTopics(serverTopic);
-        this.channelStatusTopic = channelStatusTopic;
-    }
-    /**
-     * @param client
-     * @param serverTopic The root topic of the server to connect to e.g. "tenant1/device1"
-     *                    This topic should be unique to the broker.
-     *                    Requests will be sent to {serverTopic}/i/svc/{slashedFullMethod}
-     *                    The channel will subscribe for replies on {serverTopic}/o/svc/{channelId}/#
-     *                    The channel will receive replies to on
-     *                    {serverTopic}/o/svc/{channelId}/{slashedFullMethod}
-     *                    Where if the gRPC fullMethodName is "helloworld.HelloService/SayHello"
-     *                    then {slashedFullMethod} is "helloworld/HelloService/SayHello"
-     */
-    public MqttTopicConduit(MqttTopicConduitManager topicConduitManager, IMqttAsyncClient client, String serverTopic) {
-        this(client, serverTopic,  null);
+        this.flowCredit = flowCredit;
     }
 
+    @Override
+    public int getFlowCredit() {
+        return this.flowCredit;
+    }
 
     @Override
     public synchronized void start(ChannelListener channel) throws MessagingException {
@@ -196,15 +183,7 @@ public class MqttTopicConduit implements TopicConduit {
 
     @Override
     public void close() {
-        try {
-            unsubscribe();
-            log.debug("Closing channel topic. Sending notification on " + channelStatusTopic);
-            final byte[] connectedMsg = ConnectionStatus.newBuilder().
-                    setConnected(false).setChannelId(channel.getChannelId()).build().toByteArray();
-            client.publish(channelStatusTopic, new MqttMessage(connectedMsg));
-        } catch (MqttException exception) {
-            log.error("Exception closing " + exception);
-        }
+
     }
 
 

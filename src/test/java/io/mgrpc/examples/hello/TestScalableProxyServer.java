@@ -75,9 +75,8 @@ public class TestScalableProxyServer {
 
         final ClientFactory clientFactory = new ClientFactory();
 
-        final MqttChannelConduit mqttChannelConduit = new MqttChannelConduit(clientFactory);
-
-        MessageChannel messageChannel = new MessageChannel(mqttChannelConduit);
+        final MessageChannel messageChannel = new MqttChannelBuilder().setClientFactory(clientFactory).build();
+        final MqttChannelConduit mqttChannelConduit = (MqttChannelConduit)messageChannel.getConduit();
 
 
         //This tests the case where a http client calls a service in an MqttServer

@@ -1,6 +1,5 @@
 package io.mgrpc.mqtt;
 
-import io.mgrpc.ChannelListener;
 import io.mgrpc.TimerService;
 import io.mgrpc.TopicConduit;
 import org.eclipse.paho.client.mqttv3.IMqttAsyncClient;
@@ -23,6 +22,7 @@ public class MqttTopicConduitManager {
     public static int TOPIC_CONDUITS_PER_CLIENT = 20;
 
     public static int GC_INTERVAL_MS = 5*60*1000;
+
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -117,7 +117,7 @@ public class MqttTopicConduitManager {
         return lc.mqttClient;
     }
 
-    public synchronized TopicConduit getTopicConduit(String serverTopic, ChannelListener channelListener) {
+   public synchronized TopicConduit getTopicConduit(String serverTopic, int flowCredit) {
 
         MqttTopicConduit conduit;
         conduit = conduitsByServerTopic.get(serverTopic);
@@ -135,7 +135,7 @@ public class MqttTopicConduitManager {
             }
             lc.topicConduitCount++;
             limitedClientsByServerTopic.put(serverTopic, lc);
-            conduit = new MqttTopicConduit(this, lc.mqttClient, serverTopic);
+            conduit = new MqttTopicConduit(lc.mqttClient, serverTopic, flowCredit);
             conduitsByServerTopic.put(serverTopic, conduit);
         }
         return conduit;
