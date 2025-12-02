@@ -476,7 +476,14 @@ public class MessageServer implements ServerListener {
 
             @Override
             public void sendMessage(RespT message) {
-                //Send the response up to the client
+                //Send the response up to the client. This is only called for value messages (not status)
+
+                if(cancelled){
+                    //This will happen when the service doesn't implement a cancel handler
+                    //or check if the call was cancelled and it continues to call StreamObserver.onNext()
+                    log.warn("Not sending message for cancelled call: " + callId);
+                    return;
+                }
 
                 sequence++;
 
