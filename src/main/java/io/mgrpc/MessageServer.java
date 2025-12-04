@@ -378,7 +378,11 @@ public class MessageServer implements ServerListener {
             private boolean cancelled = false;
             private ScheduledFuture<?> deadlineCancellationFuture = null;
 
-            private CreditHandler creditHandler;
+            private static final int DEFAULT_CREDIT = 20;
+
+            private int clientCreditUsed = 0;
+
+            private final CreditHandler creditHandler;
 
             private Context.CancellableContext cancellableContext = null;
 
@@ -437,16 +441,37 @@ public class MessageServer implements ServerListener {
                 switch (message.getMessageCase()) {
                     case VALUE:
                         value = message.getValue();
+                        if(!methodDescriptor.getType().clientSendsOneMessage()){
+                            //Issue more credit to the client if it has sent all the messages it has credit for.
+                            clientCreditUsed++;
+                            //Send credit if it is the first value we received or if the client has used up all previous credit
+                            if(clientCreditUsed == 1 || clientCreditUsed == DEFAULT_CREDIT) {
+                                final RpcMessage flow = RpcMessage.newBuilder()
+                                        .setCallId(this.callId)
+                                        .setSequence(0) //Flow messages are not ordered. They are processed immediately
+                                        .setFlow(Flow.newBuilder().setCredit(DEFAULT_CREDIT)).build();
+                                try {
+                                    log.debug("Sending flow message with credit={} for call {}", DEFAULT_CREDIT, callId);
+                                    conduit.send(flow);
+                                } catch (MessagingException e) {
+                                    log.error("Failed to send flow control message", e);
+                                }
+                                clientCreditUsed = 0;
+                            }
+                        }
                         break;
+
                     case STATUS:
                         //MgMessageHandler will have already checked for a cancel so this is just an ok end of stream
                         //We do not call remove() here as the call needs to remain available to handle a cancel
                         //It will be removed when close() is called by the listener/service implementation
                         listener.onHalfClose();
                         return;
+
                     case FLOW:
                         creditHandler.addCredit(message.getFlow().getCredit());
                         return;
+
                     default:
                         log.error("Unrecognised message case " + message.getMessageCase());
                         return;

@@ -189,6 +189,8 @@ public class MessageChannel extends Channel implements ChannelListener {
 
         private final MessageProcessor messageProcessor;
 
+        private final CreditHandler creditHandler;
+
         private MsgClientCall(MethodDescriptor<ReqT, RespT> methodDescriptor, CallOptions callOptions,
                               Executor executor, int queueSize) {
             this.clientExecutor = callOptions.getExecutor();
@@ -196,7 +198,11 @@ public class MessageChannel extends Channel implements ChannelListener {
             this.callOptions = callOptions;
             this.context = Context.current().withCancellation();
             this.callId = Id.random();
-            messageProcessor = new MessageProcessor(executor, queueSize, this, 0, "channel callid = " + callId);
+            this.messageProcessor = new MessageProcessor(executor, queueSize, this, 0, "channel callid = " + callId);
+            //Initialize with one message as the client always needs to send at least one value message.
+            //If there is more than one value expected then the server will send a flow message with credit for the
+            //extra values.
+            this.creditHandler = new CreditHandler(1);
         }
 
         public String getCallId() {
@@ -342,6 +348,9 @@ public class MessageChannel extends Channel implements ChannelListener {
                     .setContents(valueByteString).build();
             msgBuilder.setValue(value);
             try {
+                //Flow control
+                //If we are out of credit then wait for the target to send more credit before flooding it with messages.
+                creditHandler.waitForCredit();
                 send(methodDescriptor, msgBuilder);
             } catch (MessagingException ex){
                 this.close(Status.UNAVAILABLE.withDescription(ex.getMessage()).withCause(ex));
@@ -365,6 +374,14 @@ public class MessageChannel extends Channel implements ChannelListener {
 
 
         public void queueServerMessage(RpcMessage message) {
+            if(message.hasFlow()){
+                //Do not send flow messages through the queue as MessageProcessor().processQueue will
+                //be blocked on the call that is waiting for credit. Instead process it directly.
+                onProviderMessage(message);
+                return;
+            }
+            //Run the message through the MessageProcessor to be ordered and checked for duplicates.
+            //MessageProcsessor will then call this back in onProviderMessage
             this.messageProcessor.queueMessage(message);
         }
 
@@ -387,6 +404,9 @@ public class MessageChannel extends Channel implements ChannelListener {
             switch (message.getMessageCase()) {
                 case STATUS:
                     close(googleRpcStatusToGrpcStatus(message.getStatus()));
+                    return;
+                case FLOW:
+                    creditHandler.addCredit(message.getFlow().getCredit());
                     return;
                 case VALUE:
                     clientExec(() -> {

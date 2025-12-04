@@ -26,7 +26,7 @@ public class CreditHandler {
     public void addCredit(int credit) {
         lock.lock();
         this.credit += credit;
-        log.info("Adding credit {}. Total = {}", credit, this.credit);
+        log.info("Added credit {}. Total = {}", credit, this.credit);
         creditAvailable.signal();
         lock.unlock();
     }
@@ -38,12 +38,12 @@ public class CreditHandler {
         }
         try {
             lock.lock();
-            //Time out after 3 minutes because there may be some problem with the source not sending credit
+            //Time out after 10 minutes because there may be some problem with the source not sending credit
             //or an exception during the call. The worst that can happen here is that we will send on more
             //messages to the target but it has limit on the queue size of its MessageProcessor that will
             //cut in and fail the call
             log.debug("Waiting for credit");
-            creditAvailable.await(3, TimeUnit.MINUTES);
+            creditAvailable.await(10, TimeUnit.MINUTES);
             credit = credit - 1;
         } catch (InterruptedException e) {
             log.error("Interrupted waiting for credit", e);

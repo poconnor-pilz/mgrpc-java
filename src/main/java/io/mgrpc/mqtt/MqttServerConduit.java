@@ -184,26 +184,26 @@ public class MqttServerConduit implements ServerConduit {
 
 
         final RpcSet.Builder setBuilder = RpcSet.newBuilder();
+        setBuilder.addMessages(message);
+
         if (MethodTypeConverter.fromStart(startMessage).serverSendsOneMessage()) {
             if (message.hasValue()) {
                 //Send the value and the status as a set in one message to the broker
-                setBuilder.addMessages(message);
                 final RpcMessage.Builder statusBuilder = RpcMessage.newBuilder()
                         .setCallId(message.getCallId())
                         .setSequence(message.getSequence() + 1)
                         .setStatus(GOOGLE_RPC_OK_STATUS);
                 setBuilder.addMessages(statusBuilder);
             } else {
-                if (message.getStatus().getCode() != Status.OK.getCode().value()) {
-                    setBuilder.addMessages(message);
-                } else {
-                    //Ignore non error status values (non cancel values) as the status will already have been sent automatically above
-                    return;
+                if(message.hasStatus()) {
+                    if (message.getStatus().getCode() == Status.OK.getCode().value()) {
+                        //Ignore non error status values (non cancel values) as the status will already have been sent automatically above
+                        return;
+                    }
                 }
             }
-        } else {
-            setBuilder.addMessages(message);
         }
+
         try {
             final String topic =  startMessage.getStart().getServerStreamTopic();
             if(topic.isEmpty()){
