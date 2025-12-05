@@ -27,6 +27,9 @@ public class InProcessConduit {
 
     private final Map<String, String> callIdToChannelIdMap = new ConcurrentHashMap<>();
 
+    private static final int TWO_BILLION = 2*1000*1000*1000;
+
+
     private static volatile Executor executorSingleton;
 
 
@@ -139,6 +142,18 @@ public class InProcessConduit {
             return getExecutorInstance();
         }
 
+        /**
+         * For Inproc there is no flow control
+         */
+        @Override
+        public int getFlowCredit() {
+            //Note: It would not be hard to have flow control here but we are just
+            //not implementing it for the moment
+            //2 billion. Safely under max integer
+            return TWO_BILLION;
+        }
+
+
     }
 
     private class InprocTopicConduit implements TopicConduit {
@@ -166,7 +181,8 @@ public class InProcessConduit {
         public int getFlowCredit() {
             //Note: It would not be hard to have flow control here but we are just
             //not implementing it for the moment
-            return Integer.MAX_VALUE;
+            //2 billion. Safely under max integer
+            return TWO_BILLION;
         }
 
         @Override

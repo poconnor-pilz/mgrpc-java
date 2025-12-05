@@ -82,7 +82,7 @@ public class MqttTopicConduitManager {
                 for(String serverTopic : conduitsByServerTopic.keySet()) {
                     final MqttTopicConduit topicConduit = conduitsByServerTopic.get(serverTopic);
                     final long idleTime = System.currentTimeMillis() - topicConduit.getTimeLastUsed();
-                    log.debug("Idle time for {}: {} ms", serverTopic, idleTime);
+                    log.debug("Idle time for serverTopic {}: {} ms", serverTopic, idleTime);
                     final long maxIdleTime = GC_INTERVAL_MS;
                     if(topicConduit.getNumOpenCalls() == 0 && idleTime > maxIdleTime) {
                         log.debug("Removing TopicConduit for topic {} because it hasn't been used for {} ms", serverTopic, idleTime);

@@ -378,7 +378,8 @@ public class MessageServer implements ServerListener {
             private boolean cancelled = false;
             private ScheduledFuture<?> deadlineCancellationFuture = null;
 
-            private static final int DEFAULT_CREDIT = 20;
+            private boolean firstValueReceived = false;
+
 
             private int clientCreditUsed = 0;
 
@@ -390,7 +391,7 @@ public class MessageServer implements ServerListener {
                 this.methodDescriptor = methodDescriptor;
                 this.start = start;
                 this.callId = callId;
-                creditHandler = new CreditHandler(start.getCredit());
+                creditHandler = new CreditHandler("server call " + callId, start.getCredit());
             }
 
             public void start(ServerCallHandler<?, ?> serverCallHandler) {
@@ -445,13 +446,13 @@ public class MessageServer implements ServerListener {
                             //Issue more credit to the client if it has sent all the messages it has credit for.
                             clientCreditUsed++;
                             //Send credit if it is the first value we received or if the client has used up all previous credit
-                            if(clientCreditUsed == 1 || clientCreditUsed == DEFAULT_CREDIT) {
+                            if(!firstValueReceived || clientCreditUsed == conduit.getFlowCredit()) {
                                 final RpcMessage flow = RpcMessage.newBuilder()
                                         .setCallId(this.callId)
                                         .setSequence(0) //Flow messages are not ordered. They are processed immediately
-                                        .setFlow(Flow.newBuilder().setCredit(DEFAULT_CREDIT)).build();
+                                        .setFlow(Flow.newBuilder().setCredit(conduit.getFlowCredit())).build();
                                 try {
-                                    log.debug("Sending flow message with credit={} for call {}", DEFAULT_CREDIT, callId);
+                                    log.debug("Sending flow message with credit={} for call {}", conduit.getFlowCredit(), callId);
                                     conduit.send(flow);
                                 } catch (MessagingException e) {
                                     log.error("Failed to send flow control message", e);
@@ -459,6 +460,7 @@ public class MessageServer implements ServerListener {
                                 clientCreditUsed = 0;
                             }
                         }
+                        firstValueReceived = true;
                         break;
 
                     case STATUS:
@@ -530,7 +532,7 @@ public class MessageServer implements ServerListener {
                             new Object[]{rpcMessage.getCallId(), rpcMessage.getSequence(), rpcMessage.getMessageCase(), methodDescriptor.getFullMethodName()});
                     //Flow control
                     //If we are out of credit then wait for the target to send more credit before flooding it with messages.
-                    creditHandler.waitForCredit();
+                    creditHandler.waitForAndDecrementCredit();
                     conduit.send(rpcMessage);
                 } catch (MessagingException e) {
                     log.error("Failed to send", e);

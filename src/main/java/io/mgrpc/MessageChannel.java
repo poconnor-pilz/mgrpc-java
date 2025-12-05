@@ -202,7 +202,7 @@ public class MessageChannel extends Channel implements ChannelListener {
             //Initialize with one message as the client always needs to send at least one value message.
             //If there is more than one value expected then the server will send a flow message with credit for the
             //extra values.
-            this.creditHandler = new CreditHandler(1);
+            this.creditHandler = new CreditHandler("client call " + callId, 1);
         }
 
         public String getCallId() {
@@ -323,6 +323,8 @@ public class MessageChannel extends Channel implements ChannelListener {
                 throw new StatusRuntimeException(Status.INTERNAL.withDescription(ex.getMessage()).withCause(ex));
             }
 
+
+
             //TODO should we call responseListener.onReady() here?
 //            exec(() -> responseListener.onReady());
         }
@@ -350,7 +352,7 @@ public class MessageChannel extends Channel implements ChannelListener {
             try {
                 //Flow control
                 //If we are out of credit then wait for the target to send more credit before flooding it with messages.
-                creditHandler.waitForCredit();
+                creditHandler.waitForAndDecrementCredit();
                 send(methodDescriptor, msgBuilder);
             } catch (MessagingException ex){
                 this.close(Status.UNAVAILABLE.withDescription(ex.getMessage()).withCause(ex));

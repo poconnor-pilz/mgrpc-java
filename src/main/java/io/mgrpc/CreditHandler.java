@@ -16,22 +16,30 @@ public class CreditHandler {
 
     private volatile int credit;
 
+    private final String name; //For debugging
+
     private final Lock lock = new ReentrantLock();
     private final Condition creditAvailable = lock.newCondition();
 
-    public CreditHandler(int credit) {
+    public CreditHandler(String name, int credit) {
+        this.name = name;
         this.credit = credit;
+        log.debug("Created new credit handler {} with credit={}", name, credit);
     }
 
     public void addCredit(int credit) {
         lock.lock();
         this.credit += credit;
-        log.info("Added credit {}. Total = {}", credit, this.credit);
+        log.info("{} added credit={}. Total={}", name, credit, this.credit);
         creditAvailable.signal();
         lock.unlock();
     }
 
-    public void waitForCredit() {
+
+    /**
+     * Wait for credit to be available. Then decrement the credit by one and return.
+     */
+    public void waitForAndDecrementCredit() {
         if(credit != 0){
             credit = credit - 1;
             return;
@@ -42,8 +50,10 @@ public class CreditHandler {
             //or an exception during the call. The worst that can happen here is that we will send on more
             //messages to the target but it has limit on the queue size of its MessageProcessor that will
             //cut in and fail the call
-            log.debug("Waiting for credit");
-            creditAvailable.await(10, TimeUnit.MINUTES);
+            log.debug(name + " waiting for credit");
+            if(!creditAvailable.await(10, TimeUnit.MINUTES)){
+                log.error("Timed out waiting for credit");
+            }
             credit = credit - 1;
         } catch (InterruptedException e) {
             log.error("Interrupted waiting for credit", e);

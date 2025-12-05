@@ -90,6 +90,7 @@ public class HelloServiceForTest extends ExampleHelloServiceGrpc.ExampleHelloSer
         return new StreamObserver<HelloRequest>() {
             @Override
             public void onNext(HelloRequest value) {
+                log.debug("bidiHello service received: " + value.getName());
                 HelloReply reply = HelloReply.newBuilder().setMessage("Hello " + value.getName()).build();
                 multipleResponses.onNext(reply);
             }

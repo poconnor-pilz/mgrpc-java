@@ -86,6 +86,7 @@ class TestFlowControl {
         final Iterator<HelloReply> helloReplyIterator = stub.lotsOfReplies(request);
         Exception ex = null;
         try{
+            Thread.sleep(500); //Make sure the queue gets filled up
             while(helloReplyIterator.hasNext()) {
                 final HelloReply reply = helloReplyIterator.next();
             }

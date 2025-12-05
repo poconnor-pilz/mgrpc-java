@@ -38,6 +38,9 @@ public class JmsServerConduit implements ServerConduit {
 
     private final String channelStatusTopic;
 
+    private static final int TWO_BILLION = 2*1000*1000*1000;
+
+
     private static volatile Executor executorSingleton;
 
     @Override
@@ -97,6 +100,17 @@ public class JmsServerConduit implements ServerConduit {
         this.client = client;
         this.serverTopics = new ServerTopics(serverTopic, TOPIC_SEPARATOR);
         this.channelStatusTopic = null;
+    }
+
+    @Override
+    /**
+     * For JMS there is no flow control unless the client specifies to use broker flow control
+     */
+    public int getFlowCredit() {
+        //Note: It would not be hard to have flow control without broker flow control here but we are just
+        //not implementing it for the moment
+        //2 billion. Safely under max integer
+        return TWO_BILLION;
     }
 
 
@@ -237,17 +251,26 @@ public class JmsServerConduit implements ServerConduit {
                     //We ignore numMessages and just get the next message from the queue
                     //After it is processed the service will call request() again.
                     try {
-                        final Message message = callQueues.consumer.receive();
-                        if (message != null) {
-                            final byte[] bytes = JmsUtils.byteArrayFromMessage(session, message);
-                            try {
-                                final RpcSet rpcSet = RpcSet.parseFrom(bytes);
-                                for (RpcMessage rpcMessage : rpcSet.getMessagesList()) {
-                                    server.onMessage(rpcMessage);
+                        boolean more = true;
+                        while(more) {
+                            final Message message = callQueues.consumer.receive();
+                            more = false;
+                            if (message != null) {
+                                final byte[] bytes = JmsUtils.byteArrayFromMessage(session, message);
+                                try {
+                                    final RpcSet rpcSet = RpcSet.parseFrom(bytes);
+                                    for (RpcMessage rpcMessage : rpcSet.getMessagesList()) {
+                                        if(rpcMessage.hasFlow()){
+                                            //If the message is a flow message then we will need to pull again
+                                            //to get the gRPC message that request is calling for.
+                                            more = true;
+                                        }
+                                        server.onMessage(rpcMessage);
+                                    }
+                                } catch (InvalidProtocolBufferException e) {
+                                    log.error("Failed to parse RpcMessage", e);
+                                    return;
                                 }
-                            } catch (InvalidProtocolBufferException e) {
-                                log.error("Failed to parse RpcMessage", e);
-                                return;
                             }
                         }
                     } catch (Exception ex) {
@@ -286,6 +309,7 @@ public class JmsServerConduit implements ServerConduit {
                 }
             }
             final RpcSet.Builder setBuilder = RpcSet.newBuilder();
+            setBuilder.addMessages(message);
             if (MethodTypeConverter.fromStart(startMessage).serverSendsOneMessage()) {
                 if (message.hasValue()) {
                     //Send the value and the status as on as a set in a single message to the broker
@@ -296,15 +320,13 @@ public class JmsServerConduit implements ServerConduit {
                             .setStatus(GOOGLE_RPC_OK_STATUS);
                     setBuilder.addMessages(statusBuilder);
                 } else {
-                    if (message.getStatus().getCode() != Status.OK.getCode().value()) {
-                        setBuilder.addMessages(message);
-                    } else {
-                        //Ignore non error status values (non cancel values) as the status will already have been sent automatically above
-                        return;
+                    if(message.hasStatus()) {
+                        if (message.getStatus().getCode() == Status.OK.getCode().value()) {
+                            //Ignore non error status values (non cancel values) as the status will already have been sent automatically above
+                            return;
+                        }
                     }
                 }
-            } else {
-                setBuilder.addMessages(message);
             }
 
             producer.send(JmsUtils.messageFromByteArray(session, setBuilder.build().toByteArray()));

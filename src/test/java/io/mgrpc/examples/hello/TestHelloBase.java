@@ -196,7 +196,7 @@ public abstract class TestHelloBase {
         t1.start();
         t2.start();
 
-        latch.await();
+        assertTrue(latch.await(60, TimeUnit.SECONDS), "timed out");
 
         assertTrue(messagesInOrder[0], "Messages were not received in order");
 
@@ -273,16 +273,16 @@ public abstract class TestHelloBase {
         TestHelloReplyObserver replyObserver = new TestHelloReplyObserver();
         StreamObserver<HelloRequest> clientStreamObserver = stub.bidiHello(replyObserver);
         clientStreamObserver.onNext(joe);
-        replyObserver.latch.await(10, TimeUnit.SECONDS);
+        assertTrue(replyObserver.latch.await(10, TimeUnit.SECONDS), "timed out");
         assertEquals("Hello joe", replyObserver.lastReply.getMessage());
         replyObserver.latch = new CountDownLatch(1);
         clientStreamObserver.onNext(jane);
-        replyObserver.latch.await(10, TimeUnit.SECONDS);
+        assertTrue(replyObserver.latch.await(10, TimeUnit.SECONDS), "timed out");
         assertEquals("Hello jane", replyObserver.lastReply.getMessage());
         //close the call cleanly
         replyObserver.latch = new CountDownLatch(1);
         clientStreamObserver.onCompleted();
-        replyObserver.latch.await(10, TimeUnit.SECONDS);
+        assertTrue(replyObserver.latch.await(10, TimeUnit.SECONDS), "timed out");
         //Check for leaks
         Thread.sleep(50); //Give close() threads a chance to complete
         assertEquals(0, server.getStats().getActiveCalls());
@@ -291,7 +291,9 @@ public abstract class TestHelloBase {
     }
 
 
-    @Test
+
+
+        @Test
     public void testInProcess() throws Exception {
         String uniqueName = InProcessServerBuilder.generateName();
         Server server = InProcessServerBuilder.forName(uniqueName)

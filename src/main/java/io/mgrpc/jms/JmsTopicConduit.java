@@ -71,6 +71,8 @@ public class JmsTopicConduit implements TopicConduit {
 
     private Map<String, RpcMessage.Builder> startMessages = new ConcurrentHashMap<>();
 
+     private static final int TWO_BILLION = 2*1000*1000*1000;
+
 
     private final Executor executor;
 
@@ -101,7 +103,9 @@ public class JmsTopicConduit implements TopicConduit {
      * For JMS there is no flow control unless the client specifies to use broker flow control
      */
     public int getFlowCredit() {
-        return Integer.MAX_VALUE;
+        //Note: It would not be hard to have flow control without broker flow control here but we are just
+        //not implementing it for the moment
+        return TWO_BILLION;
     }
 
     @Override
@@ -312,17 +316,26 @@ public class JmsTopicConduit implements TopicConduit {
                     //We ignore numMessages and just get the next message from the queue
                     //After it is processed the service will call request() again.
                     try {
-                        final Message message = callQueues.consumer.receive();
-                        if (message != null) {
-                            final byte[] bytes = JmsUtils.byteArrayFromMessage(session, message);
-                            try {
-                                final RpcSet rpcSet = RpcSet.parseFrom(bytes);
-                                for (RpcMessage rpcMessage : rpcSet.getMessagesList()) {
-                                    channel.onMessage(rpcMessage);
+                        boolean more = true;
+                        while(more) {
+                            final Message message = callQueues.consumer.receive();
+                            more = false;
+                            if (message != null) {
+                                final byte[] bytes = JmsUtils.byteArrayFromMessage(session, message);
+                                try {
+                                    final RpcSet rpcSet = RpcSet.parseFrom(bytes);
+                                    for (RpcMessage rpcMessage : rpcSet.getMessagesList()) {
+                                        if(rpcMessage.hasFlow()){
+                                            //If the message is a flow message then we will need to pull again
+                                            //to get the gRPC message that request is calling for.
+                                            more = true;
+                                        }
+                                        channel.onMessage(rpcMessage);
+                                    }
+                                } catch (InvalidProtocolBufferException e) {
+                                    log.error("Failed to parse RpcMessage", e);
+                                    return;
                                 }
-                            } catch (InvalidProtocolBufferException e) {
-                                log.error("Failed to parse RpcMessage", e);
-                                return;
                             }
                         }
                     } catch (Exception ex) {
