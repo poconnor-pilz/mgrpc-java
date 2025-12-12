@@ -33,6 +33,8 @@ public class MessageChannel extends Channel implements ChannelListener {
     private final String channelId;
     private final int queueSize;
 
+    private final int flowCredit;
+
 
     private final Map<String, MsgClientCall> clientCallsById = new ConcurrentHashMap<>();
 
@@ -41,14 +43,18 @@ public class MessageChannel extends Channel implements ChannelListener {
 
     public static final int DEFAULT_QUEUE_SIZE = 100;
 
+    public static final int DEFAULT_FLOW_CREDIT = 20;
+
 
     /**
      * @param conduit           PubsubClient
      * @param channelId         The client id for the channel. Should be unique.
      * @param queueSize        The size of the message queue for each call's replies
-     */
-    public MessageChannel(ChannelConduit conduit, String channelId, int queueSize) {
-        log.debug("Creating MessageChannel with channelId={} and queueSize={}", channelId, queueSize);
+     * @param flowCredit The amount of credit that should be issued for flow control e.g. if flow credit is 20
+     *      then the sender will only send 20 messages before waiting for the receiver to send more flow credit.     */
+    public MessageChannel(ChannelConduit conduit, String channelId, int queueSize, int flowCredit) {
+        log.debug("Creating MessageChannel with channelId={}, queueSize={}, flowCredit{} ",
+                channelId, queueSize, flowCredit);
         if(conduit == null) {
             throw new NullPointerException("conduit is null");
         }
@@ -63,13 +69,18 @@ public class MessageChannel extends Channel implements ChannelListener {
         } else {
             this.queueSize = queueSize;
         }
+        if(flowCredit <= 0) {
+            this.flowCredit = DEFAULT_FLOW_CREDIT;
+        } else {
+            this.flowCredit  = flowCredit;
+        }
     }
 
     /**
      * @param conduit      Mqtt client
      */
     public MessageChannel(ChannelConduit conduit) {
-        this(conduit, Id.random(), DEFAULT_QUEUE_SIZE);
+        this(conduit, Id.random(), DEFAULT_QUEUE_SIZE, DEFAULT_FLOW_CREDIT);
     }
 
 
@@ -131,7 +142,8 @@ public class MessageChannel extends Channel implements ChannelListener {
 
     @Override
     public <RequestT, ResponseT> ClientCall newCall(MethodDescriptor<RequestT, ResponseT> methodDescriptor, CallOptions callOptions) {
-        MsgClientCall call = new MsgClientCall<>(methodDescriptor, callOptions, conduit.getExecutor(), queueSize);
+        MsgClientCall call = new MsgClientCall<>(methodDescriptor, callOptions,
+                conduit.getExecutor(), this.queueSize, this.flowCredit);
         clientCallsById.put(call.getCallId(), call);
 
         return call;
@@ -174,6 +186,7 @@ public class MessageChannel extends Channel implements ChannelListener {
         private ScheduledFuture<?> deadlineCancellationFuture;
         private boolean cancelCalled = false;
         private boolean closed = false;
+        private Status closedStatus = null;
         Deadline effectiveDeadline = null;
         Metadata metadata = null;
 
@@ -181,7 +194,9 @@ public class MessageChannel extends Channel implements ChannelListener {
 
         private String serverTopic;
 
+        private final int flowCredit;
         private int serverCreditUsed = 0;
+
 
 
         private final ContextCancellationListener cancellationListener =
@@ -192,17 +207,15 @@ public class MessageChannel extends Channel implements ChannelListener {
         private final CreditHandler creditHandler;
 
         private MsgClientCall(MethodDescriptor<ReqT, RespT> methodDescriptor, CallOptions callOptions,
-                              Executor executor, int queueSize) {
+                              Executor executor, int queueSize, int flowCredit) {
             this.clientExecutor = callOptions.getExecutor();
             this.methodDescriptor = methodDescriptor;
             this.callOptions = callOptions;
             this.context = Context.current().withCancellation();
             this.callId = Id.random();
             this.messageProcessor = new MessageProcessor(executor, queueSize, this, 0, "channel callid = " + callId);
-            //Initialize with one message as the client always needs to send at least one value message.
-            //If there is more than one value expected then the server will send a flow message with credit for the
-            //extra values.
             this.creditHandler = new CreditHandler("client call " + callId, 1);
+            this.flowCredit = flowCredit;
         }
 
         public String getCallId() {
@@ -210,10 +223,6 @@ public class MessageChannel extends Channel implements ChannelListener {
         }
 
         public String getServerTopic() {return serverTopic;}
-
-        private int getFlowCredit(){
-            return this.topicConduit.getFlowCredit();
-        }
 
         @Override
         public void start(Listener<RespT> responseListener, Metadata headers) {
@@ -291,7 +300,7 @@ public class MessageChannel extends Channel implements ChannelListener {
 
             Start.Builder start = Start.newBuilder();
             start.setChannelId(channelId);
-            start.setCredit(getFlowCredit());
+            start.setCredit(this.flowCredit);
             start.setMethodName(methodDescriptor.getFullMethodName());
             start.setMethodType(MethodTypeConverter.toStart(methodDescriptor.getType()));
             if (effectiveDeadline != null) {
@@ -304,7 +313,13 @@ public class MessageChannel extends Channel implements ChannelListener {
                 //Note that deadlines will be ignored in this case (although they will be passed to the server)
                 log.debug("replyTo topic = " + responseTopic);
                 start.setServerStreamTopic(responseTopic);
-                close(Status.OK);
+                //Note that we don't fully close the call here because it still has to be used to
+                //send one value message to the server which will start the server stream
+                //we just want to close the client call (the responseListener)
+                context.removeListener(cancellationListener);
+                cancelTimeouts();
+                clientExec(() -> responseListener.onClose(Status.OK, new Metadata()));
+                clientCallsById.remove(this.callId);
             }
             //Add metadata to start
             Set<String> keys = metadata.keys();
@@ -331,6 +346,14 @@ public class MessageChannel extends Channel implements ChannelListener {
 
         @Override
         public void sendMessage(ReqT message) {
+
+            if(closed){
+                //This will happen when the client code keeps calling onNext() for a call that has failed
+                //(i.e. client code didn't listen for failure and stop the sends)
+                log.error("Cannot send message for closed call: " + callId);
+                throw new StatusRuntimeException(closedStatus.withDescription("Cannot send message for closed call: " + callId));
+            }
+
 
             sequence++;
             //Send message to the server
@@ -376,8 +399,8 @@ public class MessageChannel extends Channel implements ChannelListener {
 
 
         public void queueServerMessage(RpcMessage message) {
-            if(message.hasFlow()){
-                //Do not send flow messages through the queue as MessageProcessor().processQueue will
+            if(message.hasFlow() ){
+                //Do not send flow or status messages through the queue as MessageProcessor().processQueue will
                 //be blocked on the call that is waiting for credit. Instead process it directly.
                 onProviderMessage(message);
                 return;
@@ -423,11 +446,11 @@ public class MessageChannel extends Channel implements ChannelListener {
                         } else {
                            //Issue more credit to the server if it has sent all the messages it has credit for.
                            serverCreditUsed++;
-                           if(serverCreditUsed == getFlowCredit()) {
+                           if(serverCreditUsed == this.flowCredit) {
                                final RpcMessage.Builder flow = RpcMessage.newBuilder()
                                        .setCallId(this.callId)
                                        .setSequence(0) //Flow messages are not ordered. They are processed immediately
-                                       .setFlow(Flow.newBuilder().setCredit(getFlowCredit()));
+                                       .setFlow(Flow.newBuilder().setCredit(this.flowCredit));
                                try {
                                    log.debug("Sending flow message");
                                    send(methodDescriptor, flow);
@@ -473,6 +496,7 @@ public class MessageChannel extends Channel implements ChannelListener {
 
         public void close(Status status) {
             closed = true;
+            closedStatus = status;
             log.debug("Closing call {} with status: {} {}", new Object[]{this.callId, status.getCode(), status.getDescription()});
             context.removeListener(cancellationListener);
             cancelTimeouts();

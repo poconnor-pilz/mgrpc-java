@@ -11,6 +11,7 @@ import io.grpc.stub.ServerCallStreamObserver;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
 import io.mgrpc.mqtt.MqttChannelBuilder;
+import io.mgrpc.mqtt.MqttServerBuilder;
 import io.mgrpc.mqtt.MqttServerConduit;
 import io.mgrpc.mqtt.MqttUtils;
 import io.mgrpc.utils.StatusObserver;
@@ -270,7 +271,11 @@ public class TestCancelAndTimeout {
 
         server.close();
         //Make a server with queue size 10
-        server = new MessageServer(new MqttServerConduit(serverMqtt, SERVER), 10);
+        server = new MqttServerBuilder()
+                .setClient(serverMqtt)
+                .setTopic(SERVER)
+                .setQueueSize(10)
+                .setFlowCredit(100).build();
         server.start();
 
         final CountDownLatch serviceLatch = new CountDownLatch(1);
@@ -278,6 +283,7 @@ public class TestCancelAndTimeout {
         class BlockedService extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
 
             public String lastRequestReceived;
+            int messagesReceived = 0;
 
             @Override
             public StreamObserver<HelloRequest> lotsOfGreetings(StreamObserver<HelloReply> responseObserver) {
@@ -285,9 +291,15 @@ public class TestCancelAndTimeout {
                     @Override
                     public void onNext(HelloRequest request) {
                         log.debug("Service received: " + request.getName());
+                        messagesReceived++;
                         //block the queue
                         try {
-                            serviceLatch.await();
+                            //make sure we are beyond the initial flow credit qouta
+                            //so that the client gets sent credits of 100 and then has enough credit
+                            //to send enough messages to flood the queue
+                            if(messagesReceived > 10) {
+                                serviceLatch.await();
+                            }
                         } catch (InterruptedException e) {
                             log.error("", e);
                         }
@@ -307,18 +319,27 @@ public class TestCancelAndTimeout {
         }
         server.addService(new BlockedService());
 
+
+
         final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
         StatusObserver clientStatusObserver = new StatusObserver("client");
         final StreamObserver client = stub.lotsOfGreetings(clientStatusObserver);
 
-        for (int i = 0; i < 15; i++) {
+        for (int i = 0; i < 30; i++) {
             HelloRequest request = HelloRequest.newBuilder().setName("request" + i).build();
-            client.onNext(request);
+            try {
+                client.onNext(request);
+            } catch (StatusRuntimeException e) {
+                //We may or may not get this failure depending on timing but if we do
+                //it is expected because the call will be closed when the queue overflows
+                log.error("onNext() failed", e);
+                break;
+            }
         }
 
         Status clientStatus = clientStatusObserver.waitForStatus(10, TimeUnit.SECONDS);
         assertEquals(Status.RESOURCE_EXHAUSTED.getCode(), clientStatus.getCode());
-        assertEquals("Service queue capacity exceeded.", clientStatus.getDescription());
+        assertEquals("Service queue capacity = 10 exceeded.", clientStatus.getDescription());
         serviceLatch.countDown();
 
     }

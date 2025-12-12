@@ -117,7 +117,7 @@ public class MqttTopicConduitManager {
         return lc.mqttClient;
     }
 
-   public synchronized TopicConduit getTopicConduit(String serverTopic, int flowCredit) {
+   public synchronized TopicConduit getTopicConduit(String serverTopic) {
 
         MqttTopicConduit conduit;
         conduit = conduitsByServerTopic.get(serverTopic);
@@ -135,7 +135,7 @@ public class MqttTopicConduitManager {
             }
             lc.topicConduitCount++;
             limitedClientsByServerTopic.put(serverTopic, lc);
-            conduit = new MqttTopicConduit(lc.mqttClient, serverTopic, flowCredit);
+            conduit = new MqttTopicConduit(lc.mqttClient, serverTopic);
             conduitsByServerTopic.put(serverTopic, conduit);
         }
         return conduit;

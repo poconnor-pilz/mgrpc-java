@@ -122,7 +122,7 @@ public class MessageServer implements ServerListener {
         //This could also occur when the call's queue has reached its limit but the client hasn't
         //received the error message yet.
         if (recentlyRemovedCallIds.get(callId) != null){
-            log.warn("Message received for removed call {}. Ignoring", callId);
+            log.warn("Message received for removed call {}. Sequence {} Ignoring", callId, message.getSequence());
             return;
         }
 
@@ -351,7 +351,7 @@ public class MessageServer implements ServerListener {
         public void onQueueCapacityExceeded() {
             log.error("Service queue capacity exceeded for call " + callId);
             if (serverCall != null) {
-                serverCall.close(Status.RESOURCE_EXHAUSTED.withDescription("Service queue capacity exceeded."), EMPTY_METADATA);
+                serverCall.close(Status.RESOURCE_EXHAUSTED.withDescription("Service queue capacity = " + queueSize + " exceeded."), EMPTY_METADATA);
             }
         }
 
@@ -378,9 +378,7 @@ public class MessageServer implements ServerListener {
             private boolean cancelled = false;
             private ScheduledFuture<?> deadlineCancellationFuture = null;
 
-            private boolean firstValueReceived = false;
-
-
+            private boolean firstValueReceived = true;
             private int clientCreditUsed = 0;
 
             private final CreditHandler creditHandler;
@@ -446,7 +444,7 @@ public class MessageServer implements ServerListener {
                             //Issue more credit to the client if it has sent all the messages it has credit for.
                             clientCreditUsed++;
                             //Send credit if it is the first value we received or if the client has used up all previous credit
-                            if(!firstValueReceived || clientCreditUsed == conduit.getFlowCredit()) {
+                            if(firstValueReceived || clientCreditUsed == conduit.getFlowCredit()) {
                                 final RpcMessage flow = RpcMessage.newBuilder()
                                         .setCallId(this.callId)
                                         .setSequence(0) //Flow messages are not ordered. They are processed immediately
@@ -460,7 +458,7 @@ public class MessageServer implements ServerListener {
                                 clientCreditUsed = 0;
                             }
                         }
-                        firstValueReceived = true;
+                        firstValueReceived = false;
                         break;
 
                     case STATUS:

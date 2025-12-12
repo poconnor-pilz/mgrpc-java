@@ -110,7 +110,7 @@ public abstract class TestHelloBase {
 
         final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub stub = ExampleHelloServiceGrpc
                 .newBlockingStub(channel)
-                .withDeadlineAfter(60*60*1000, TimeUnit.MILLISECONDS);
+                .withDeadlineAfter(60*1000, TimeUnit.MILLISECONDS);
 
         //Run the service with a small delay between messages. This will test flow control
         //Without flow control a BlockingStub will fail as it puts incoming messages in a queue of only 3 elements

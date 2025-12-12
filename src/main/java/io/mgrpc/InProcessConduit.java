@@ -174,16 +174,6 @@ public class InProcessConduit {
             }
         }
 
-        /**
-         * For Inproc there is no flow control
-         */
-        @Override
-        public int getFlowCredit() {
-            //Note: It would not be hard to have flow control here but we are just
-            //not implementing it for the moment
-            //2 billion. Safely under max integer
-            return TWO_BILLION;
-        }
 
         @Override
         public void onCallClosed(String callId){}

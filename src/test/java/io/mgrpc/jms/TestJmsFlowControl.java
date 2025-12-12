@@ -62,7 +62,12 @@ public class TestJmsFlowControl {
 
         final String serverId = Id.shortRandom();
         //Make a server with queue size 10
-        MessageServer server = new MessageServer(new JmsServerConduit(serverConnection, serverId), 10);
+        MessageServer server = new JmsServerBuilder()
+                .setConnection(serverConnection)
+                .setQueueSize(10)
+                .setFlowCredit(Integer.MAX_VALUE) //no effective base flow control
+                .setTopic(serverId).build();
+
         server.start();
 
         //Set up a channel without broker flow control
@@ -115,7 +120,7 @@ public class TestJmsFlowControl {
 
         Status clientStatus = clientStatusObserver.waitForStatus(10, TimeUnit.SECONDS);
         checkStatus(Status.RESOURCE_EXHAUSTED, clientStatus);
-        assertEquals("Service queue capacity exceeded.", clientStatus.getDescription());
+        assertEquals("Service queue capacity = 10 exceeded.", clientStatus.getDescription());
         serviceLatch.countDown();
 
         messageChannel.close();
@@ -133,13 +138,17 @@ public class TestJmsFlowControl {
         //The test code should get an error and the server should get a cancel so that it stops sending messages.
         //and the input stream to the server should get an error.
 
-        MessageServer server = new MessageServer(new JmsServerConduit(serverConnection, serverId));
+        MessageServer server = new JmsServerBuilder()
+                .setConnection(serverConnection)
+                .setTopic(serverId).build();
         server.start();
 
-        //Make a channel with queue size 10 without broker flow control
-        MessageChannel messageChannel = new MessageChannel(
-                new JmsChannelConduit(clientConnection, false),
-                null, 10);
+        //Make a channel with queue size 10 without broker flow control and without base flow control
+        MessageChannel messageChannel =  new JmsChannelBuilder()
+                .setConnection(clientConnection)
+                .setQueueSize(10)
+                .setFlowCredit(Integer.MAX_VALUE)
+                .setUseBrokerFlowControl(false).build();
         Channel channel = TopicInterceptor.intercept(messageChannel, serverId);
 
         final CountDownLatch serverCancelledLatch = new CountDownLatch(1);
@@ -226,7 +235,11 @@ public class TestJmsFlowControl {
 
         final String serverId = Id.shortRandom();
         //Make a server with queue size 10
-        MessageServer server = new MessageServer(new JmsServerConduit(serverConnection, serverId), 10);
+        MessageServer server = new JmsServerBuilder()
+                .setConnection(serverConnection)
+                .setQueueSize(10)
+                .setFlowCredit(Integer.MAX_VALUE) // no effective base flow control
+                .setTopic(serverId).build();
         server.start();
 
         //Set up a channel with broker flow control
@@ -317,11 +330,19 @@ public class TestJmsFlowControl {
 
         final String serverId = Id.shortRandom();
         //Make a server with queue size 10
-        MessageServer server = new MessageServer(new JmsServerConduit(serverConnection, serverId), 10);
+        MessageServer server = new JmsServerBuilder()
+                .setConnection(serverConnection)
+                .setQueueSize(10)
+                .setFlowCredit(Integer.MAX_VALUE)
+                .setTopic(serverId).build();
         server.start();
 
         //Set up a channel with broker flow control
-        MessageChannel messageChannel = new MessageChannel(new JmsChannelConduit(clientConnection, true));
+        MessageChannel messageChannel =  new JmsChannelBuilder()
+                .setConnection(clientConnection)
+                .setQueueSize(10)
+                .setFlowCredit(Integer.MAX_VALUE) //no effective base flow control
+                .setUseBrokerFlowControl(true).build();
         Channel channel = TopicInterceptor.intercept(messageChannel, serverId);
 
         class ServiceThatTriesToCauseOverflow extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {

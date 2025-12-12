@@ -38,8 +38,7 @@ public class JmsServerConduit implements ServerConduit {
 
     private final String channelStatusTopic;
 
-    private static final int TWO_BILLION = 2*1000*1000*1000;
-
+    private final int flowCredit;
 
     private static volatile Executor executorSingleton;
 
@@ -83,34 +82,20 @@ public class JmsServerConduit implements ServerConduit {
      *                           If this value is null then the conduit will not attempt to subscribe for
      *                           channel status messages.
      */
-    public JmsServerConduit(Connection client, String serverTopic, String channelStatusTopic) {
+    public JmsServerConduit(Connection client, String serverTopic, String channelStatusTopic, int flowCredit) {
         this.client = client;
         this.serverTopics = new ServerTopics(serverTopic, TOPIC_SEPARATOR);
         this.channelStatusTopic = channelStatusTopic;
+        this.flowCredit = flowCredit;
     }
 
-    /**
-     * @param client
-     * @param serverTopic The root topic of the server e.g. "tenant1/device1"
-     *                    The server will subscribe for requests on subtopics of {serverTopic}/i/svc
-     *                    A request for a method should be sent to sent to {serverTopic}/i/svc
-     *                    Replies will be sent to {serverTopic}/o/svc/{channelId}}
-     */
-    public JmsServerConduit(Connection client, String serverTopic) {
-        this.client = client;
-        this.serverTopics = new ServerTopics(serverTopic, TOPIC_SEPARATOR);
-        this.channelStatusTopic = null;
-    }
 
     @Override
     /**
      * For JMS there is no flow control unless the client specifies to use broker flow control
      */
     public int getFlowCredit() {
-        //Note: It would not be hard to have flow control without broker flow control here but we are just
-        //not implementing it for the moment
-        //2 billion. Safely under max integer
-        return TWO_BILLION;
+        return flowCredit;
     }
 
 
@@ -243,6 +228,7 @@ public class JmsServerConduit implements ServerConduit {
     @Override
     public void request(String callId, int numMessages) {
         final JmsCallQueues callQueues = callQueuesMap.get(callId);
+        log.debug("Request called numMessages = " + numMessages);
         if (callQueues != null) {
             if (callQueues.consumer != null) {
                 getExecutor().execute(() -> {
@@ -251,20 +237,12 @@ public class JmsServerConduit implements ServerConduit {
                     //We ignore numMessages and just get the next message from the queue
                     //After it is processed the service will call request() again.
                     try {
-                        boolean more = true;
-                        while(more) {
                             final Message message = callQueues.consumer.receive();
-                            more = false;
                             if (message != null) {
                                 final byte[] bytes = JmsUtils.byteArrayFromMessage(session, message);
                                 try {
                                     final RpcSet rpcSet = RpcSet.parseFrom(bytes);
                                     for (RpcMessage rpcMessage : rpcSet.getMessagesList()) {
-                                        if(rpcMessage.hasFlow()){
-                                            //If the message is a flow message then we will need to pull again
-                                            //to get the gRPC message that request is calling for.
-                                            more = true;
-                                        }
                                         server.onMessage(rpcMessage);
                                     }
                                 } catch (InvalidProtocolBufferException e) {
@@ -272,7 +250,6 @@ public class JmsServerConduit implements ServerConduit {
                                     return;
                                 }
                             }
-                        }
                     } catch (Exception ex) {
                         log.error("Exception processing or waiting for message for call " + callId, ex);
                     }
@@ -295,8 +272,9 @@ public class JmsServerConduit implements ServerConduit {
         try {
             MessageProducer producer = null;
             final JmsCallQueues callQueues = callQueuesMap.get(message.getCallId());
-            if (callQueues != null && callQueues.producer != null) {
-                //There is a specific queue for this call
+            if (!message.hasFlow() && callQueues != null && callQueues.producer != null) {
+                //There is a specific queue for this call and it's not a flow message (which goes to the
+                //general queue)
                 producer = callQueues.producer;
             } else {
                 final String channelId = startMessage.getStart().getChannelId();

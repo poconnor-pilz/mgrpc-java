@@ -30,7 +30,6 @@ public class MqttChannelConduit implements ChannelConduit {
 
     private final IMqttAsyncClient client;
 
-    private final int flowCredit;
 
     private static volatile Executor executorSingleton;
 
@@ -88,10 +87,8 @@ public class MqttChannelConduit implements ChannelConduit {
      *                           (For MQTT this topic will be the same topic as the MQTT LWT for the channel client)
      *                           If this value is null then the conduit will not attempt to publish
      *                           channel status messages.
-     * @param flowCredit The amount of credit that should be issued for flow control e.g. if flow credit is 20
-     *      then the sender will only send 20 messages before waiting for the receiver to send more flow credit.
      **/
-    public MqttChannelConduit(MqttClientFactory clientFactory, IMqttAsyncClient mqttAsyncClient, String channelStatusTopic, int flowCredit) {
+    public MqttChannelConduit(MqttClientFactory clientFactory, IMqttAsyncClient mqttAsyncClient, String channelStatusTopic) {
         if(clientFactory == null) {
             if(mqttAsyncClient == null){
                 throw new IllegalArgumentException("mqttAsyncClient is null. It must be specified if clientFactory is null");
@@ -106,14 +103,13 @@ public class MqttChannelConduit implements ChannelConduit {
         this.topicConduitManager = new MqttTopicConduitManager(clientFactory);
         this.client = topicConduitManager.makeMainClient();
         this.channelStatusTopic = channelStatusTopic;
-        this.flowCredit = flowCredit;;
     }
 
 
     @Override
     public TopicConduit getTopicConduit(String serverTopic, ChannelListener channelListener) {
 
-        final TopicConduit topicConduit = this.topicConduitManager.getTopicConduit(serverTopic, flowCredit);
+        final TopicConduit topicConduit = this.topicConduitManager.getTopicConduit(serverTopic);
 
         try {
             //start should be idempotent and synchronized

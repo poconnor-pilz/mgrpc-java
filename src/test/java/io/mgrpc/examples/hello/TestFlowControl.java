@@ -13,13 +13,14 @@ import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
 import io.mgrpc.errors.CancelableObserver;
 import io.mgrpc.mqtt.MqttChannelBuilder;
+import io.mgrpc.mqtt.MqttServerBuilder;
 import io.mgrpc.mqtt.MqttServerConduit;
 import io.mgrpc.mqtt.MqttUtils;
+import io.mgrpc.utils.StatusObserver;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -128,6 +129,123 @@ class TestFlowControl {
 
         server.close();
 
+    }
+
+
+    @Test
+    public void testClientStreamFlow() throws Exception {
+
+        final String serverTopic = Id.shortRandom();
+
+        //Make a server with queue size 10 but flow credit 100. This will cause the queue to overflow
+        MessageServer server = new MqttServerBuilder()
+                .setClient(serverMqtt)
+                .setTopic(serverTopic)
+                .setQueueSize(10)
+                .setFlowCredit(100).build();
+        server.start();
+
+
+        class BlockedService extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
+            public int messagesReceived = 0;
+            public CountDownLatch blockingLatch = new CountDownLatch(1);
+            public CountDownLatch completedLatch = new CountDownLatch(1);
+            @Override
+            public StreamObserver<HelloRequest> lotsOfGreetings(StreamObserver<HelloReply> responseObserver) {
+                return new StreamObserver<HelloRequest>() {
+                    @Override
+                    public void onNext(HelloRequest request) {
+                        log.debug("Service received: " + request.getName());
+                        messagesReceived++;
+                        //block the queue
+                        try {
+                            //make sure we are beyond the initial flow credit qouta
+                            //so that the clientStream gets sent credits of 100 and then has enough credit
+                            //to send enough messages to flood the queue
+                            if(messagesReceived > 10) {
+                                blockingLatch.await();
+                            }
+                        } catch (InterruptedException e) {
+                            log.error("", e);
+                        }
+                    }
+                    @Override
+                    public void onError(Throwable throwable) {
+                        log.error("server onError()", throwable);
+                    }
+                    @Override
+                    public void onCompleted() {
+                        completedLatch.countDown();
+                    }
+                };
+            }
+        }
+
+        BlockedService blockedService = new BlockedService();
+        server.addService(blockedService);
+
+        MessageChannel messageChannel = new MqttChannelBuilder()
+                .setClient(clientMqtt)
+                .setQueueSize(100)
+                .setFlowCredit(99).build();
+        Channel channel = TopicInterceptor.intercept(messageChannel, serverTopic);
+
+        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
+        StatusObserver clientStatusObserver = new StatusObserver("clientStream");
+        final StreamObserver clientStream = stub.lotsOfGreetings(clientStatusObserver);
+
+        for (int i = 0; i < 30; i++) {
+            HelloRequest request = HelloRequest.newBuilder().setName("request" + i).build();
+            clientStream.onNext(request);
+        }
+
+        Status clientStatus = clientStatusObserver.waitForStatus(10, TimeUnit.SECONDS);
+        assertEquals(Status.RESOURCE_EXHAUSTED.getCode(), clientStatus.getCode());
+        assertEquals("Service queue capacity = 10 exceeded.", clientStatus.getDescription());
+        blockedService.blockingLatch.countDown();
+
+        server.close();
+
+        //Make a server with queue size greater than flow credit and verify that it does not overflow the queue
+        //because the client will stop sending when it runs out of credit.
+        server = new MqttServerBuilder()
+                .setClient(serverMqtt)
+                .setTopic(serverTopic)
+                .setQueueSize(100)
+                .setFlowCredit(15).build();
+        server.start();
+
+        blockedService = new BlockedService();
+        server.addService(blockedService);
+
+        clientStatusObserver = new StatusObserver("clientStream");
+        final StreamObserver clientStream2 = stub.lotsOfGreetings(clientStatusObserver);
+
+        final int[] numSent = new int[1];
+
+        Thread t1 = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                for (int i = 0; i < 30; i++) {
+                    HelloRequest request = HelloRequest.newBuilder().setName("request" + i).build();
+                    clientStream2.onNext(request);
+                    numSent[0]++;
+                }
+            }
+        });
+        t1.start();
+
+        //Wait for some time. The thread above should be blocked on onNext() until we unlock the blockingLatch
+        //at which point the service can continue to process messages.
+        Thread.sleep(500);
+
+        //16 messages should be sent because the channel has an initial credit of 1 and then
+        //gets credit of 15 more
+        assertEquals(numSent[0], 16);
+        blockedService.blockingLatch.countDown();
+        blockedService.completedLatch.await(5, TimeUnit.SECONDS);
+
+        assertEquals(30, blockedService.messagesReceived);
     }
 
 

@@ -70,7 +70,9 @@ public class TestHelloJms extends TestHelloBase {
     }
 
     public MessageServer makeMessageServer(String serverTopic) throws Exception {
-        MessageServer server  = new MessageServer(new JmsServerConduit(serverConnection, serverTopic));
+        MessageServer server = new JmsServerBuilder()
+                .setConnection(serverConnection)
+                .setTopic(serverTopic).build();
         server.start();
         return server;
     }

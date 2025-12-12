@@ -71,12 +71,11 @@ public class JmsTopicConduit implements TopicConduit {
 
     private Map<String, RpcMessage.Builder> startMessages = new ConcurrentHashMap<>();
 
-     private static final int TWO_BILLION = 2*1000*1000*1000;
-
 
     private final Executor executor;
 
     private volatile boolean isStarted = false;
+
 
 
     /**
@@ -98,15 +97,6 @@ public class JmsTopicConduit implements TopicConduit {
         this.executor = executor;
     }
 
-    @Override
-    /**
-     * For JMS there is no flow control unless the client specifies to use broker flow control
-     */
-    public int getFlowCredit() {
-        //Note: It would not be hard to have flow control without broker flow control here but we are just
-        //not implementing it for the moment
-        return TWO_BILLION;
-    }
 
     @Override
     public synchronized void start(ChannelListener channel) throws MessagingException {
@@ -141,7 +131,6 @@ public class JmsTopicConduit implements TopicConduit {
                     }
                 } catch (Exception e) {
                     log.error("Failed to parse RpcMessage", e);
-                    return;
                 }
             });
             Queue statusQueue = session.createQueue(serverTopics.status);
@@ -165,8 +154,6 @@ public class JmsTopicConduit implements TopicConduit {
         } catch (JMSException ex) {
             throw new MessagingException(ex);
         }
-
-
     }
 
     @Override
@@ -249,26 +236,40 @@ public class JmsTopicConduit implements TopicConduit {
         final RpcSet.Builder setBuilder = RpcSet.newBuilder();
         if (MethodTypeConverter.fromStart(start).clientSendsOneMessage()) {
             //If clientSendsOneMessage we only want to send one broker message containing
-            //start, request, status.
-            if (messageBuilder.hasStart()) {
-                //Wait for the request
-                return;
-            }
-            if (messageBuilder.hasStatus()) {
-                if (messageBuilder.getStatus().getCode() != Status.OK.getCode().value()) {
-                    setBuilder.addMessages(messageBuilder);
-                } else {
-                    //Ignore non error status values (non cancel values) as the status will already have been sent automatically below
+            //start, request, status. This means that we don't send a Start message now but wait for the
+            //client to send request message. When we receive the request message we immediately send
+            //start, request, status in one single broker message. Finally when then client actually sends the status
+            //message we just ignore it.
+
+            switch(messageBuilder.getMessageCase()) {
+                case START:
+                    //Wait for the client to send the request message
                     return;
-                }
-            } else {
-                setBuilder.addMessages(start);
-                setBuilder.addMessages(messageBuilder);
-                final RpcMessage.Builder statusBuilder = RpcMessage.newBuilder()
-                        .setCallId(messageBuilder.getCallId())
-                        .setSequence(messageBuilder.getSequence() + 1)
-                        .setStatus(GOOGLE_RPC_OK_STATUS);
-                setBuilder.addMessages(statusBuilder);
+
+                case STATUS:
+                    if (messageBuilder.getStatus().getCode() != Status.OK.getCode().value()) {
+                        setBuilder.addMessages(messageBuilder);
+                    } else {
+                        //Ignore non error status values (non cancel values) as the status will already have been sent automatically below
+                        return;
+                    }
+                    break;
+
+                case VALUE:
+                    //Send start, request, status as a single broker message
+                    setBuilder.addMessages(start);
+                    setBuilder.addMessages(messageBuilder);
+                    final RpcMessage.Builder statusBuilder = RpcMessage.newBuilder()
+                            .setCallId(messageBuilder.getCallId())
+                            .setSequence(messageBuilder.getSequence() + 1)
+                            .setStatus(GOOGLE_RPC_OK_STATUS);
+                    setBuilder.addMessages(statusBuilder);
+                    break;
+
+                case FLOW:
+                    setBuilder.addMessages(messageBuilder);
+                    break;
+
             }
         } else {
             setBuilder.addMessages(messageBuilder);
@@ -306,6 +307,7 @@ public class JmsTopicConduit implements TopicConduit {
 
     @Override
     public void request(String callId, int numMessages) {
+
         final JmsCallQueues callQueues = callQueuesMap.get(callId);
         if (callQueues != null) {
             if (callQueues.consumer != null) {
@@ -316,20 +318,12 @@ public class JmsTopicConduit implements TopicConduit {
                     //We ignore numMessages and just get the next message from the queue
                     //After it is processed the service will call request() again.
                     try {
-                        boolean more = true;
-                        while(more) {
                             final Message message = callQueues.consumer.receive();
-                            more = false;
                             if (message != null) {
                                 final byte[] bytes = JmsUtils.byteArrayFromMessage(session, message);
                                 try {
                                     final RpcSet rpcSet = RpcSet.parseFrom(bytes);
                                     for (RpcMessage rpcMessage : rpcSet.getMessagesList()) {
-                                        if(rpcMessage.hasFlow()){
-                                            //If the message is a flow message then we will need to pull again
-                                            //to get the gRPC message that request is calling for.
-                                            more = true;
-                                        }
                                         channel.onMessage(rpcMessage);
                                     }
                                 } catch (InvalidProtocolBufferException e) {
@@ -337,7 +331,6 @@ public class JmsTopicConduit implements TopicConduit {
                                     return;
                                 }
                             }
-                        }
                     } catch (Exception ex) {
                         log.error("Exception processing or waiting for message", ex);
                     }

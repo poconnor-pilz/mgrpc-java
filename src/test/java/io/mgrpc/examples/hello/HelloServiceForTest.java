@@ -58,7 +58,7 @@ public class HelloServiceForTest extends ExampleHelloServiceGrpc.ExampleHelloSer
             private ArrayList<String> names = new ArrayList<>();
             @Override
             public void onNext(HelloRequest value) {
-                log.debug("lotsOfGreetings received " + value);
+                log.debug("lotsOfGreetings received " + value.getName());
                 names.add(value.getName());
             }
 

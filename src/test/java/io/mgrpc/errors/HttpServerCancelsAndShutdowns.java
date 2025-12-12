@@ -11,6 +11,7 @@ import io.grpc.stub.StreamObserver;
 import io.mgrpc.NoopStreamObserver;
 import io.mgrpc.utils.DirectExecutor;
 import io.mgrpc.utils.Pause;
+import io.mgrpc.utils.StatusObserver;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;

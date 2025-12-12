@@ -74,8 +74,6 @@ public class MqttTopicConduit implements TopicConduit {
 
     private long timeLastUsed = System.currentTimeMillis();
 
-    private final int flowCredit;
-
 
     /**
      * @param client
@@ -87,20 +85,13 @@ public class MqttTopicConduit implements TopicConduit {
      *                    {serverTopic}/o/svc/{channelId}/{slashedFullMethod}
      *                    Where if the gRPC fullMethodName is "helloworld.HelloService/SayHello"
      *                    then {slashedFullMethod} is "helloworld/HelloService/SayHello"
-     * @param flowCredit  The amount of credit that should be issued for flow control e.g. if flow credit is 20
-     *                    then the sender will only send 20 messages before waiting for the receiver to
      *                    send more flow credit.
      */
-    public MqttTopicConduit(IMqttAsyncClient client, String serverTopic, int flowCredit) {
+    public MqttTopicConduit(IMqttAsyncClient client, String serverTopic) {
         this.client = client;
         this.serverTopics = new ServerTopics(serverTopic);
-        this.flowCredit = flowCredit;
     }
 
-    @Override
-    public int getFlowCredit() {
-        return this.flowCredit;
-    }
 
     @Override
     public synchronized void start(ChannelListener channel) throws MessagingException {

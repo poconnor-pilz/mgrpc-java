@@ -51,7 +51,7 @@ public class MqttChannelBuilder {
     }
 
     public MessageChannel build(){
-        final MqttChannelConduit conduit = new MqttChannelConduit(clientFactory, client, channelStatusTopic, flowCredit);
-        return new MessageChannel(conduit, channelId, queueSize);
+        final MqttChannelConduit conduit = new MqttChannelConduit(clientFactory, client, channelStatusTopic);
+        return new MessageChannel(conduit, channelId, queueSize, flowCredit);
     }
 }
