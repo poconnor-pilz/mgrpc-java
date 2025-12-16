@@ -387,11 +387,12 @@ public class MessageServer implements ServerListener {
             private boolean cancelled = false;
             private ScheduledFuture<?> deadlineCancellationFuture = null;
 
-            private boolean firstValueReceived = true;
             private int clientCreditUsed = 0;
             private final CreditHandler creditHandler;
 
             private final int flowCredit;
+
+            private int currentFlowCredit;
 
             private Context.CancellableContext cancellableContext = null;
 
@@ -400,6 +401,10 @@ public class MessageServer implements ServerListener {
                 this.start = start;
                 this.callId = callId;
                 this.flowCredit = flowCredit;
+                //The channel always starts with credit for 2 value messages.
+                //After the server receives the second value message it should send on more flow credit.
+                //This means that for single message requests the server never has to send credit.
+                this.currentFlowCredit = 2;
                 creditHandler = new CreditHandler("server call " + callId, start.getCredit());
             }
 
@@ -451,25 +456,22 @@ public class MessageServer implements ServerListener {
                 switch (message.getMessageCase()) {
                     case VALUE:
                         value = message.getValue();
-                        if(!methodDescriptor.getType().clientSendsOneMessage()){
-                            //Issue more credit to the client if it has sent all the messages it has credit for.
-                            clientCreditUsed++;
-                            //Send credit if it is the first value we received or if the client has used up all previous credit
-                            if(firstValueReceived || clientCreditUsed == this.flowCredit) {
-                                final RpcMessage flow = RpcMessage.newBuilder()
-                                        .setCallId(this.callId)
-                                        .setSequence(0) //Flow messages are not ordered. They are processed immediately
-                                        .setFlow(Flow.newBuilder().setCredit(this.flowCredit)).build();
-                                try {
-                                    log.debug("Sending flow message with credit={} for call {}", this.flowCredit, callId);
-                                    conduit.send(flow);
-                                } catch (MessagingException e) {
-                                    log.error("Failed to send flow control message", e);
-                                }
-                                clientCreditUsed = 0;
+                        //Issue more credit to the client if it has sent all the messages it has credit for.
+                        clientCreditUsed++;
+                        if(clientCreditUsed == this.currentFlowCredit) {
+                            final RpcMessage flow = RpcMessage.newBuilder()
+                                    .setCallId(this.callId)
+                                    .setSequence(0) //Flow messages are not ordered. They are processed immediately
+                                    .setFlow(Flow.newBuilder().setCredit(this.flowCredit)).build();
+                            this.currentFlowCredit = this.flowCredit;
+                            try {
+                                log.debug("Sending flow message with credit={} for call {}", this.flowCredit, callId);
+                                conduit.send(flow);
+                            } catch (MessagingException e) {
+                                log.error("Failed to send flow control message", e);
                             }
+                            clientCreditUsed = 0;
                         }
-                        firstValueReceived = false;
                         break;
 
                     case STATUS:

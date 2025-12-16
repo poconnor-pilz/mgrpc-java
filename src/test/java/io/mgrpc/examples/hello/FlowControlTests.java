@@ -35,15 +35,21 @@ public class FlowControlTests {
 
         class BlockedService extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
 
+            private int numMessagesReceived = 0;
             @Override
             public StreamObserver<HelloRequest> lotsOfGreetings(StreamObserver<HelloReply> responseObserver) {
                 return new StreamObserver<HelloRequest>() {
                     @Override
                     public void onNext(HelloRequest request) {
                         log.debug("Service received: " + request.getName());
+                        numMessagesReceived++;
                         //block the queue
                         try {
-                            serviceLatch.await();
+                            //Allow at least 2 messages through before blocking
+                            //because the server only sends flow credit after it gets 2 messages.
+                            if(numMessagesReceived == 2) {
+                                serviceLatch.await();
+                            }
                         } catch (InterruptedException e) {
                             log.error("", e);
                         }
@@ -279,13 +285,20 @@ public class FlowControlTests {
 
             public CountDownLatch completedLatch = new CountDownLatch(1);
 
+            private int numMessagesReceived = 0;
+
             @Override
             public void onNext(HelloReply reply) {
                 log.debug("Client received: " + reply.getMessage());
                 list.add(reply);
                 //block the internal queue
+                numMessagesReceived++;
                 try {
-                    blockingLatch.await();
+                    //Allow at least 2 messages through before blocking
+                    //because the server only sends flow credit after it gets 2 messages.
+                    if(numMessagesReceived == 2) {
+                        blockingLatch.await();
+                    }
                 } catch (InterruptedException e) {
                     log.error("", e);
                 }

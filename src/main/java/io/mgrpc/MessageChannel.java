@@ -213,7 +213,10 @@ public class MessageChannel extends Channel implements ChannelListener {
             this.context = Context.current().withCancellation();
             this.callId = Id.random();
             this.messageProcessor = new MessageProcessor(executor, queueSize, this, 0, "channel callid = " + callId);
-            this.creditHandler = new CreditHandler("client call " + callId, 1);
+            //The channel always starts with credit for 2 value messages.
+            //After the server receives the second value message it should send on more flow credit.
+            //This means that for single message requests the server never has to send credit.
+            this.creditHandler = new CreditHandler("client call " + callId, 2);
             this.flowCredit = flowCredit;
         }
 
