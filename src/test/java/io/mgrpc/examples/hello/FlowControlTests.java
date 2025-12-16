@@ -1,24 +1,18 @@
-package io.mgrpc.jms;
+package io.mgrpc.examples.hello;
 
 import io.grpc.Channel;
 import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
 import io.grpc.examples.helloworld.ExampleHelloServiceGrpc;
 import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.stub.ServerCallStreamObserver;
 import io.grpc.stub.StreamObserver;
-import io.mgrpc.*;
+import io.mgrpc.MessageServer;
 import io.mgrpc.utils.StatusObserver;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.jms.Connection;
-import javax.jms.ConnectionFactory;
-import javax.jms.JMSException;
-import javax.naming.InitialContext;
 import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
 import java.util.List;
@@ -28,58 +22,18 @@ import java.util.concurrent.TimeUnit;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-public class TestJmsFlowControl {
+public class FlowControlTests {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
-    private static Connection serverConnection;
-    private static Connection clientConnection;
+    public static void testServerQueueCapacityExceeded(MessageServer server, Channel channel) throws Exception {
 
-    @BeforeAll
-    public static void startClients() throws Exception {
-        EmbeddedBroker.start();
-        InitialContext initialContext = new InitialContext();
-        ConnectionFactory cf = (ConnectionFactory) initialContext.lookup("ConnectionFactory");
-
-        serverConnection = cf.createConnection();
-        serverConnection.start();
-        clientConnection = cf.createConnection();
-        clientConnection.start();
-    }
-
-    @AfterAll
-    public static void stopClients() throws JMSException {
-        serverConnection.close();
-        clientConnection.close();
-    }
-
-
-    @Test
-    public void testServerQueueCapacityExceeded() throws Exception {
-
-        //Verify that when broker flow control is not set then it is possible to make the internal server
+        //Verify that when flow control is not set then it is possible to make the internal server
         //buffer/queue overflow
-
-        final String serverId = Id.shortRandom();
-        //Make a server with queue size 10
-        MessageServer server = new JmsServerBuilder()
-                .setConnection(serverConnection)
-                .setQueueSize(10)
-                .setFlowCredit(Integer.MAX_VALUE) //no effective base flow control
-                .setTopic(serverId).build();
-
-        server.start();
-
-        //Set up a channel without broker flow control
-        MessageChannel messageChannel = new MessageChannel(new JmsChannelConduit(clientConnection, false));
-        Channel channel = TopicInterceptor.intercept(messageChannel, serverId);
-
 
         final CountDownLatch serviceLatch = new CountDownLatch(1);
 
         class BlockedService extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
-
-            public String lastRequestReceived;
 
             @Override
             public StreamObserver<HelloRequest> lotsOfGreetings(StreamObserver<HelloReply> responseObserver) {
@@ -94,16 +48,12 @@ public class TestJmsFlowControl {
                             log.error("", e);
                         }
                     }
-
                     @Override
                     public void onError(Throwable throwable) {
                         log.error("server onError()", throwable);
                     }
-
                     @Override
-                    public void onCompleted() {
-
-                    }
+                    public void onCompleted() {}
                 };
             }
         }
@@ -113,43 +63,37 @@ public class TestJmsFlowControl {
         StatusObserver clientStatusObserver = new StatusObserver("client");
         final StreamObserver client = stub.lotsOfGreetings(clientStatusObserver);
 
+
         for (int i = 0; i < 15; i++) {
             HelloRequest request = HelloRequest.newBuilder().setName("request" + i).build();
-            client.onNext(request);
+            try {
+                client.onNext(request);
+            } catch (StatusRuntimeException e) {
+                //We may or may not get this failure depending on timing but if we do
+                //it is expected because the call will be closed when the queue overflows
+                log.debug("Exception thrown during onNext()");
+                assertEquals(Status.RESOURCE_EXHAUSTED.getCode(), e.getStatus().getCode());
+                break;
+            }
         }
+
 
         Status clientStatus = clientStatusObserver.waitForStatus(10, TimeUnit.SECONDS);
         checkStatus(Status.RESOURCE_EXHAUSTED, clientStatus);
         assertEquals("Service queue capacity = 10 exceeded.", clientStatus.getDescription());
         serviceLatch.countDown();
 
-        messageChannel.close();
-        server.close();
     }
 
 
-    @Test
-    public void testClientQueueCapacityExceeded() throws Exception{
+    public static void testClientQueueCapacityExceeded(MessageServer server, Channel channel) throws Exception{
 
-        final String serverId = Id.shortRandom();
 
         //Verify that if the server sends a lot of messages to a client that is blocked and there is no
-        //broker flow control then the client queue limit is reached.
+        // flow control then the client queue limit is reached.
         //The test code should get an error and the server should get a cancel so that it stops sending messages.
         //and the input stream to the server should get an error.
 
-        MessageServer server = new JmsServerBuilder()
-                .setConnection(serverConnection)
-                .setTopic(serverId).build();
-        server.start();
-
-        //Make a channel with queue size 10 without broker flow control and without base flow control
-        MessageChannel messageChannel =  new JmsChannelBuilder()
-                .setConnection(clientConnection)
-                .setQueueSize(10)
-                .setFlowCredit(Integer.MAX_VALUE)
-                .setUseBrokerFlowControl(false).build();
-        Channel channel = TopicInterceptor.intercept(messageChannel, serverId);
 
         final CountDownLatch serverCancelledLatch = new CountDownLatch(1);
         class BlockingListenForCancel extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
@@ -220,31 +164,14 @@ public class TestJmsFlowControl {
         //The client should receive an onError() RESOURCE_EXHAUSTED
         checkStatus(Status.RESOURCE_EXHAUSTED, clientStatusObserver.waitForStatus(10, TimeUnit.SECONDS));
 
-        messageChannel.close();
-        server.close();
-
     }
 
-    @Test
-    public void testClientStreamFlowControl() throws Exception {
+    public static void testClientStreamFlowControl(MessageServer server, Channel channel) throws Exception {
 
         //Make a service that blocks until the test flips a latch
         //While the service is blocked try to overlflow the internal MessageServer queue and verify
         //That it doesn't cause a problem because the broker has buffered the messages
         //Then verify that when the service is unblocked it eventually pulls all the messages from the server
-
-        final String serverId = Id.shortRandom();
-        //Make a server with queue size 10
-        MessageServer server = new JmsServerBuilder()
-                .setConnection(serverConnection)
-                .setQueueSize(10)
-                .setFlowCredit(Integer.MAX_VALUE) // no effective base flow control
-                .setTopic(serverId).build();
-        server.start();
-
-        //Set up a channel with broker flow control
-        MessageChannel messageChannel = new MessageChannel(new JmsChannelConduit(clientConnection, true));
-        Channel channel = TopicInterceptor.intercept(messageChannel, serverId);
 
         final CountDownLatch serviceLatch = new CountDownLatch(1);
         final CountDownLatch firstMessageLatch = new CountDownLatch(1);
@@ -270,16 +197,12 @@ public class TestJmsFlowControl {
                             log.error("", e);
                         }
                     }
-
                     @Override
                     public void onError(Throwable throwable) {
                         log.error("server onError()", throwable);
                     }
-
                     @Override
-                    public void onCompleted() {
-
-                    }
+                    public void onCompleted() {}
                 };
             }
         }
@@ -291,16 +214,23 @@ public class TestJmsFlowControl {
         StatusObserver clientStatusObserver = new StatusObserver("client");
         final StreamObserver client = stub.lotsOfGreetings(clientStatusObserver);
 
-        for (int i = 0; i < 15; i++) {
-            HelloRequest request = HelloRequest.newBuilder().setName("request" + i).build();
-            client.onNext(request);
-        }
+        //Run the client stream on a thread because client.onNext() will block when it runs out of credit
+        //
+        Thread t = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                for (int i = 0; i < 15; i++) {
+                    HelloRequest request = HelloRequest.newBuilder().setName("request" + i).build();
+                    client.onNext(request);
+                }
+            }
+        });
+        t.start();
 
         //Wait until at least one message is received
         firstMessageLatch.await(5, TimeUnit.SECONDS);
         assertEquals(1, blockedService.list.size());
 
-        client.onCompleted();
 
         //Allow some time to make sure messages got to broker
         Thread.sleep(100);
@@ -313,39 +243,22 @@ public class TestJmsFlowControl {
         serviceLatch.countDown();
 
         checkStatus(Status.OK, clientStatusObserver.waitForStatus(10, TimeUnit.SECONDS));
+
+        //client.onCompleted();
+
         assertEquals(15, blockedService.list.size());
 
-        messageChannel.close();
-        server.close();
     }
 
 
-    @Test
-    public void testServerStreamFlowControl() throws Exception {
+    public static void testServerStreamFlowControl(MessageServer server, Channel channel) throws Exception {
 
         //Make a service that blocks until the test flips a latch
         //While the service is blocked try to overlflow the internal MessageServer queue and verify
-        //That it doesn't cause a problem because the broker has buffered the messages
+        //That it doesn't cause a problem because the broker has buffered the messages or flow control is enabled
         //Then verify that when the service is unblocked it eventually pulls all the messages from the server
 
-        final String serverId = Id.shortRandom();
-        //Make a server with queue size 10
-        MessageServer server = new JmsServerBuilder()
-                .setConnection(serverConnection)
-                .setQueueSize(10)
-                .setFlowCredit(Integer.MAX_VALUE)
-                .setTopic(serverId).build();
-        server.start();
-
-        //Set up a channel with broker flow control
-        MessageChannel messageChannel =  new JmsChannelBuilder()
-                .setConnection(clientConnection)
-                .setQueueSize(10)
-                .setFlowCredit(Integer.MAX_VALUE) //no effective base flow control
-                .setUseBrokerFlowControl(true).build();
-        Channel channel = TopicInterceptor.intercept(messageChannel, serverId);
-
-        class ServiceThatTriesToCauseOverflow extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
+       class ServiceThatTriesToCauseOverflow extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
             @Override
             public void lotsOfReplies(HelloRequest request, StreamObserver<HelloReply> responseObserver) {
                 for (int i = 0; i < 15; i++) {
@@ -404,13 +317,9 @@ public class TestJmsFlowControl {
         assertTrue(blockingServerStream.completedLatch.await(5, TimeUnit.SECONDS));
         assertEquals(15, blockingServerStream.list.size());
 
-        messageChannel.close();
-        server.close();
     }
 
-
-
-    private void checkStatus(Status expected, Status actual){
+    private static void checkStatus(Status expected, Status actual){
         assertEquals(expected.getCode(), actual.getCode());
     }
 }

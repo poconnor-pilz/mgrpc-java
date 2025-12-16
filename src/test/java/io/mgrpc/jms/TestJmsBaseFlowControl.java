@@ -66,7 +66,7 @@ public class TestJmsBaseFlowControl {
 
         MessageChannel messageChannel = new JmsChannelBuilder()
                 .setConnection(clientConnection)
-                .setUseBrokerFlowControl(true)
+                .setUseBrokerCallQueues(true)
                 .setFlowCredit(10)
                 .setQueueSize(1000)
                 .build();
@@ -144,7 +144,7 @@ public class TestJmsBaseFlowControl {
 
         MessageChannel messageChannel = new JmsChannelBuilder()
                 .setConnection(clientConnection)
-                .setUseBrokerFlowControl(true)
+                .setUseBrokerCallQueues(true)
                 .setFlowCredit(10)
                 .setQueueSize(1000)
                 .build();

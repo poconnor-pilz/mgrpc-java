@@ -19,7 +19,7 @@ import javax.naming.InitialContext;
 import java.lang.invoke.MethodHandles;
 
 
-public class TestHelloJms extends TestHelloBase {
+public class TestHelloJmsWithBrokerCallQueues extends TestHelloBase {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
@@ -49,7 +49,7 @@ public class TestHelloJms extends TestHelloBase {
 
     @BeforeEach
     void setup() throws Exception{
-        channel = new MessageChannel(new JmsChannelConduit(clientConnection, false));
+        channel = new MessageChannel(new JmsChannelConduit(clientConnection, true));
     }
 
     @AfterEach

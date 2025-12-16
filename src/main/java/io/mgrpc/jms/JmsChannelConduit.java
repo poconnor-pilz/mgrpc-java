@@ -19,7 +19,7 @@ public class JmsChannelConduit implements ChannelConduit {
 
 
     private final Connection client;
-    private final boolean useBrokerFlowControl;
+    private final boolean useBrokerCallQueues;
 
     private final String channelStatusTopic;
 
@@ -63,24 +63,24 @@ public class JmsChannelConduit implements ChannelConduit {
 
     /**
      * @param client The JMS client
-     * @param useBrokerFlowControl If true then use broker queues to buffer client and server streams.
+     * @param useBrokerCallQueues If true then use broker queues to buffer client and server streams.
      * @param channelStatusTopic The topic on which messages regarding the channel status will be published.
      *                           (For MQTT this topic will be the same topic as the MQTT LWT for the channel client)
      *                           If this value is null then the conduit will not attempt to publish
      *                           channel status messages.
      **/
-    public JmsChannelConduit(Connection client, boolean useBrokerFlowControl, String channelStatusTopic) {
+    public JmsChannelConduit(Connection client, boolean useBrokerCallQueues, String channelStatusTopic) {
         this.client = client;
-        this.useBrokerFlowControl = useBrokerFlowControl;
+        this.useBrokerCallQueues = useBrokerCallQueues;
         this.channelStatusTopic = channelStatusTopic;
     }
 
     /**
      * @param client The JMS client
-     * @param useBrokerFlowControl If true then use broker queues to buffer client and server streams.
+     * @param useBrokerCallQueues If true then use broker queues to buffer client and server streams.
      **/
-    public JmsChannelConduit(Connection client, boolean useBrokerFlowControl) {
-        this(client, useBrokerFlowControl, null);
+    public JmsChannelConduit(Connection client, boolean useBrokerCallQueues) {
+        this(client, useBrokerCallQueues, null);
     }
 
 
@@ -99,7 +99,7 @@ public class JmsChannelConduit implements ChannelConduit {
         synchronized (conduitsByServerTopic) {
             conduit = conduitsByServerTopic.get(serverTopic);
             if (conduit == null) {
-                conduit = new JmsTopicConduit(session, serverTopic, useBrokerFlowControl, getExecutor());
+                conduit = new JmsTopicConduit(session, serverTopic, useBrokerCallQueues, getExecutor());
                 conduitsByServerTopic.put(serverTopic, conduit);
             }
         }

@@ -55,7 +55,7 @@ public class MessageServer implements ServerListener {
 
     /**
      * @param conduit PubsubClient
-     * @param queueSize         The size of the incoming message queue for each call
+     * @param queueSize  The size of the incoming message queue for each call
      */
     public MessageServer(ServerConduit conduit, int queueSize) {
         this.conduit = conduit;
@@ -69,7 +69,6 @@ public class MessageServer implements ServerListener {
 
 
     public void start() throws MessagingException {
-
 
         conduit.start(this);
 
