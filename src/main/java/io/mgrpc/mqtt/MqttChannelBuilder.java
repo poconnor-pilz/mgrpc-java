@@ -1,22 +1,21 @@
 package io.mgrpc.mqtt;
 
 import io.mgrpc.MessageChannel;
+import io.mgrpc.MessageServer;
 import org.eclipse.paho.client.mqttv3.IMqttAsyncClient;
 
 public class MqttChannelBuilder {
 
-    private static final int DEFAULT_FLOW_CREDIT = 100;
 
     private MqttClientFactory clientFactory;
 
     private IMqttAsyncClient client;
     private String channelStatusTopic;
-    private int flowCredit = DEFAULT_FLOW_CREDIT;
-
+    private int flowCredit = MessageServer.DEFAULT_FLOW_CREDIT;
 
     private String channelId;
 
-    private int queueSize;
+    private int queueSize = MessageChannel.DEFAULT_QUEUE_SIZE;
 
 
     /**
@@ -57,7 +56,6 @@ public class MqttChannelBuilder {
         this.flowCredit = flowCredit;
         return this;
     }
-
 
     /**
      * @param channelId The client id for the channel. Should be unique.

@@ -6,17 +6,16 @@ import org.eclipse.paho.client.mqttv3.IMqttAsyncClient;
 
 public class MqttServerBuilder {
 
-    private static final int DEFAULT_FLOW_CREDIT = 100;
 
 
     private IMqttAsyncClient client;
     private String channelStatusTopic;
-    private int flowCredit = DEFAULT_FLOW_CREDIT;
+    private int flowCredit = MessageServer.DEFAULT_FLOW_CREDIT;
 
 
     private String topic;
 
-    private int queueSize;
+    private int queueSize = MessageServer.DEFAULT_QUEUE_SIZE;
 
 
 
@@ -73,7 +72,7 @@ public class MqttServerBuilder {
     }
 
     public MessageServer build(){
-        final MqttServerConduit conduit = new MqttServerConduit(client, topic, channelStatusTopic, flowCredit);
-        return new MessageServer(conduit, queueSize);
+        final MqttServerConduit conduit = new MqttServerConduit(client, topic, channelStatusTopic);
+        return new MessageServer(conduit, queueSize, flowCredit);
     }
 }

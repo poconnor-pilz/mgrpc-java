@@ -38,11 +38,6 @@ public interface ServerConduit {
      */
     void send(RpcMessage message) throws MessagingException;
 
-    /**
-     * @return The amount of credit that should be issued for flow control e.g. if flow credit is 20
-     * then the sender will only send 20 messages before waiting for the receiver to send more flow credit.
-     */
-    int getFlowCredit();
 
     /**
      * @return The executor with which to execute calls

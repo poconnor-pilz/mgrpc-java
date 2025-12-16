@@ -26,8 +26,6 @@ public class MqttServerConduit implements ServerConduit {
     private final IMqttAsyncClient client;
     private final static long SUBSCRIBE_TIMEOUT_MILLIS = 5000;
 
-    private static final int DEFAULT_FLOW_CREDIT = 20;
-
 
     private Map<String, RpcMessage> startMessages = new ConcurrentHashMap<>();
 
@@ -35,7 +33,6 @@ public class MqttServerConduit implements ServerConduit {
 
     private final String channelStatusTopic;
 
-    private final int flowCredit;
 
     private static volatile Executor executorSingleton;
     @Override
@@ -79,35 +76,14 @@ public class MqttServerConduit implements ServerConduit {
      *                           This topic will usually be the same topic as the MQTT LWT for the channel client.
      *                           If this value is null then the conduit will not attempt to subscribe for
      *                           channel status messages.
-     * @param flowCredit  The amount of credit that should be issued for flow control e.g. if flow credit is 20
-     *                    then the sender will only send 20 messages before waiting for the receiver to
-     *                    send more flow credit.
      */
-    public MqttServerConduit(IMqttAsyncClient client, String serverTopic, String channelStatusTopic, int flowCredit) {
+    public MqttServerConduit(IMqttAsyncClient client, String serverTopic, String channelStatusTopic) {
         this.client = client;
         this.serverTopics = new ServerTopics(serverTopic);
         this.channelStatusTopic = channelStatusTopic;
-        this.flowCredit = flowCredit;
     }
 
 
-    /**
-     * @param client
-     * @param serverTopic The root topic of the server e.g. "tenant1/device1"
-     *                    This topic should be unique to the broker.
-     *                    The server will subscribe for requests on subtopics of {serverTopic}/i/svc
-     *                    A request for a method should be sent to sent to {serverTopic}/i/svc/{slashedFullMethod}
-     *                    Replies will be sent to {serverTopic}/o/svc/{channelId}/{slashedFullMethod}
-     *                    Where if the gRPC fullMethodName is "helloworld.HelloService/SayHello"
-     *                    then {slashedFullMethod} is "helloworld/HelloService/SayHello"
-     * @param channelStatusTopic The topic on which messages regarding channel status will be reported.
-     *                           This topic will usually be the same topic as the MQTT LWT for the channel client.
-     *                           If this value is null then the conduit will not attempt to subscribe for
-     *                           channel status messages.
-     */
-    public MqttServerConduit(IMqttAsyncClient client, String serverTopic, String channelStatusTopic) {
-        this(client, serverTopic, channelStatusTopic, DEFAULT_FLOW_CREDIT);
-    }
 
     /**
      * @param client
@@ -121,11 +97,6 @@ public class MqttServerConduit implements ServerConduit {
      */
     public MqttServerConduit(IMqttAsyncClient client, String serverTopic) {
         this(client, serverTopic, null);
-    }
-
-    @Override
-    public int getFlowCredit() {
-        return this.flowCredit;
     }
 
     @Override

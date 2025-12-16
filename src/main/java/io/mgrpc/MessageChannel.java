@@ -35,7 +35,6 @@ public class MessageChannel extends Channel implements ChannelListener {
 
     private final int flowCredit;
 
-
     private final Map<String, MsgClientCall> clientCallsById = new ConcurrentHashMap<>();
 
 

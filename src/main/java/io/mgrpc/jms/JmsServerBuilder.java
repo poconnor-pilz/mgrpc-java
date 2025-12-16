@@ -8,18 +8,13 @@ import javax.jms.Connection;
 public class JmsServerBuilder {
 
 
-
-
-    private static final int TWO_BILLION = 2*1000*1000*1000;
-
-    private int flowCredit = TWO_BILLION;
-
+   private int flowCredit = MessageServer.DEFAULT_FLOW_CREDIT;
 
     private String topic;
 
     private String channelStatusTopic;
 
-    private int queueSize = 100;
+    private int queueSize = MessageServer.DEFAULT_QUEUE_SIZE;
 
     private Connection connection;
 
@@ -76,7 +71,7 @@ public class JmsServerBuilder {
     }
 
     public MessageServer build(){
-        final JmsServerConduit conduit = new JmsServerConduit(connection, topic, channelStatusTopic, flowCredit);
-        return new MessageServer(conduit, queueSize);
+        final JmsServerConduit conduit = new JmsServerConduit(connection, topic, channelStatusTopic);
+        return new MessageServer(conduit, queueSize, flowCredit);
     }
 }

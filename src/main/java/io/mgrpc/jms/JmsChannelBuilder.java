@@ -6,7 +6,6 @@ import javax.jms.Connection;
 
 public class JmsChannelBuilder {
 
-    private static final int DEFAULT_FLOW_CREDIT = 100;
 
     private Connection connection;
 
@@ -14,12 +13,11 @@ public class JmsChannelBuilder {
     private boolean useBrokerCallQueues;
 
     private String channelStatusTopic;
-    private int flowCredit = DEFAULT_FLOW_CREDIT;
-
+    private int flowCredit = MessageChannel.DEFAULT_FLOW_CREDIT;
 
     private String channelId;
 
-    private int queueSize;
+    private int queueSize = MessageChannel.DEFAULT_QUEUE_SIZE;
 
 
     /**

@@ -28,9 +28,7 @@ public class MessageServer implements ServerListener {
 
     private final static int CANCELLED_CODE = Status.CANCELLED.getCode().value();
 
-
     private static volatile Executor executorSingleton;
-
 
     private final ServerConduit conduit;
 
@@ -48,8 +46,11 @@ public class MessageServer implements ServerListener {
      */
     final ConcurrentHashMap<String, Long> recentlyRemovedCallIds = new ConcurrentHashMap<>();
 
-    private static final int DEFAULT_QUEUE_SIZE = 100;
+    public static final int DEFAULT_QUEUE_SIZE = 100;
     private final int queueSize;
+
+    public static final int DEFAULT_FLOW_CREDIT = 20;
+    private final int flowCredit;
 
     private  ScheduledFuture<?> clearRecentlyRemovedTimer;
 
@@ -57,14 +58,23 @@ public class MessageServer implements ServerListener {
      * @param conduit PubsubClient
      * @param queueSize  The size of the incoming message queue for each call
      */
-    public MessageServer(ServerConduit conduit, int queueSize) {
+    public MessageServer(ServerConduit conduit, int queueSize, int flowCredit) {
         this.conduit = conduit;
         this.queueSize = queueSize;
+        this.flowCredit = flowCredit;
+    }
+
+    /**
+     * @param conduit PubsubClient
+     * @param queueSize  The size of the incoming message queue for each call
+     */
+    public MessageServer(ServerConduit conduit, int queueSize) {
+        this(conduit, queueSize, DEFAULT_FLOW_CREDIT);
     }
 
 
     public MessageServer(ServerConduit conduit) {
-        this(conduit, DEFAULT_QUEUE_SIZE);
+        this(conduit, DEFAULT_QUEUE_SIZE, DEFAULT_FLOW_CREDIT);
     }
 
 
@@ -325,7 +335,7 @@ public class MessageServer implements ServerListener {
                 final ServerCallHandler<?, ?> serverCallHandler = serverMethodDefinition.getServerCallHandler();
 
                 serverCall = new MsgServerCall<>(serverMethodDefinition.getMethodDescriptor(),
-                        start, callId);
+                        start, callId, flowCredit);
 
                 //Extract the channelId from the header. It may be used later to find calls for a
                 //particular client that need to be cleaned up because the client has disconnected.
@@ -379,15 +389,17 @@ public class MessageServer implements ServerListener {
 
             private boolean firstValueReceived = true;
             private int clientCreditUsed = 0;
-
             private final CreditHandler creditHandler;
+
+            private final int flowCredit;
 
             private Context.CancellableContext cancellableContext = null;
 
-            MsgServerCall(MethodDescriptor<ReqT, RespT> methodDescriptor, Start start, String callId) {
+            MsgServerCall(MethodDescriptor<ReqT, RespT> methodDescriptor, Start start, String callId, int flowCredit) {
                 this.methodDescriptor = methodDescriptor;
                 this.start = start;
                 this.callId = callId;
+                this.flowCredit = flowCredit;
                 creditHandler = new CreditHandler("server call " + callId, start.getCredit());
             }
 
@@ -443,13 +455,13 @@ public class MessageServer implements ServerListener {
                             //Issue more credit to the client if it has sent all the messages it has credit for.
                             clientCreditUsed++;
                             //Send credit if it is the first value we received or if the client has used up all previous credit
-                            if(firstValueReceived || clientCreditUsed == conduit.getFlowCredit()) {
+                            if(firstValueReceived || clientCreditUsed == this.flowCredit) {
                                 final RpcMessage flow = RpcMessage.newBuilder()
                                         .setCallId(this.callId)
                                         .setSequence(0) //Flow messages are not ordered. They are processed immediately
-                                        .setFlow(Flow.newBuilder().setCredit(conduit.getFlowCredit())).build();
+                                        .setFlow(Flow.newBuilder().setCredit(this.flowCredit)).build();
                                 try {
-                                    log.debug("Sending flow message with credit={} for call {}", conduit.getFlowCredit(), callId);
+                                    log.debug("Sending flow message with credit={} for call {}", this.flowCredit, callId);
                                     conduit.send(flow);
                                 } catch (MessagingException e) {
                                     log.error("Failed to send flow control message", e);

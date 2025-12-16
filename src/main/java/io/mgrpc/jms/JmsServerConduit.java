@@ -38,8 +38,6 @@ public class JmsServerConduit implements ServerConduit {
 
     private final String channelStatusTopic;
 
-    private final int flowCredit;
-
     private static volatile Executor executorSingleton;
 
     @Override
@@ -82,20 +80,10 @@ public class JmsServerConduit implements ServerConduit {
      *                           If this value is null then the conduit will not attempt to subscribe for
      *                           channel status messages.
      */
-    public JmsServerConduit(Connection client, String serverTopic, String channelStatusTopic, int flowCredit) {
+    public JmsServerConduit(Connection client, String serverTopic, String channelStatusTopic) {
         this.client = client;
         this.serverTopics = new ServerTopics(serverTopic, TOPIC_SEPARATOR);
         this.channelStatusTopic = channelStatusTopic;
-        this.flowCredit = flowCredit;
-    }
-
-
-    @Override
-    /**
-     * For JMS there is no flow control unless the client specifies to use broker flow control
-     */
-    public int getFlowCredit() {
-        return flowCredit;
     }
 
 
