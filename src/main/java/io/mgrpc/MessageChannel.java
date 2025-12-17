@@ -454,7 +454,7 @@ public class MessageChannel extends Channel implements ChannelListener {
                                        .setSequence(0) //Flow messages are not ordered. They are processed immediately
                                        .setFlow(Flow.newBuilder().setCredit(this.flowCredit));
                                try {
-                                   log.debug("Sending flow message");
+                                   log.debug("Sending credit={} for call {}", this.flowCredit, callId);
                                    send(methodDescriptor, flow);
                                } catch (MessagingException e) {
                                    log.error("Failed to send flow control message", e);

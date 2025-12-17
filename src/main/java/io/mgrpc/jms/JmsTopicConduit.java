@@ -293,7 +293,10 @@ public class JmsTopicConduit implements TopicConduit {
 
         JmsCallQueues callQueues = callQueuesMap.get(messageBuilder.getCallId());
         try {
-            if (!messageBuilder.hasStart() && callQueues != null && callQueues.producer != null) {
+            //Flow and start messages are sent to the general queue.
+            //Value and status messages are sent to a specific input queue if useBrokerCallQueues was specified
+            if (!messageBuilder.hasStart() && !messageBuilder.hasFlow()
+                   && callQueues != null && callQueues.producer != null) {
                 //This message must be sent to a specific input queue
                 callQueues.producer.send(JmsUtils.messageFromByteArray(session, buffer));
             } else {

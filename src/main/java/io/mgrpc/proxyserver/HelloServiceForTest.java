@@ -14,6 +14,8 @@ public class HelloServiceForTest extends ExampleHelloServiceGrpc.ExampleHelloSer
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
 
+
+
     /**
      * @param request a single request
      * @param singleResponse a stream containing a single response

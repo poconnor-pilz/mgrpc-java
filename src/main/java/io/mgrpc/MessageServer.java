@@ -465,7 +465,7 @@ public class MessageServer implements ServerListener {
                                     .setFlow(Flow.newBuilder().setCredit(this.flowCredit)).build();
                             this.currentFlowCredit = this.flowCredit;
                             try {
-                                log.debug("Sending flow message with credit={} for call {}", this.flowCredit, callId);
+                                log.debug("Sending flow credit={} for call {}", this.flowCredit, callId);
                                 conduit.send(flow);
                             } catch (MessagingException e) {
                                 log.error("Failed to send flow control message", e);

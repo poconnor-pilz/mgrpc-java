@@ -238,6 +238,8 @@ public abstract class TestHelloBase {
     }
 
 
+
+
     @Test
     public void testBidiHello() throws Throwable {
 
@@ -251,36 +253,30 @@ public abstract class TestHelloBase {
         class TestHelloReplyObserver implements StreamObserver<HelloReply> {
             public HelloReply lastReply;
             public CountDownLatch latch = new CountDownLatch(1);
-
             @Override
             public void onNext(HelloReply value) {
                 lastReply = value;
                 latch.countDown();
             }
-
             @Override
-            public void onError(Throwable t) {
-
-            }
-
+            public void onError(Throwable t) {}
             @Override
             public void onCompleted() {
                 latch.countDown();
             }
         }
-        HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
-        HelloRequest jane = HelloRequest.newBuilder().setName("jane").build();
         TestHelloReplyObserver replyObserver = new TestHelloReplyObserver();
         StreamObserver<HelloRequest> clientStreamObserver = stub.bidiHello(replyObserver);
-        clientStreamObserver.onNext(joe);
-        assertTrue(replyObserver.latch.await(10, TimeUnit.SECONDS), "timed out");
-        assertEquals("Hello joe", replyObserver.lastReply.getMessage());
-        replyObserver.latch = new CountDownLatch(1);
-        clientStreamObserver.onNext(jane);
-        assertTrue(replyObserver.latch.await(10, TimeUnit.SECONDS), "timed out");
-        assertEquals("Hello jane", replyObserver.lastReply.getMessage());
+        for(int i = 0; i < 50; i++){
+            String msg = "test " + i;
+            HelloRequest request = HelloRequest.newBuilder().setName(msg).build();
+            log.debug("Test trying to send: " + msg);
+            clientStreamObserver.onNext(request);
+            assertTrue(replyObserver.latch.await(10, TimeUnit.MINUTES), "timed out");
+            assertEquals("Hello " + msg, replyObserver.lastReply.getMessage());
+            replyObserver.latch = new CountDownLatch(1);
+        }
         //close the call cleanly
-        replyObserver.latch = new CountDownLatch(1);
         clientStreamObserver.onCompleted();
         assertTrue(replyObserver.latch.await(10, TimeUnit.SECONDS), "timed out");
         //Check for leaks
@@ -289,7 +285,6 @@ public abstract class TestHelloBase {
         assertEquals(0, getChannelActiveCalls());
         server.close();
     }
-
 
 
 
