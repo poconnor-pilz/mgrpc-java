@@ -29,7 +29,7 @@ message  RpcMessage{
   //should increase the number by 1
   uint32 sequence = 2;
 
-  //A message is either Start, Value or Status
+  //A message is either Start, Value, Status or Flow
   //Examples:
   //A client stream with 1 value:      start, value, status(ok).
   //A client stream with 2 values:     start, value, value, status.

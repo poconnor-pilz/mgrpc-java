@@ -7,7 +7,7 @@ import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
 import io.mgrpc.mqtt.MqttChannelBuilder;
-import io.mgrpc.mqtt.MqttServerConduit;
+import io.mgrpc.mqtt.MqttServerBuilder;
 import io.mgrpc.mqtt.MqttStreamPubSub;
 import io.mgrpc.mqtt.MqttUtils;
 import io.mgrpc.utils.ToList;
@@ -64,7 +64,7 @@ public class TestStreamsPubSub {
     void setup() throws Exception {
 
         //Set up the serverb
-        server = new MessageServer(new MqttServerConduit(serverMqtt, SERVER));
+        server = new MqttServerBuilder().setClient(serverMqtt).setTopic(SERVER).build();
         server.start();
 
         pubsub = new MqttStreamPubSub(clientMqtt);

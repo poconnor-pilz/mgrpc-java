@@ -1,7 +1,7 @@
 package io.mgrpc.proxyserver;
 
 import io.mgrpc.MessageServer;
-import io.mgrpc.mqtt.MqttServerConduit;
+import io.mgrpc.mqtt.MqttServerBuilder;
 import org.eclipse.paho.client.mqttv3.IMqttAsyncClient;
 
 public class StartServers {
@@ -21,7 +21,7 @@ public class StartServers {
 
         for(int i = 0; i < numServers; i++){
             String topic = "mgrpc/server-" + i;
-            MessageServer server = new MessageServer(new MqttServerConduit(serverMqtt, topic));
+            MessageServer server = new MqttServerBuilder().setClient(serverMqtt).setTopic(topic).build();
             server.addService(new HelloServiceForTest());
             server.start();
         }

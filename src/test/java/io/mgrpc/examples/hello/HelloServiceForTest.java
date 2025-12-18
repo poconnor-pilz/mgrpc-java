@@ -9,10 +9,17 @@ import org.slf4j.LoggerFactory;
 
 import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
+import java.util.List;
 
 public class HelloServiceForTest extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
 
     private static final Logger log = LoggerFactory.getLogger(MethodHandles.lookup().lookupClass());
+
+    private final List<String> greetings = new ArrayList<>();
+
+    public List<String> getGreetings() {
+        return greetings;
+    }
 
     /**
      * @param request a single request
@@ -55,11 +62,10 @@ public class HelloServiceForTest extends ExampleHelloServiceGrpc.ExampleHelloSer
     public StreamObserver<HelloRequest> lotsOfGreetings(StreamObserver<HelloReply> singleResponse) {
 
         return new StreamObserver<HelloRequest>() {
-            private ArrayList<String> names = new ArrayList<>();
             @Override
             public void onNext(HelloRequest value) {
                 log.debug("lotsOfGreetings received " + value.getName());
-                names.add(value.getName());
+                greetings.add(value.getName());
             }
 
             @Override
@@ -71,7 +77,7 @@ public class HelloServiceForTest extends ExampleHelloServiceGrpc.ExampleHelloSer
             public void onCompleted() {
                 log.debug("lotsOfGreetings onCompleted()");
                 String everyone = "";
-                for(String name: names){
+                for(String name: greetings){
                     everyone += name + ",";
                 }
                 HelloReply reply = HelloReply.newBuilder().setMessage("Hello " + everyone).build();

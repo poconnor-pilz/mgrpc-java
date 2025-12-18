@@ -18,7 +18,7 @@ package io.grpc.examples.routeguide;
 
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.MessageServer;
-import io.mgrpc.mqtt.MqttServerConduit;
+import io.mgrpc.mqtt.MqttServerBuilder;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.example.mqttutils.MqttUtils;
 
@@ -60,7 +60,7 @@ public class RouteGuideServer {
 
     MqttAsyncClient mqttAsyncClient = MqttUtils.makeClient(target);
     //Set up the server at topic serverTopic
-    MessageServer server = new MessageServer(new MqttServerConduit(mqttAsyncClient, serverTopic));
+    MessageServer server = new MqttServerBuilder().setClient(mqttAsyncClient).setTopic(serverTopic).build();
     server.addService(new RouteGuideService(RouteGuideUtil.parseFeatures(RouteGuideUtil.getDefaultFeaturesFile())));
     server.start();
 

@@ -3,7 +3,7 @@ package org.example.filetransfer;
 import com.google.protobuf.ByteString;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.MessageServer;
-import io.mgrpc.mqtt.MqttServerConduit;
+import io.mgrpc.mqtt.MqttServerBuilder;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.example.mqttutils.MqttUtils;
 
@@ -20,7 +20,7 @@ public class FileTransferService extends FileTransferGrpc.FileTransferImplBase {
         //Services in the server will listen on topics prefixed with "tenant1/device1"
         MqttAsyncClient client = MqttUtils.makeClient(MqttUtils.getBrokerUrl());
         String serverTopic = "tenant1/device1";
-        MessageServer server = new MessageServer(new MqttServerConduit(client, serverTopic));
+        MessageServer server = new MqttServerBuilder().setClient(client).setTopic(serverTopic).build();
 
         //Add the FileTransferService to the MessageServer
         if(args.length == 1) {

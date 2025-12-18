@@ -1,8 +1,10 @@
 package io.mgrpc.jms;
 
-import io.grpc.Channel;
 import io.grpc.Status;
-import io.mgrpc.*;
+import io.mgrpc.EmbeddedBroker;
+import io.mgrpc.Id;
+import io.mgrpc.MessageChannel;
+import io.mgrpc.MessageServer;
 import io.mgrpc.examples.hello.FlowControlTests;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -52,7 +54,7 @@ public class TestJmsFlowControlUsingBrokerCallQueues {
     @Test
     public void testServerQueueCapacityExceeded() throws Exception {
 
-        //Verify that when broker flow control is not set then it is possible to make the internal server
+        //Verify that when broker call queues are not used then it is possible to make the internal server
         //buffer/queue overflow
 
         final String serverId = Id.shortRandom();
@@ -66,10 +68,11 @@ public class TestJmsFlowControlUsingBrokerCallQueues {
         server.start();
 
         //Set up a channel without broker flow control
-        MessageChannel messageChannel = new MessageChannel(new JmsChannelConduit(clientConnection, false));
-        Channel channel = TopicInterceptor.intercept(messageChannel, serverId);
+        MessageChannel messageChannel = new JmsChannelBuilder()
+                .setConnection(clientConnection)
+                .setUseBrokerCallQueues(false).build();
 
-        FlowControlTests.testServerQueueCapacityExceeded(server, channel);
+        FlowControlTests.testServerQueueCapacityExceeded(server, messageChannel.forTopic(serverId));
 
         messageChannel.close();
         server.close();
@@ -97,9 +100,8 @@ public class TestJmsFlowControlUsingBrokerCallQueues {
                 .setQueueSize(10)
                 .setFlowCredit(Integer.MAX_VALUE)
                 .setUseBrokerCallQueues(false).build();
-        Channel channel = TopicInterceptor.intercept(messageChannel, serverId);
 
-        FlowControlTests.testClientQueueCapacityExceeded(server, channel);
+        FlowControlTests.testClientQueueCapacityExceeded(server, messageChannel.forTopic(serverId));
 
         messageChannel.close();
         server.close();
@@ -124,10 +126,11 @@ public class TestJmsFlowControlUsingBrokerCallQueues {
         server.start();
 
         //Set up a channel with broker flow control
-        MessageChannel messageChannel = new MessageChannel(new JmsChannelConduit(clientConnection, true));
-        Channel channel = TopicInterceptor.intercept(messageChannel, serverId);
+        MessageChannel messageChannel = new JmsChannelBuilder()
+                .setConnection(clientConnection)
+                .setUseBrokerCallQueues(true).build();
 
-        FlowControlTests.testClientStreamFlowControl(server, channel);
+        FlowControlTests.testClientStreamFlowControl(server, messageChannel.forTopic(serverId));
 
         messageChannel.close();
         server.close();
@@ -157,9 +160,8 @@ public class TestJmsFlowControlUsingBrokerCallQueues {
                 .setQueueSize(10)
                 .setFlowCredit(Integer.MAX_VALUE) //no effective base flow control
                 .setUseBrokerCallQueues(true).build();
-        Channel channel = TopicInterceptor.intercept(messageChannel, serverId);
 
-        FlowControlTests.testServerStreamFlowControl(server, channel);
+        FlowControlTests.testServerStreamFlowControl(server, messageChannel.forTopic(serverId));
 
         messageChannel.close();
         server.close();

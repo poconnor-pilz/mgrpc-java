@@ -92,6 +92,17 @@ public class MessageChannel extends Channel implements ChannelListener {
         return conduit;
     }
 
+    /**
+     * Return an intercepted channel that puts a header in each request of "server-topic = {topic}"
+     * @param topic The server topic to which the channel will send messages
+     * @return The intercepted channel. All messages sent on this will have the header applied.
+     * This header will cause the messages for the channel to be routed to topics that start with
+     * "{topic}/"
+     */
+    public Channel forTopic(String topic) {
+        return TopicInterceptor.intercept(this, topic);
+    }
+
 
     @Override
     public void onMessage(RpcMessage message)  {
@@ -225,6 +236,7 @@ public class MessageChannel extends Channel implements ChannelListener {
         }
 
         public String getServerTopic() {return serverTopic;}
+
 
         @Override
         public void start(Listener<RespT> responseListener, Metadata headers) {

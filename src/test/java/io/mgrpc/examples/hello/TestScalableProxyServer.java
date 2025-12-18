@@ -114,7 +114,7 @@ public class TestScalableProxyServer {
         final MqttAsyncClient serverMqttConnection = MqttUtils.makeClient();
 
         for(String serverName : serverNames){
-            MessageServer messageServer = new MessageServer(new MqttServerConduit(serverMqttConnection, serverName));
+            MessageServer messageServer = new MqttServerBuilder().setClient(serverMqttConnection).setTopic(serverName).build();
             messageServer.addService(new ListenForHello(serverName));
             messageServer.start();
         }

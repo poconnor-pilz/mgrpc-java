@@ -49,7 +49,7 @@ public class TestHelloJms extends TestHelloBase {
 
     @BeforeEach
     void setup() throws Exception{
-        channel = new MessageChannel(new JmsChannelConduit(clientConnection, false));
+        channel = new JmsChannelBuilder().setConnection(clientConnection).setUseBrokerCallQueues(false).build();
     }
 
     @AfterEach

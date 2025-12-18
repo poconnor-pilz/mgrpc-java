@@ -8,7 +8,7 @@ import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
 import io.mgrpc.mqtt.MqttChannelBuilder;
-import io.mgrpc.mqtt.MqttServerConduit;
+import io.mgrpc.mqtt.MqttServerBuilder;
 import io.mgrpc.mqtt.MqttUtils;
 import io.mgrpc.utils.StatusObserver;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
@@ -99,7 +99,7 @@ public class TestCommsErrors {
         Thread.sleep(500);
 
         //The server will send a connected status when it starts up
-        MessageServer server = new MessageServer(new MqttServerConduit(serverMqtt, serverName));
+        MessageServer server = new MqttServerBuilder().setClient(serverMqtt).setTopic(serverName).build();
         server.start();
         server.addService(new HelloService());
 
@@ -133,7 +133,7 @@ public class TestCommsErrors {
         Channel channel = TopicInterceptor.intercept(baseChannel, serverName);
 
         MqttAsyncClient serverMqttWithLwt = MqttUtils.makeClient();
-        MessageServer server = new MessageServer(new MqttServerConduit(serverMqttWithLwt, serverName));
+        MessageServer server = new MqttServerBuilder().setClient(serverMqttWithLwt).setTopic(serverName).build();
         server.start();
         server.addService(new HelloService());
 
@@ -172,7 +172,7 @@ public class TestCommsErrors {
         final String statusTopic = new ServerTopics(serverName).status;
         CloseableSocketFactory sf = new CloseableSocketFactory();
         MqttAsyncClient serverMqttWithLwt = MqttUtils.makeClient(statusTopic, null, sf);
-        MessageServer server = new MessageServer(new MqttServerConduit(serverMqttWithLwt, serverName));
+        MessageServer server = new MqttServerBuilder().setClient(serverMqttWithLwt).setTopic(serverName).build();
         server.start();
         server.addService(new HelloService());
 
@@ -209,7 +209,10 @@ public class TestCommsErrors {
         final String channelStatusTopic = "mgrpc/channelStatus";
 
         final ListenForCancel listenForCancel = new ListenForCancel();
-        MessageServer server = new MessageServer(new MqttServerConduit(serverMqtt, serverName, channelStatusTopic));
+        MessageServer server = new MqttServerBuilder()
+                .setClient(serverMqtt)
+                .setTopic(serverName)
+                .setChannelStatusTopic(channelStatusTopic).build();
         server.start();
         server.addService(listenForCancel);
 
@@ -259,7 +262,10 @@ public class TestCommsErrors {
 
         final ListenForCancel listenForCancel = new ListenForCancel();
         final String channelStatusTopic = "mgrpc/channelStatus";
-        MessageServer server = new MessageServer(new MqttServerConduit(serverMqtt, serverName, channelStatusTopic));
+        MessageServer server = new MqttServerBuilder()
+                .setClient(serverMqtt)
+                .setTopic(serverName)
+                .setChannelStatusTopic(channelStatusTopic).build();
         server.start();
         server.addService(listenForCancel);
 

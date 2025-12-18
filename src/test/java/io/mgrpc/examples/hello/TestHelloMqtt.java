@@ -5,7 +5,7 @@ import io.mgrpc.EmbeddedBroker;
 import io.mgrpc.MessageChannel;
 import io.mgrpc.MessageServer;
 import io.mgrpc.mqtt.MqttChannelBuilder;
-import io.mgrpc.mqtt.MqttServerConduit;
+import io.mgrpc.mqtt.MqttServerBuilder;
 import io.mgrpc.mqtt.MqttUtils;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
@@ -67,7 +67,7 @@ public class TestHelloMqtt extends TestHelloBase {
     }
 
     public MessageServer makeMessageServer(String serverTopic) throws Exception {
-        MessageServer server = new MessageServer(new MqttServerConduit(serverMqtt, serverTopic));
+        MessageServer server = new MqttServerBuilder().setClient(serverMqtt).setTopic(serverTopic).build();
         server.start();
         return server;
     }

@@ -9,7 +9,7 @@ import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
 import io.mgrpc.*;
 import io.mgrpc.mqtt.MqttChannelBuilder;
-import io.mgrpc.mqtt.MqttServerConduit;
+import io.mgrpc.mqtt.MqttServerBuilder;
 import io.mgrpc.mqtt.MqttUtils;
 import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
@@ -50,7 +50,7 @@ public class TestAuthAndMetadata {
 
         //Make server name short but random to prevent stray status messages from previous tests affecting this test
         final String SERVER = Id.shortRandom();
-        MessageServer server = new MessageServer(new MqttServerConduit(MqttUtils.makeClient(), SERVER));
+        MessageServer server = new MqttServerBuilder().setClient(MqttUtils.makeClient()).setTopic(SERVER).build();
 
         server.start();
 

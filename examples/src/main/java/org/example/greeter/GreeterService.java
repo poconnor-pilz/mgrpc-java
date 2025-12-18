@@ -5,7 +5,7 @@ import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.MessageServer;
-import io.mgrpc.mqtt.MqttServerConduit;
+import io.mgrpc.mqtt.MqttServerBuilder;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.example.mqttutils.MqttUtils;
 import org.slf4j.Logger;
@@ -28,7 +28,7 @@ public class GreeterService extends GreeterGrpc.GreeterImplBase {
         MqttUtils.EmbeddedBroker.start();
         MqttAsyncClient serverMqtt = MqttUtils.makeClient(MqttUtils.getBrokerUrl());
         //Set up the server at topic serverTopic
-        MessageServer server = new MessageServer(new MqttServerConduit(serverMqtt, SERVER_TOPIC));
+        MessageServer server = new MqttServerBuilder().setClient(serverMqtt).setTopic(SERVER_TOPIC).build();
         //Add our service
         server.addService(new GreeterService());
         server.start();

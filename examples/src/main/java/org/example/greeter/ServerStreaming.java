@@ -5,8 +5,7 @@ import io.grpc.examples.helloworld.GreeterGrpc;
 import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
 import io.mgrpc.MessageChannel;
-import io.mgrpc.TopicInterceptor;
-import io.mgrpc.mqtt.MqttChannelConduit;
+import io.mgrpc.mqtt.MqttChannelBuilder;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.example.mqttutils.MqttUtils;
 import org.slf4j.Logger;
@@ -28,9 +27,9 @@ public class ServerStreaming {
 
         MqttAsyncClient clientMqtt = MqttUtils.makeClient(MqttUtils.getBrokerUrl());
 
-        MessageChannel baseChannel = new MessageChannel(new MqttChannelConduit(clientMqtt));
+        MessageChannel baseChannel = new MqttChannelBuilder().setClient(clientMqtt).build();
         //Make sure all messages on the channel are routed through GreeterService.SERVER_TOPIC
-        Channel channel = TopicInterceptor.intercept(baseChannel, GreeterService.SERVER_TOPIC);
+        Channel channel = baseChannel.forTopic(GreeterService.SERVER_TOPIC);
 
 
         final GreeterGrpc.GreeterBlockingStub blockingStub = GreeterGrpc.newBlockingStub(channel);

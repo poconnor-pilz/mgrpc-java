@@ -12,7 +12,6 @@ import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
 import io.mgrpc.mqtt.MqttChannelBuilder;
 import io.mgrpc.mqtt.MqttServerBuilder;
-import io.mgrpc.mqtt.MqttServerConduit;
 import io.mgrpc.mqtt.MqttUtils;
 import io.mgrpc.utils.StatusObserver;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
@@ -69,7 +68,7 @@ public class TestCancelAndTimeout {
     void setup() throws Exception {
 
         //Set up the server
-        server = new MessageServer(new MqttServerConduit(serverMqtt, SERVER));
+        server = new MqttServerBuilder().setClient(serverMqtt).setTopic(SERVER).build();
         server.start();
         messageChannel = new MqttChannelBuilder().setClient(clientMqtt).build();
         channel = TopicInterceptor.intercept(messageChannel, SERVER);

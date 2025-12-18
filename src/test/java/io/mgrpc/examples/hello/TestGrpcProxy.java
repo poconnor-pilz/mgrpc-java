@@ -9,7 +9,7 @@ import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
 import io.mgrpc.*;
 import io.mgrpc.mqtt.MqttChannelBuilder;
-import io.mgrpc.mqtt.MqttServerConduit;
+import io.mgrpc.mqtt.MqttServerBuilder;
 import io.mgrpc.mqtt.MqttUtils;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.junit.jupiter.api.BeforeAll;
@@ -84,7 +84,7 @@ public class TestGrpcProxy {
 
 
         final MqttAsyncClient serverMqttConnection = MqttUtils.makeClient();
-        MessageServer messageServer = new MessageServer(new MqttServerConduit(serverMqttConnection, SERVER));
+        MessageServer messageServer = new MqttServerBuilder().setClient(serverMqttConnection).setTopic(SERVER).build();
         messageServer.addService(serviceWithIntercept);
         messageServer.start();
 
@@ -150,7 +150,7 @@ public class TestGrpcProxy {
                 .usePlaintext().build();
 
         final MqttAsyncClient serverMqttConnection = MqttUtils.makeClient();
-        MessageServer messageServer = new MessageServer(new MqttServerConduit(serverMqttConnection, SERVER));
+        MessageServer messageServer = new MqttServerBuilder().setClient(serverMqttConnection).setTopic(SERVER).build();
 
         //We want to wire this:
         //MqttServer ->  GrpcProxy -> HttpChannel

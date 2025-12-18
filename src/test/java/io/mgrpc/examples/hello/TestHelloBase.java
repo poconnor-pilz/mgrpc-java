@@ -216,20 +216,26 @@ public abstract class TestHelloBase {
         String serverTopic = "mgrpc/" + Id.shortRandom();
         Channel channel = TopicInterceptor.intercept(getChannel(), serverTopic);
         MessageServer server = makeMessageServer(serverTopic);
-        server.addService(new HelloServiceForTest());
 
-        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
-        HelloRequest joe = HelloRequest.newBuilder().setName("joe").build();
-        HelloRequest jane = HelloRequest.newBuilder().setName("jane").build();
-        HelloRequest john = HelloRequest.newBuilder().setName("john").build();
+        final HelloServiceForTest testService = new HelloServiceForTest();
+        server.addService(testService);
+
+        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub
+                = ExampleHelloServiceGrpc.newStub(channel);
         StreamWaiter<HelloReply> waiter = new StreamWaiter<>(REQUEST_TIMEOUT);
         StreamObserver<HelloRequest> clientStreamObserver = stub.lotsOfGreetings(waiter);
-        clientStreamObserver.onNext(joe);
-        clientStreamObserver.onNext(jane);
-        clientStreamObserver.onNext(john);
+        for(int i = 0; i < 50; i++){
+            HelloRequest request = HelloRequest.newBuilder().setName("test " + i).build();
+            clientStreamObserver.onNext(request);
+        }
         clientStreamObserver.onCompleted();
         final HelloReply reply = waiter.getSingle();
-        assertEquals("Hello joe,jane,john,", reply.getMessage());
+
+        for(int i = 0; i < 50; i++){
+            String msg = "test " + i;
+            assertEquals(msg, testService.getGreetings().get(i));
+        }
+
         //Check for leaks
         Thread.sleep(50); //Give close() threads a chance to complete
         assertEquals(0, server.getStats().getActiveCalls());

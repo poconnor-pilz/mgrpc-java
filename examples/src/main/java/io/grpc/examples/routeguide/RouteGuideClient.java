@@ -25,8 +25,7 @@ import io.grpc.examples.routeguide.RouteGuideGrpc.RouteGuideBlockingStub;
 import io.grpc.examples.routeguide.RouteGuideGrpc.RouteGuideStub;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.MessageChannel;
-import io.mgrpc.TopicInterceptor;
-import io.mgrpc.mqtt.MqttChannelConduit;
+import io.mgrpc.mqtt.MqttChannelBuilder;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.example.mqttutils.MqttUtils;
 
@@ -257,10 +256,10 @@ public class RouteGuideClient {
 
 
     MqttAsyncClient mqttAsyncClient = MqttUtils.makeClient(target);
-    MessageChannel baseChannel = new MessageChannel(new MqttChannelConduit(mqttAsyncClient));
+    MessageChannel baseChannel = new MqttChannelBuilder().setClient(mqttAsyncClient).build();
     //Make sure all messages on the channel are routed through serverTopic
     final String serverTopic = "mgrpc/routeguideexample";
-    Channel channel = TopicInterceptor.intercept(baseChannel, serverTopic);
+    Channel channel = baseChannel.forTopic(serverTopic);
 
 
     List<Feature> features;

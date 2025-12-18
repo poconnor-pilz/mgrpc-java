@@ -47,6 +47,8 @@ public class TopicInterceptor implements ClientInterceptor {
      *                    to make many intercepted channels from one base channel.
      * @param serverTopic The server topic to which the channel will send messages
      * @return The intercepted channel. All messages sent on this will have the header applied.
+     * This header will cause the messages for the channel to be routed to topics that start with
+     * "{topic}/"
      */
     public static Channel intercept(Channel baseChannel, String serverTopic) {
         return ClientInterceptors.intercept(baseChannel, new TopicInterceptor(serverTopic));

@@ -2,8 +2,7 @@ package org.example.filetransfer;
 
 import io.grpc.Channel;
 import io.mgrpc.MessageChannel;
-import io.mgrpc.TopicInterceptor;
-import io.mgrpc.mqtt.MqttChannelConduit;
+import io.mgrpc.mqtt.MqttChannelBuilder;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.example.mqttutils.MqttUtils;
 
@@ -39,14 +38,14 @@ public class FileTransferClient {
 
         //Make a grpc channel on topic "filetransfer" on the local broker
         MqttAsyncClient clientMqtt = MqttUtils.makeClient(MqttUtils.getBrokerUrl());
-        MessageChannel msgChannel = new MessageChannel(new MqttChannelConduit(clientMqtt));
+        MessageChannel msgChannel = new MqttChannelBuilder().setClient(clientMqtt).build();
         String serverTopic = "tenant1/device1";
-        Channel channel = TopicInterceptor.intercept(msgChannel, serverTopic);
+        Channel channel = msgChannel.forTopic(serverTopic);
 
         //Code from here on down is pure gRPC (no mqtt)
         FileTransferGrpc.FileTransferBlockingStub stub = FileTransferGrpc.newBlockingStub(channel);
 
-        int chunkSize = 1024 * 20; //Max payload size for AWS IoT hub is 128kb.
+        int chunkSize = 1024; //Max payload size for AWS IoT hub is 128kb.
         byte[] buffer = new byte[chunkSize];
         int bytesRead;
 

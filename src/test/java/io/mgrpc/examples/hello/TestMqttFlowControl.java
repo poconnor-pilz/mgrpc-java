@@ -13,7 +13,6 @@ import io.mgrpc.*;
 import io.mgrpc.errors.CancelableObserver;
 import io.mgrpc.mqtt.MqttChannelBuilder;
 import io.mgrpc.mqtt.MqttServerBuilder;
-import io.mgrpc.mqtt.MqttServerConduit;
 import io.mgrpc.mqtt.MqttUtils;
 import org.eclipse.paho.client.mqttv3.MqttAsyncClient;
 import org.eclipse.paho.client.mqttv3.MqttException;
@@ -126,9 +125,8 @@ class TestMqttFlowControl {
                 .setClient(clientMqtt)
                 .setQueueSize(1000)
                 .setFlowCredit(10).build();
-        Channel channel = TopicInterceptor.intercept(messageChannel, serverId);
 
-        FlowControlTests.testClientStreamFlowControl(server, channel);
+        FlowControlTests.testClientStreamFlowControl(server, messageChannel.forTopic(serverId));
 
         messageChannel.close();
         server.close();
@@ -236,7 +234,7 @@ class TestMqttFlowControl {
         final CancelableService cancelableService = new CancelableService();
 
         final String serverTopic = Id.shortRandom();
-        MessageServer server = new MessageServer(new MqttServerConduit(serverMqtt, serverTopic));
+        MessageServer server = new MqttServerBuilder().setClient(serverMqtt).setTopic(serverTopic).build();
         server.addService(cancelableService);
         server.start();
 

@@ -1,6 +1,5 @@
 package io.mgrpc.errors;
 
-import io.grpc.Channel;
 import io.grpc.Status;
 import io.grpc.examples.helloworld.ExampleHelloServiceGrpc;
 import io.grpc.examples.helloworld.HelloReply;
@@ -9,7 +8,7 @@ import io.grpc.stub.StreamObserver;
 import io.mgrpc.*;
 import io.mgrpc.mqtt.MqttChannelBuilder;
 import io.mgrpc.mqtt.MqttExceptionLogger;
-import io.mgrpc.mqtt.MqttServerConduit;
+import io.mgrpc.mqtt.MqttServerBuilder;
 import io.mgrpc.mqtt.MqttUtils;
 import io.mgrpc.utils.TestRpcMessageBuilder;
 import io.mgrpc.utils.ToList;
@@ -86,7 +85,7 @@ class TestOrderAndDuplicates {
 
 
         final Accumulator accumulator = new Accumulator();
-        MessageServer server = new MessageServer(new MqttServerConduit(serverMqtt, SERVER));
+        MessageServer server = new MqttServerBuilder().setClient(serverMqtt).setTopic(SERVER).build();
         server.start();
         server.addService(accumulator);
 
@@ -143,7 +142,7 @@ class TestOrderAndDuplicates {
         //Then verify that the MqttServer puts re-orders the requests correctly.
 
         final Accumulator accumulator = new Accumulator();
-        MessageServer server = new MessageServer(new MqttServerConduit(serverMqtt, SERVER));
+        MessageServer server = new MqttServerBuilder().setClient(serverMqtt).setTopic(SERVER).build();
         server.start();
         server.addService(accumulator);
 
@@ -214,10 +213,9 @@ class TestOrderAndDuplicates {
         MessageChannel messageChannel =new MqttChannelBuilder()
                 .setClient(clientMqtt)
                 .setChannelId(channelId).build();
-        Channel channel = TopicInterceptor.intercept(messageChannel, SERVER);
 
-
-        final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub stub = ExampleHelloServiceGrpc.newBlockingStub(channel);
+        final ExampleHelloServiceGrpc.ExampleHelloServiceBlockingStub stub
+                = ExampleHelloServiceGrpc.newBlockingStub(messageChannel.forTopic(SERVER));
         HelloRequest request = HelloRequest.newBuilder().setName("test").build();
         List<HelloReply> responseList = ToList.toList(stub.lotsOfReplies(request));
         assertEquals(responseList.size(), 5);
