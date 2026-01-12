@@ -64,14 +64,14 @@ class TestMqttFlowControl {
         MessageServer server = new MqttServerBuilder()
                 .setClient(serverMqtt)
                 .setQueueSize(10)
-                .setFlowCredit(Integer.MAX_VALUE) //no effective base flow control
+                .setCreditSize(Integer.MAX_VALUE) //no effective base flow control
                 .setTopic(serverId).build();
         server.start();
 
         MessageChannel messageChannel = new MqttChannelBuilder()
                 .setClient(clientMqtt)
                 .setQueueSize(10000)
-                .setFlowCredit(Integer.MAX_VALUE).build();
+                .setCreditSize(Integer.MAX_VALUE).build();
         Channel channel = TopicInterceptor.intercept(messageChannel, serverId);
 
         FlowControlTests.testServerQueueCapacityExceeded(server, channel);
@@ -87,14 +87,14 @@ class TestMqttFlowControl {
         MessageServer server = new MqttServerBuilder()
                 .setClient(serverMqtt)
                 .setQueueSize(1000)
-                .setFlowCredit(Integer.MAX_VALUE) //no effective base flow control
+                .setCreditSize(Integer.MAX_VALUE) //no effective base flow control
                 .setTopic(serverId).build();
         server.start();
 
         MessageChannel messageChannel = new MqttChannelBuilder()
                 .setClient(clientMqtt)
                 .setQueueSize(10)
-                .setFlowCredit(Integer.MAX_VALUE).build();
+                .setCreditSize(Integer.MAX_VALUE).build();
         Channel channel = TopicInterceptor.intercept(messageChannel, serverId);
 
         FlowControlTests.testClientQueueCapacityExceeded(server, channel);
@@ -104,34 +104,54 @@ class TestMqttFlowControl {
 
     }
 
+
     @Test
     public void testClientStreamFlowControl() throws Exception {
-
-
-        //Make a service that blocks until the test flips a latch
-        //While the service is blocked try to overlflow the internal MessageServer queue and verify
-        //That it doesn't cause a problem because flow control is enabled
-
 
         final String serverId = Id.shortRandom();
         MessageServer server = new MqttServerBuilder()
                 .setClient(serverMqtt)
-                .setQueueSize(1000)
-                .setFlowCredit(10)
+                .setQueueSize(10) // small queue but it should not overflow because of flow control
+                .setCreditSize(10) //Only issue 10 credits each time to prevent queue from overflowing
                 .setTopic(serverId).build();
         server.start();
 
         MessageChannel messageChannel = new MqttChannelBuilder()
                 .setClient(clientMqtt)
-                .setQueueSize(1000)
-                .setFlowCredit(10).build();
+                .setQueueSize(99)
+                .setCreditSize(99).build();
 
-        FlowControlTests.testClientStreamFlowControl(server, messageChannel.forTopic(serverId));
+        FlowControlTests.testClientStreamFlowControl(server, messageChannel.forTopic(serverId), Status.OK);
 
         messageChannel.close();
         server.close();
 
     }
+
+    @Test
+    public void testClientStreamFlowControlWithFail() throws Exception {
+
+
+        final String serverId = Id.shortRandom();
+        MessageServer server = new MqttServerBuilder()
+                .setClient(serverMqtt)
+                .setQueueSize(10) // small queue but that should overflow
+                .setCreditSize(99) //Issue 99 credits each time to cause overflow
+                .setTopic(serverId).build();
+        server.start();
+
+        MessageChannel messageChannel = new MqttChannelBuilder()
+                .setClient(clientMqtt)
+                .setQueueSize(99)
+                .setCreditSize(99).build();
+
+        FlowControlTests.testClientStreamFlowControl(server, messageChannel.forTopic(serverId), Status.RESOURCE_EXHAUSTED);
+
+        messageChannel.close();
+        server.close();
+
+    }
+
 
     @Test
     public void testServerStreamFlowControl() throws Exception {
@@ -146,14 +166,14 @@ class TestMqttFlowControl {
         MessageServer server = new MqttServerBuilder()
                 .setClient(serverMqtt)
                 .setQueueSize(1000)
-                .setFlowCredit(1000)
+                .setCreditSize(1000)
                 .setTopic(serverId).build();
         server.start();
 
         MessageChannel messageChannel = new MqttChannelBuilder()
                 .setClient(clientMqtt)
                 .setQueueSize(1000)
-                .setFlowCredit(10).build();
+                .setCreditSize(10).build();
         Channel channel = TopicInterceptor.intercept(messageChannel, serverId);
 
         FlowControlTests.testServerStreamFlowControl(server, channel);
@@ -241,7 +261,7 @@ class TestMqttFlowControl {
         //Set the flow credit to 3 so that the service will not have enough credit to send all 6 messages
         MessageChannel messageChannel = new MqttChannelBuilder()
                 .setClient(clientMqtt)
-                .setFlowCredit(3)
+                .setCreditSize(3)
                 .build();
 
         Channel channel = TopicInterceptor.intercept(messageChannel, serverTopic);
@@ -271,6 +291,29 @@ class TestMqttFlowControl {
         assertTrue(cancelableObserver.latch.await(5, TimeUnit.SECONDS));
         assertEquals(cancelableObserver.exception.getStatus().getCode(), Status.CANCELLED.getCode());
 
+
+    }
+
+    @Test
+    public void testClientStreamOnReady() throws Exception {
+
+        final String serverId = Id.shortRandom();
+        MessageServer server = new MqttServerBuilder()
+                .setClient(serverMqtt)
+                .setQueueSize(1000)
+                .setCreditSize(10)
+                .setTopic(serverId).build();
+        server.start();
+
+        MessageChannel messageChannel = new MqttChannelBuilder()
+                .setClient(clientMqtt)
+                .setQueueSize(1000)
+                .setCreditSize(10).build();
+
+        FlowControlTests.testClientStreamOnReady(server, messageChannel.forTopic(serverId));
+
+        messageChannel.close();
+        server.close();
 
     }
 }

@@ -67,7 +67,7 @@ public class TestJmsBaseFlowControl {
         MessageChannel messageChannel = new JmsChannelBuilder()
                 .setConnection(clientConnection)
                 .setUseBrokerCallQueues(true)
-                .setFlowCredit(10)
+                .setCreditSize(10)
                 .setQueueSize(1000)
                 .build();
 
@@ -137,7 +137,7 @@ public class TestJmsBaseFlowControl {
 
         MessageServer server = new JmsServerBuilder()
                 .setConnection(serverConnection)
-                .setFlowCredit(10)
+                .setCreditSize(10)
                 .setTopic(serverId).build();
 
         server.start();
@@ -145,7 +145,7 @@ public class TestJmsBaseFlowControl {
         MessageChannel messageChannel = new JmsChannelBuilder()
                 .setConnection(clientConnection)
                 .setUseBrokerCallQueues(true)
-                .setFlowCredit(10)
+                .setCreditSize(10)
                 .setQueueSize(1000)
                 .build();
 

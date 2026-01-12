@@ -49,8 +49,12 @@ public class MessageServer implements ServerListener {
     public static final int DEFAULT_QUEUE_SIZE = 100;
     private final int queueSize;
 
-    public static final int DEFAULT_FLOW_CREDIT = 20;
-    private final int flowCredit;
+    public static final int DEFAULT_CREDIT_SIZE = 20;
+
+    /**
+     * Size of credit that should be issued to client for flow control
+     */
+    private final int creditSize;
 
     private  ScheduledFuture<?> clearRecentlyRemovedTimer;
 
@@ -58,10 +62,10 @@ public class MessageServer implements ServerListener {
      * @param conduit PubsubClient
      * @param queueSize  The size of the incoming message queue for each call
      */
-    public MessageServer(ServerConduit conduit, int queueSize, int flowCredit) {
+    public MessageServer(ServerConduit conduit, int queueSize, int creditSize) {
         this.conduit = conduit;
         this.queueSize = queueSize;
-        this.flowCredit = flowCredit;
+        this.creditSize = creditSize;
     }
 
     /**
@@ -69,12 +73,12 @@ public class MessageServer implements ServerListener {
      * @param queueSize  The size of the incoming message queue for each call
      */
     public MessageServer(ServerConduit conduit, int queueSize) {
-        this(conduit, queueSize, DEFAULT_FLOW_CREDIT);
+        this(conduit, queueSize, DEFAULT_CREDIT_SIZE);
     }
 
 
     public MessageServer(ServerConduit conduit) {
-        this(conduit, DEFAULT_QUEUE_SIZE, DEFAULT_FLOW_CREDIT);
+        this(conduit, DEFAULT_QUEUE_SIZE, DEFAULT_CREDIT_SIZE);
     }
 
 
@@ -335,7 +339,7 @@ public class MessageServer implements ServerListener {
                 final ServerCallHandler<?, ?> serverCallHandler = serverMethodDefinition.getServerCallHandler();
 
                 serverCall = new MsgServerCall<>(serverMethodDefinition.getMethodDescriptor(),
-                        start, callId, flowCredit);
+                        start, callId, creditSize);
 
                 //Extract the channelId from the header. It may be used later to find calls for a
                 //particular client that need to be cleaned up because the client has disconnected.
@@ -390,21 +394,24 @@ public class MessageServer implements ServerListener {
             private int clientCreditUsed = 0;
             private final CreditHandler creditHandler;
 
-            private final int flowCredit;
+            /**
+             * Size of credit that should be issued to client for flow control
+             */
+            private final int creditSize;
 
-            private int currentFlowCredit;
+            private int lastCreditIssued;
 
             private Context.CancellableContext cancellableContext = null;
 
-            MsgServerCall(MethodDescriptor<ReqT, RespT> methodDescriptor, Start start, String callId, int flowCredit) {
+            MsgServerCall(MethodDescriptor<ReqT, RespT> methodDescriptor, Start start, String callId, int creditSize) {
                 this.methodDescriptor = methodDescriptor;
                 this.start = start;
                 this.callId = callId;
-                this.flowCredit = flowCredit;
+                this.creditSize = creditSize;
                 //The channel always starts with credit for 2 value messages.
                 //After the server receives the second value message it should send on more flow credit.
                 //This means that for single message requests the server never has to send credit.
-                this.currentFlowCredit = 2;
+                this.lastCreditIssued = 2;
                 creditHandler = new CreditHandler("server call " + callId, start.getCredit());
             }
 
@@ -458,14 +465,14 @@ public class MessageServer implements ServerListener {
                         value = message.getValue();
                         //Issue more credit to the client if it has sent all the messages it has credit for.
                         clientCreditUsed++;
-                        if(clientCreditUsed == this.currentFlowCredit) {
+                        if(clientCreditUsed == this.lastCreditIssued) {
                             final RpcMessage flow = RpcMessage.newBuilder()
                                     .setCallId(this.callId)
                                     .setSequence(0) //Flow messages are not ordered. They are processed immediately
-                                    .setFlow(Flow.newBuilder().setCredit(this.flowCredit)).build();
-                            this.currentFlowCredit = this.flowCredit;
+                                    .setFlow(Flow.newBuilder().setCredit(this.creditSize)).build();
+                            this.lastCreditIssued = this.creditSize;
                             try {
-                                log.debug("Sending flow credit={} for call {}", this.flowCredit, callId);
+                                log.debug("Sending flow credit={} for call {}", this.creditSize, callId);
                                 conduit.send(flow);
                             } catch (MessagingException e) {
                                 log.error("Failed to send flow control message", e);

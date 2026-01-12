@@ -10,7 +10,7 @@ public class MqttServerBuilder {
 
     private IMqttAsyncClient client;
     private String channelStatusTopic;
-    private int flowCredit = MessageServer.DEFAULT_FLOW_CREDIT;
+    private int creditSize = MessageServer.DEFAULT_CREDIT_SIZE;
 
 
     private String topic;
@@ -54,11 +54,11 @@ public class MqttServerBuilder {
     }
 
     /**
-     * @param flowCredit The amount of credit that should be issued for flow control e.g. if flow credit is 20
-     *      then the sender will only send 20 messages before waiting for the receiver to send more flow credit.
+     * @param creditSize The amount of credit that should be issued for flow control e.g. if creditSize 20
+     * then the sender will only send 20 messages before waiting for the receiver to send more credit.
      */
-    public MqttServerBuilder setFlowCredit(int flowCredit) {
-        this.flowCredit = flowCredit;
+    public MqttServerBuilder setCreditSize(int creditSize) {
+        this.creditSize = creditSize;
         return this;
     }
 
@@ -73,6 +73,6 @@ public class MqttServerBuilder {
 
     public MessageServer build(){
         final MqttServerConduit conduit = new MqttServerConduit(client, topic, channelStatusTopic);
-        return new MessageServer(conduit, queueSize, flowCredit);
+        return new MessageServer(conduit, queueSize, creditSize);
     }
 }

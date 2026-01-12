@@ -21,10 +21,17 @@ public class CreditHandler {
     private final Lock lock = new ReentrantLock();
     private final Condition creditAvailable = lock.newCondition();
 
-    public CreditHandler(String name, int credit) {
+    private final Runnable onCreditAvailableHandler;
+
+    public CreditHandler(String name, int credit, Runnable onCreditAvailableHandler) {
         this.name = name;
         this.credit = credit;
+        this.onCreditAvailableHandler = onCreditAvailableHandler;
         log.debug("Created new credit handler {} with credit={}", name, credit);
+    }
+
+    public CreditHandler(String name, int credit) {
+        this(name, credit, null);
     }
 
     public void addCredit(int credit) {
@@ -33,6 +40,13 @@ public class CreditHandler {
         log.info("{} added credit={}. Total={}", name, credit, this.credit);
         creditAvailable.signal();
         lock.unlock();
+        if (onCreditAvailableHandler != null) {
+            onCreditAvailableHandler.run();
+        }
+    }
+
+    public boolean hasCredit(){
+        return this.credit > 0;
     }
 
 

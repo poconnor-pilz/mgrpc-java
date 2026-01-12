@@ -274,7 +274,7 @@ public class TestCancelAndTimeout {
                 .setClient(serverMqtt)
                 .setTopic(SERVER)
                 .setQueueSize(10)
-                .setFlowCredit(100).build();
+                .setCreditSize(100).build();
         server.start();
 
         final CountDownLatch serviceLatch = new CountDownLatch(1);

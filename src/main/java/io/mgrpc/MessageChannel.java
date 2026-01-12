@@ -33,7 +33,10 @@ public class MessageChannel extends Channel implements ChannelListener {
     private final String channelId;
     private final int queueSize;
 
-    private final int flowCredit;
+    /**
+     * Size of credit that should be issued to server for flow control
+     */
+    private final int creditSize;
 
     private final Map<String, MsgClientCall> clientCallsById = new ConcurrentHashMap<>();
 
@@ -42,18 +45,18 @@ public class MessageChannel extends Channel implements ChannelListener {
 
     public static final int DEFAULT_QUEUE_SIZE = 100;
 
-    public static final int DEFAULT_FLOW_CREDIT = 20;
+    public static final int DEFAULT_CREDIT_SIZE = 20;
 
 
     /**
      * @param conduit           PubsubClient
      * @param channelId         The client id for the channel. Should be unique.
      * @param queueSize        The size of the message queue for each call's replies
-     * @param flowCredit The amount of credit that should be issued for flow control e.g. if flow credit is 20
+     * @param creditSize The amount of credit that should be issued for flow control e.g. if flow credit is 20
      *      then the sender will only send 20 messages before waiting for the receiver to send more flow credit.     */
-    public MessageChannel(ChannelConduit conduit, String channelId, int queueSize, int flowCredit) {
+    public MessageChannel(ChannelConduit conduit, String channelId, int queueSize, int creditSize) {
         log.debug("Creating MessageChannel with channelId={}, queueSize={}, flowCredit{} ",
-                channelId, queueSize, flowCredit);
+                channelId, queueSize, creditSize);
         if(conduit == null) {
             throw new NullPointerException("conduit is null");
         }
@@ -68,10 +71,10 @@ public class MessageChannel extends Channel implements ChannelListener {
         } else {
             this.queueSize = queueSize;
         }
-        if(flowCredit <= 0) {
-            this.flowCredit = DEFAULT_FLOW_CREDIT;
+        if(creditSize <= 0) {
+            this.creditSize = DEFAULT_CREDIT_SIZE;
         } else {
-            this.flowCredit  = flowCredit;
+            this.creditSize = creditSize;
         }
     }
 
@@ -79,7 +82,7 @@ public class MessageChannel extends Channel implements ChannelListener {
      * @param conduit      Mqtt client
      */
     public MessageChannel(ChannelConduit conduit) {
-        this(conduit, Id.random(), DEFAULT_QUEUE_SIZE, DEFAULT_FLOW_CREDIT);
+        this(conduit, Id.random(), DEFAULT_QUEUE_SIZE, DEFAULT_CREDIT_SIZE);
     }
 
 
@@ -153,7 +156,7 @@ public class MessageChannel extends Channel implements ChannelListener {
     @Override
     public <RequestT, ResponseT> ClientCall newCall(MethodDescriptor<RequestT, ResponseT> methodDescriptor, CallOptions callOptions) {
         MsgClientCall call = new MsgClientCall<>(methodDescriptor, callOptions,
-                conduit.getExecutor(), this.queueSize, this.flowCredit);
+                conduit.getExecutor(), this.queueSize, this.creditSize);
         clientCallsById.put(call.getCallId(), call);
 
         return call;
@@ -204,7 +207,10 @@ public class MessageChannel extends Channel implements ChannelListener {
 
         private String serverTopic;
 
-        private final int flowCredit;
+        /**
+         * Size of credit that should be issued to server for flow control
+         */
+        private final int creditSize;
         private int serverCreditUsed = 0;
 
 
@@ -217,18 +223,21 @@ public class MessageChannel extends Channel implements ChannelListener {
         private final CreditHandler creditHandler;
 
         private MsgClientCall(MethodDescriptor<ReqT, RespT> methodDescriptor, CallOptions callOptions,
-                              Executor executor, int queueSize, int flowCredit) {
+                              Executor executor, int queueSize, int creditSize) {
             this.clientExecutor = callOptions.getExecutor();
             this.methodDescriptor = methodDescriptor;
             this.callOptions = callOptions;
             this.context = Context.current().withCancellation();
             this.callId = Id.random();
             this.messageProcessor = new MessageProcessor(executor, queueSize, this, 0, "channel callid = " + callId);
+            this.creditSize = creditSize;
             //The channel always starts with credit for 2 value messages.
             //After the server receives the second value message it should send on more flow credit.
             //This means that for single message requests the server never has to send credit.
-            this.creditHandler = new CreditHandler("client call " + callId, 2);
-            this.flowCredit = flowCredit;
+            this.creditHandler = new CreditHandler("client call " + callId, 2, () -> {
+                clientExec(() -> responseListener.onReady());
+            });
+
         }
 
         public String getCallId() {
@@ -314,7 +323,7 @@ public class MessageChannel extends Channel implements ChannelListener {
 
             Start.Builder start = Start.newBuilder();
             start.setChannelId(channelId);
-            start.setCredit(this.flowCredit);
+            start.setCredit(this.creditSize);
             start.setMethodName(methodDescriptor.getFullMethodName());
             start.setMethodType(MethodTypeConverter.toStart(methodDescriptor.getType()));
             if (effectiveDeadline != null) {
@@ -352,10 +361,15 @@ public class MessageChannel extends Channel implements ChannelListener {
                 throw new StatusRuntimeException(Status.INTERNAL.withDescription(ex.getMessage()).withCause(ex));
             }
 
+            //If the client is written to use onReady() style flow control then notify that it
+            //can now send on messages.
+            clientExec(() -> responseListener.onReady());
+        }
 
-
-            //TODO should we call responseListener.onReady() here?
-//            exec(() -> responseListener.onReady());
+        @Override
+        public boolean isReady() {
+            //If the creditHandler has credit then it is ready to recieve more messages.
+            return creditHandler.hasCredit();
         }
 
         @Override
@@ -395,7 +409,6 @@ public class MessageChannel extends Channel implements ChannelListener {
                 this.close(Status.UNAVAILABLE.withDescription(ex.getMessage()).withCause(ex));
                 return;
             }
-            responseListener.onReady();
         }
 
 
@@ -460,13 +473,13 @@ public class MessageChannel extends Channel implements ChannelListener {
                         } else {
                            //Issue more credit to the server if it has sent all the messages it has credit for.
                            serverCreditUsed++;
-                           if(serverCreditUsed == this.flowCredit) {
+                           if(serverCreditUsed == this.creditSize) {
                                final RpcMessage.Builder flow = RpcMessage.newBuilder()
                                        .setCallId(this.callId)
                                        .setSequence(0) //Flow messages are not ordered. They are processed immediately
-                                       .setFlow(Flow.newBuilder().setCredit(this.flowCredit));
+                                       .setFlow(Flow.newBuilder().setCredit(this.creditSize));
                                try {
-                                   log.debug("Sending credit={} for call {}", this.flowCredit, callId);
+                                   log.debug("Sending credit={} for call {}", this.creditSize, callId);
                                    send(methodDescriptor, flow);
                                } catch (MessagingException e) {
                                    log.error("Failed to send flow control message", e);
@@ -578,6 +591,8 @@ public class MessageChannel extends Channel implements ChannelListener {
 
         @Override
         public void halfClose() {
+            //This is called when onCompleted() is called on the client stream
+            //or after the single message has been sent in the case of clientSendsOneMessage.
             sequence++;
             final RpcMessage.Builder msgBuilder = RpcMessage.newBuilder()
                     .setCallId(callId)

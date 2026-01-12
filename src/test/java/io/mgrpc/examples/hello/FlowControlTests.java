@@ -6,6 +6,8 @@ import io.grpc.StatusRuntimeException;
 import io.grpc.examples.helloworld.ExampleHelloServiceGrpc;
 import io.grpc.examples.helloworld.HelloReply;
 import io.grpc.examples.helloworld.HelloRequest;
+import io.grpc.stub.ClientCallStreamObserver;
+import io.grpc.stub.ClientResponseObserver;
 import io.grpc.stub.ServerCallStreamObserver;
 import io.grpc.stub.StreamObserver;
 import io.mgrpc.MessageServer;
@@ -15,12 +17,15 @@ import org.slf4j.LoggerFactory;
 
 import java.lang.invoke.MethodHandles;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class FlowControlTests {
 
@@ -172,89 +177,7 @@ public class FlowControlTests {
 
     }
 
-    public static void testClientStreamFlowControl(MessageServer server, Channel channel) throws Exception {
 
-        //Make a service that blocks until the test flips a latch
-        //While the service is blocked try to overlflow the internal MessageServer queue and verify
-        //That it doesn't cause a problem because the broker has buffered the messages
-        //Then verify that when the service is unblocked it eventually pulls all the messages from the server
-
-        final CountDownLatch serviceLatch = new CountDownLatch(1);
-        final CountDownLatch firstMessageLatch = new CountDownLatch(1);
-        class BlockedService extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
-            public List<HelloRequest> list = new ArrayList<>();
-
-            @Override
-            public StreamObserver<HelloRequest> lotsOfGreetings(StreamObserver<HelloReply> responseObserver) {
-                return new StreamObserver<HelloRequest>() {
-                    @Override
-                    public void onNext(HelloRequest request) {
-                        log.debug("Service received: " + request.getName());
-                        list.add(request);
-                        firstMessageLatch.countDown();
-                        if(list.size() == 15){
-                            responseObserver.onNext(HelloReply.newBuilder().build());
-                            responseObserver.onCompleted();
-                        }
-                        //block the internal queue
-                        try {
-                            serviceLatch.await();
-                        } catch (InterruptedException e) {
-                            log.error("", e);
-                        }
-                    }
-                    @Override
-                    public void onError(Throwable throwable) {
-                        log.error("server onError()", throwable);
-                    }
-                    @Override
-                    public void onCompleted() {}
-                };
-            }
-        }
-
-        final BlockedService blockedService = new BlockedService();
-        server.addService(blockedService);
-
-        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
-        StatusObserver clientStatusObserver = new StatusObserver("client");
-        final StreamObserver client = stub.lotsOfGreetings(clientStatusObserver);
-
-        //Run the client stream on a thread because client.onNext() will block when it runs out of credit
-        //
-        Thread t = new Thread(new Runnable() {
-            @Override
-            public void run() {
-                for (int i = 0; i < 15; i++) {
-                    HelloRequest request = HelloRequest.newBuilder().setName("request" + i).build();
-                    client.onNext(request);
-                }
-            }
-        });
-        t.start();
-
-        //Wait until at least one message is received
-        firstMessageLatch.await(5, TimeUnit.SECONDS);
-        assertEquals(1, blockedService.list.size());
-
-
-        //Allow some time to make sure messages got to broker
-        Thread.sleep(100);
-
-        //There should still only be one message because the service is blocked
-        assertEquals(1, blockedService.list.size());
-        log.debug("Unblocking client stream");
-
-        //unblock the service
-        serviceLatch.countDown();
-
-        checkStatus(Status.OK, clientStatusObserver.waitForStatus(10, TimeUnit.SECONDS));
-
-        //client.onCompleted();
-
-        assertEquals(15, blockedService.list.size());
-
-    }
 
 
     public static void testServerStreamFlowControl(MessageServer server, Channel channel) throws Exception {
@@ -331,6 +254,203 @@ public class FlowControlTests {
         assertEquals(15, blockingServerStream.list.size());
 
     }
+
+    static class LockedService extends ExampleHelloServiceGrpc.ExampleHelloServiceImplBase {
+        public int numMessagesReceived = 0;
+        //Use a lock and condition instead of a java object with wait/notify because only a lock supports
+        //testing whether a timeout fails
+        public final Lock lock = new ReentrantLock();
+        public final Condition unblock = lock.newCondition();
+
+        private final int blockTimeoutMillis;
+
+        public Exception exception = null;
+
+        LockedService(int blockTimeoutMillis) {
+            this.blockTimeoutMillis = blockTimeoutMillis;
+        }
+
+        public void unblock(){
+            try{
+                lock.lock();
+                log.debug("Notifying unblock");
+                unblock.signal();
+            } finally {
+                lock.unlock();
+            }
+
+        }
+
+        @Override
+        public StreamObserver<HelloRequest> lotsOfGreetings(StreamObserver<HelloReply> responseObserver) {
+            return new StreamObserver<HelloRequest>() {
+                @Override
+                public void onNext(HelloRequest request) {
+                    numMessagesReceived++;
+                    //The first batch will be 2 messages because that's the initial credit for a client stream
+                    //Further batches will be 10 messages because that's what the test will set the server
+                    //credit size to be
+                    if(numMessagesReceived == 2 || ((numMessagesReceived > 2) && (numMessagesReceived - 2) % 10  == 0)) {
+                        //block and wait for a new batch of messages to be sent
+                        try {
+                            lock.lock();
+                            //Block the sender
+                            log.debug("Waiting for unblock");
+                            if(!unblock.await(blockTimeoutMillis, TimeUnit.MILLISECONDS)){
+                                log.warn("unblock timed out");
+                            }
+                        } catch (InterruptedException e) {
+                            log.error("interrupted waiting for unblock");
+                            exception = e;
+                        } finally {
+                            lock.unlock();
+                        }
+                    }
+                    log.debug("server received: " + request.getName());
+                }
+                @Override
+                public void onError(Throwable throwable) {
+                    log.error("server onError()", throwable);
+                }
+                @Override
+                public void onCompleted() {
+                    responseObserver.onNext(HelloReply.newBuilder().build());
+                    responseObserver.onCompleted();
+                }
+            };
+        }
+    }
+
+    public static void testClientStreamFlowControl(MessageServer server, Channel channel, Status expectedStatus) throws Exception {
+
+
+        final LockedService blockedService = new LockedService(50);
+        server.addService(blockedService);
+
+        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
+        StatusObserver clientStatusObserver = new StatusObserver("client");
+        final StreamObserver client = stub.lotsOfGreetings(clientStatusObserver);
+
+        //Run the client stream on a thread because client.onNext() will block when it runs out of credit
+        //after 2 or 10 messages
+        Thread t = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                for (int i = 0; i < 25; i++) {
+                    HelloRequest request = HelloRequest.newBuilder().setName("request" + i).build();
+                    client.onNext(request);
+                    log.debug("Thread sent message: " + i);
+                }
+                client.onCompleted();
+            }
+        });
+        t.start();
+
+        final Status status = clientStatusObserver.waitForStatus(10, TimeUnit.SECONDS);
+
+        checkStatus(expectedStatus, status);
+
+        if(status.isOk()) {
+            assertNull(blockedService.exception);
+            assertEquals(25, blockedService.numMessagesReceived);
+        }
+    }
+
+
+    public static void testClientStreamOnReady(MessageServer server, Channel channel) throws Exception {
+
+        /*
+        This test must be run with a MessageServer that has a credit size of 10
+
+        The server blocks until client sends all the messages it has credit for.
+        At this point the isReady() on the client side should be false and the client isReadyHandler should finish.
+        The client then notifies the server that it has sent all it's messages and the server processes them
+         */
+
+        final LockedService lockedService = new LockedService(10000);
+        server.addService(lockedService);
+
+        final ExampleHelloServiceGrpc.ExampleHelloServiceStub stub = ExampleHelloServiceGrpc.newStub(channel);
+
+        final List<HelloRequest> requests = new ArrayList<>();
+        for (int i = 0; i < 25; i++) {
+            HelloRequest request = HelloRequest.newBuilder().setName("request" + i).build();
+            requests.add(request);
+        }
+
+        final Iterator<HelloRequest> sourceData = requests.iterator();
+        final int[] numMessagesSent = {0, 0, 0, 0};
+
+        final CountDownLatch finishLatch = new CountDownLatch(1);
+
+        //This weird construct is how gRPC java does manual flow control
+        ClientResponseObserver<HelloRequest, HelloReply> clientResponseObserver =
+                new ClientResponseObserver<HelloRequest, HelloReply>() {
+                    int timesOnReadyHandlerCalled = 0;
+                    @Override
+                    public void beforeStart(ClientCallStreamObserver<HelloRequest> requestObserver) {
+                        requestObserver.setOnReadyHandler(() -> {
+                            int numMessages = 0;
+                            while (requestObserver.isReady() && sourceData.hasNext()) {
+                                requestObserver.onNext(sourceData.next());
+                                numMessages++;
+                            }
+                            //The while loop above will finish when isReady() is false which occurs when the client
+                            //has run out of credit.
+                            //At this point signal the server to unblock.
+                            //The server will then process its existing batch of messages before sending more credit.
+                            //At that point this onReadyHandler() should get called again.
+                            lockedService.unblock();
+                            numMessagesSent[timesOnReadyHandlerCalled++] = numMessages;
+                            if (!sourceData.hasNext()) {
+                                requestObserver.onCompleted();
+                            }
+                        });
+                    }
+
+                    @Override
+                    public void onNext(HelloReply value) {
+                        log.debug("Server sent: " + value.getMessage());
+                    }
+
+                    @Override
+                    public void onError(Throwable t) {
+                        log.error("", t);
+                        finishLatch.countDown();
+                    }
+
+                    @Override
+                    public void onCompleted() {
+                        log.debug("Done.");
+                        finishLatch.countDown();
+                    }
+                };
+
+
+        ClientCallStreamObserver<HelloRequest> requestObserver =
+                (ClientCallStreamObserver<HelloRequest>) stub.lotsOfGreetings(clientResponseObserver);
+
+
+        assertTrue(finishLatch.await(20, TimeUnit.SECONDS));
+        assertEquals(25, lockedService.numMessagesReceived);
+        assertNull(lockedService.exception);
+        //The on ready handler should get called 4 times.
+        //First time is the default 2 messages credit for a client
+        assertEquals(2, numMessagesSent[0]);
+        assertNull(lockedService.exception);
+        //Second time is 10 messages because server sends credit of 10
+        assertEquals(10, numMessagesSent[1]);
+        assertNull(lockedService.exception);
+        //Third time is 10 messages because server sends credit of 10
+        assertEquals(10, numMessagesSent[2]);
+        assertNull(lockedService.exception);
+        //Last time server sends credit of 10 but there are only 3 messages left to send.
+        assertEquals(3, numMessagesSent[3]);
+        assertNull(lockedService.exception);
+
+    }
+
+
 
     private static void checkStatus(Status expected, Status actual){
         assertEquals(expected.getCode(), actual.getCode());

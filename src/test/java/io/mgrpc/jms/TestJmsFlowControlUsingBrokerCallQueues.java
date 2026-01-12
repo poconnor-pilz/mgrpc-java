@@ -62,7 +62,7 @@ public class TestJmsFlowControlUsingBrokerCallQueues {
         MessageServer server = new JmsServerBuilder()
                 .setConnection(serverConnection)
                 .setQueueSize(10)
-                .setFlowCredit(Integer.MAX_VALUE) //no effective base flow control
+                .setCreditSize(Integer.MAX_VALUE) //no effective base flow control
                 .setTopic(serverId).build();
 
         server.start();
@@ -98,7 +98,7 @@ public class TestJmsFlowControlUsingBrokerCallQueues {
         MessageChannel messageChannel =  new JmsChannelBuilder()
                 .setConnection(clientConnection)
                 .setQueueSize(10)
-                .setFlowCredit(Integer.MAX_VALUE)
+                .setCreditSize(Integer.MAX_VALUE)
                 .setUseBrokerCallQueues(false).build();
 
         FlowControlTests.testClientQueueCapacityExceeded(server, messageChannel.forTopic(serverId));
@@ -121,7 +121,7 @@ public class TestJmsFlowControlUsingBrokerCallQueues {
         MessageServer server = new JmsServerBuilder()
                 .setConnection(serverConnection)
                 .setQueueSize(10)
-                .setFlowCredit(Integer.MAX_VALUE) // no effective base flow control
+                .setCreditSize(Integer.MAX_VALUE) // no effective base flow control
                 .setTopic(serverId).build();
         server.start();
 
@@ -130,11 +130,12 @@ public class TestJmsFlowControlUsingBrokerCallQueues {
                 .setConnection(clientConnection)
                 .setUseBrokerCallQueues(true).build();
 
-        FlowControlTests.testClientStreamFlowControl(server, messageChannel.forTopic(serverId));
+        FlowControlTests.testClientStreamFlowControl(server, messageChannel.forTopic(serverId), Status.OK);
 
         messageChannel.close();
         server.close();
     }
+
 
 
     @Test
@@ -150,7 +151,7 @@ public class TestJmsFlowControlUsingBrokerCallQueues {
         MessageServer server = new JmsServerBuilder()
                 .setConnection(serverConnection)
                 .setQueueSize(10)
-                .setFlowCredit(Integer.MAX_VALUE)
+                .setCreditSize(Integer.MAX_VALUE)
                 .setTopic(serverId).build();
         server.start();
 
@@ -158,13 +159,40 @@ public class TestJmsFlowControlUsingBrokerCallQueues {
         MessageChannel messageChannel =  new JmsChannelBuilder()
                 .setConnection(clientConnection)
                 .setQueueSize(10)
-                .setFlowCredit(Integer.MAX_VALUE) //no effective base flow control
+                .setCreditSize(Integer.MAX_VALUE) //no effective base flow control
                 .setUseBrokerCallQueues(true).build();
 
         FlowControlTests.testServerStreamFlowControl(server, messageChannel.forTopic(serverId));
 
         messageChannel.close();
         server.close();
+    }
+
+    @Test
+    public void testClientStreamOnReady() throws Exception {
+
+        final String serverId = Id.shortRandom();
+        //Make a server with queue size 10
+        MessageServer server = new JmsServerBuilder()
+                .setConnection(serverConnection)
+                .setQueueSize(1000)
+                .setCreditSize(10)
+                .setTopic(serverId).build();
+        server.start();
+
+        //Set up a channel with broker flow control
+        MessageChannel messageChannel =  new JmsChannelBuilder()
+                .setConnection(clientConnection)
+                .setQueueSize(10000)
+                .setCreditSize(10)
+                .setUseBrokerCallQueues(true).build();
+
+        FlowControlTests.testClientStreamOnReady(server, messageChannel.forTopic(serverId));
+
+        messageChannel.close();
+        server.close();
+
+
     }
 
 

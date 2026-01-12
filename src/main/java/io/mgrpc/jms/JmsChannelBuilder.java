@@ -13,7 +13,7 @@ public class JmsChannelBuilder {
     private boolean useBrokerCallQueues;
 
     private String channelStatusTopic;
-    private int flowCredit = MessageChannel.DEFAULT_FLOW_CREDIT;
+    private int creditSize = MessageChannel.DEFAULT_CREDIT_SIZE;
 
     private String channelId;
 
@@ -40,11 +40,11 @@ public class JmsChannelBuilder {
     }
 
     /**
-     * @param flowCredit The amount of credit that should be issued for flow control e.g. if flow credit is 20
-     *      then the sender will only send 20 messages before waiting for the receiver to send more flow credit.
+     * @param creditSize The amount of credit that should be issued for flow control e.g. if creditSize is 20
+     *      then the sender will only send 20 messages before waiting for the receiver to send more credit.
      */
-    public JmsChannelBuilder setFlowCredit(int flowCredit) {
-        this.flowCredit = flowCredit;
+    public JmsChannelBuilder setCreditSize(int creditSize) {
+        this.creditSize = creditSize;
         return this;
     }
 
@@ -75,6 +75,6 @@ public class JmsChannelBuilder {
 
     public MessageChannel build(){
         final JmsChannelConduit conduit = new JmsChannelConduit(connection, useBrokerCallQueues, channelStatusTopic);
-        return new MessageChannel(conduit, channelId, queueSize, flowCredit);
+        return new MessageChannel(conduit, channelId, queueSize, creditSize);
     }
 }
