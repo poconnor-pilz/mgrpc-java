@@ -169,7 +169,7 @@ public class TestCommsErrors {
         MessageChannel baseChannel = new MqttChannelBuilder().setClient(clientMqtt).build();
         Channel channel = TopicInterceptor.intercept(baseChannel, serverName);
 
-        final String statusTopic = new ServerTopics(serverName).status;
+        final String statusTopic = MessageServer.getStatusTopic(serverName, "/");
         CloseableSocketFactory sf = new CloseableSocketFactory();
         MqttAsyncClient serverMqttWithLwt = MqttUtils.makeClient(statusTopic, null, sf);
         MessageServer server = new MqttServerBuilder().setClient(serverMqttWithLwt).setTopic(serverName).build();

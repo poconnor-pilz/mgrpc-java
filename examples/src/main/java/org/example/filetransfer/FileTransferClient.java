@@ -36,7 +36,7 @@ public class FileTransferClient {
             return;
         }
 
-        //Make a grpc channel on topic "filetransfer" on the local broker
+        //Make a grpc channel on topic ""tenant1/device1"" on the local broker
         MqttAsyncClient clientMqtt = MqttUtils.makeClient(MqttUtils.getBrokerUrl());
 
         MessageChannel msgChannel = new MqttChannelBuilder().setClient(clientMqtt).build();

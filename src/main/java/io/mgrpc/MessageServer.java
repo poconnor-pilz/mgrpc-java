@@ -81,6 +81,16 @@ public class MessageServer implements ServerListener {
         this(conduit, DEFAULT_QUEUE_SIZE, DEFAULT_CREDIT_SIZE);
     }
 
+    /**
+     * Return the topic on which server status is reported. This same topic should be used for the
+     * LWT message in an MQTT server
+     * @param serverTopic The root topic for all services on the server e.g. "tenant1/device1"
+     * @param separator The topic separator (usually "/")
+     * @return The topic on which server status is reported
+     */
+    public static String getStatusTopic(String serverTopic, String separator){
+        return new ServerTopics(serverTopic, separator).status;
+    }
 
     public void start() throws MessagingException {
 
